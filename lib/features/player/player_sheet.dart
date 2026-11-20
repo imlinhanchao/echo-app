@@ -173,6 +173,10 @@ class PlayerSheet extends ConsumerStatefulWidget {
 class _PlayerSheetState extends ConsumerState<PlayerSheet> {
   static const List<double> _speeds = <double>[1.0, 1.25, 1.5, 2.0];
   final ScrollController _textScroll = ScrollController();
+
+  /// 每条字幕的锚点：用于把当前朗读句精确滚到屏幕垂直中线。
+  /// （旧实现按比例估算滚动位置，句子长短不一时会越来越偏，最后贴底。）
+  final Map<int, GlobalKey> _cueKeys = <int, GlobalKey>{};
   int _lastScrolledCue = -1;
 
   @override
@@ -181,20 +185,45 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
     super.dispose();
   }
 
-  /// 当前朗读句自动滚入视野（仅当句号变化，避免抖动）。
-  void _scrollToActiveCue(int active, int count) {
-    if (active < 0 || active == _lastScrolledCue || !_textScroll.hasClients) {
+  /// 当前朗读句滚动到视口垂直居中。
+  ///
+  /// 难点：ListView 懒构建，目标句在屏幕外时其 element 还不存在，
+  /// 直接 ensureVisible 无效。因此分两段：
+  /// 1) 按索引比例把列表粗跳到目标附近，让它进入构建范围；
+  /// 2) 目标 element 出现后用 ensureVisible(alignment: 0.5) 精确居中。
+  void _scrollToActiveCue(int active, int totalCues) {
+    if (active < 0 || active == _lastScrolledCue) return;
+    _lastScrolledCue = active;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _centerCue(active, totalCues);
+    });
+  }
+
+  void _centerCue(int active, int totalCues, {int attempt = 0}) {
+    if (!mounted) return;
+    final ctx = _cueKeys[active]?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.5,
+        duration: Duration(milliseconds: attempt == 0 ? 320 : 200),
+        curve: Curves.easeOut,
+      );
       return;
     }
-    _lastScrolledCue = active;
-    final fraction = count <= 1 ? 0.0 : active / (count - 1);
-    final max = _textScroll.position.maxScrollExtent;
-    final target = (max * fraction * 0.9).clamp(0.0, max);
-    _textScroll.animateTo(
-      target,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOut,
-    );
+    if (attempt >= 3 || !_textScroll.hasClients || totalCues <= 1) return;
+    final position = _textScroll.position;
+    final fraction = (active / (totalCues - 1)).clamp(0.0, 1.0);
+    final target =
+        (position.maxScrollExtent * fraction).clamp(0.0, position.maxScrollExtent);
+    // 第一跳直达估计位置，之后逐帧微调靠近目标
+    final next = attempt == 0
+        ? target
+        : position.pixels + (target - position.pixels) * 0.5;
+    _textScroll.jumpTo(next.clamp(0.0, position.maxScrollExtent));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _centerCue(active, totalCues, attempt: attempt + 1);
+    });
   }
 
   @override
@@ -222,9 +251,7 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
         ? (state.globalPositionMs / totalMs).clamp(0.0, 1.0)
         : 0.0;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToActiveCue(state.activeCueIndex, state.cues.length);
-    });
+    _scrollToActiveCue(state.activeCueIndex, state.cues.length);
 
     return Scaffold(
       key: const Key('player_sheet'),
@@ -340,7 +367,10 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                                     state.activeCueIndex >= 0 &&
                                     index < state.activeCueIndex;
                                 return GestureDetector(
-                                  key: Key('player_cue_$index'),
+                                  key: _cueKeys.putIfAbsent(
+                                    index,
+                                    () => GlobalKey(),
+                                  ),
                                   onTap: () => controller.seekToCue(cue),
                                   behavior: HitTestBehavior.opaque,
                                   child: Padding(

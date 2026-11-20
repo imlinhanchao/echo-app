@@ -146,11 +146,13 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
 
   Future<void> _pickChapters() async {
     if (_chapters.isEmpty) return;
+    // 选中集合必须提升到 StatefulBuilder 之外：
+    // 放在 builder 内会在每次 setDialogState 重建时被重置，表现为"勾选没反应"。
+    final chosen = Set<int>.of(_selectedChapterIndexes);
     final selected = await showDialog<Set<int>?>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (dialogCtx, setDialogState) {
-          final chosen = Set<int>.of(_selectedChapterIndexes);
           return AlertDialog(
             title: const Text('选择转换章节'),
             content: SizedBox(
@@ -184,7 +186,17 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogCtx).pop(const <int>{}),
+                key: const Key('chapters_select_all'),
+                onPressed: () => setDialogState(() {
+                  chosen
+                    ..clear()
+                    ..addAll(_chapters.map((c) => c.index));
+                }),
+                child: const Text('全选'),
+              ),
+              TextButton(
+                key: const Key('chapters_clear'),
+                onPressed: () => setDialogState(chosen.clear),
                 child: const Text('清除'),
               ),
               FilledButton(

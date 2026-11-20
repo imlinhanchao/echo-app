@@ -33,13 +33,17 @@ class EchoAudioHandler extends BaseAudioHandler {
     Duration? duration,
     String title = '',
     String artist = '',
+    Uri? artUri,
   }) async {
     mediaItem.add(
       MediaItem(
         id: uri.toString(),
+        album: 'Echo · 回声',
         title: title.isEmpty ? 'Echo · 回声' : title,
         artist: artist,
         duration: duration,
+        // 锁屏 / 通知栏上部"小组件"的封面图
+        artUri: artUri,
       ),
     );
     await _player.setAudioSource(
@@ -158,6 +162,7 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     String? mediaTitle,
     String? mediaArtist,
     Duration? mediaDuration,
+    String? mediaArtUrl,
   }) =>
       _handler.setChunkSource(
         uri,
@@ -166,6 +171,9 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
         duration: mediaDuration,
         title: mediaTitle ?? '',
         artist: mediaArtist ?? '',
+        artUri: (mediaArtUrl != null && mediaArtUrl.startsWith('http'))
+            ? Uri.tryParse(mediaArtUrl)
+            : null,
       );
 
   @override

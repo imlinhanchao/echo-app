@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:permission_handler/permission_handler.dart';
+
 import 'core/api/models.dart';
 import 'core/audio/audio_service_engine.dart';
 import 'core/settings/theme_mode_controller.dart';
@@ -14,6 +19,17 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 后台媒体会话（锁屏/通知栏播控）；桌面/测试等平台自动回退 just_audio。
   await AudioServiceEngine.tryInit();
+  // Android 13+ 需要运行时通知权限，否则媒体通知与锁屏控件不显示。
+  if (!kIsWeb && Platform.isAndroid) {
+    try {
+      final status = await Permission.notification.status;
+      if (!status.isGranted) {
+        await Permission.notification.request();
+      }
+    } catch (_) {
+      // 权限申请失败不阻塞启动。
+    }
+  }
   // 恢复亮/暗偏好（dark-first，默认深色）。
   await ThemeModeController.init();
   // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。

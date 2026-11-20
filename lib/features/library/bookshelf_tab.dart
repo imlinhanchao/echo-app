@@ -394,7 +394,7 @@ class _AudiobookRow extends ConsumerWidget {
           ? () async {
               await ref
                   .read(chunkedPlayerProvider.notifier)
-                  .loadAudiobook(item);
+                  .loadAudiobook(item, coverUrl: cover);
               if (context.mounted) await openPlayer(context);
             }
           : null,
@@ -435,7 +435,7 @@ class _AudiobookRow extends ConsumerWidget {
                 tooltip: '播放',
                 onPressed: () => ref
                     .read(chunkedPlayerProvider.notifier)
-                    .loadAudiobook(item),
+                    .loadAudiobook(item, coverUrl: cover),
                 icon: Icon(Icons.play_arrow, color: tokens.primary),
               ),
             PopupMenuButton<String>(

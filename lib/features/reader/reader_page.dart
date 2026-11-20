@@ -161,7 +161,17 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
       const SnackBar(content: Text('正在定位到本章音频…')),
     );
 
-    await controller.loadAudiobook(audio, autoPlay: false);
+    final cover = ref
+        .read(libraryControllerProvider)
+        .books
+        .where((b) => b.id == widget.book.id)
+        .map((b) => b.coverUrl)
+        .firstOrNull;
+    await controller.loadAudiobook(
+      audio,
+      autoPlay: false,
+      coverUrl: cover,
+    );
     final chunks = ref.read(chunkedPlayerProvider).chunks;
     if (chunks.isEmpty) {
       messenger?.showSnackBar(

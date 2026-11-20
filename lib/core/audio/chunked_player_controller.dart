@@ -28,6 +28,7 @@ abstract class AudioEngine {
     String? mediaTitle,
     String? mediaArtist,
     Duration? mediaDuration,
+    String? mediaArtUrl,
   });
 
   Future<void> play();
@@ -70,6 +71,7 @@ class JustAudioEngine implements AudioEngine {
     String? mediaTitle,
     String? mediaArtist,
     Duration? mediaDuration,
+    String? mediaArtUrl,
   }) async {
     final source = AudioSource.uri(
       uri,
@@ -108,6 +110,7 @@ class FakeAudioEngine implements AudioEngine {
 
   Uri? lastUri;
   Map<String, String> lastHeaders = const <String, String>{};
+  String? lastMediaArtUrl;
   String? lastMediaTitle;
   String? lastMediaArtist;
   Duration? lastMediaDuration;
@@ -132,12 +135,14 @@ class FakeAudioEngine implements AudioEngine {
     String? mediaTitle,
     String? mediaArtist,
     Duration? mediaDuration,
+    String? mediaArtUrl,
   }) async {
     lastUri = uri;
     lastHeaders = headers;
     lastMediaTitle = mediaTitle;
     lastMediaArtist = mediaArtist;
     lastMediaDuration = mediaDuration;
+    lastMediaArtUrl = mediaArtUrl;
     position = initialPosition;
     _positionController.add(position);
   }
@@ -317,6 +322,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   final AudioEngine _engine;
   final ProgressStore _progressStore;
 
+  /// 当前有声书封面对应的书籍封面地址（用于锁屏/通知栏封面图）。
+  String? _coverUrl;
+
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<bool>? _playSub;
   StreamSubscription<void>? _doneSub;
@@ -328,7 +336,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   Future<void> loadAudiobook(
     AudiobookInfo audiobook, {
     bool autoPlay = true,
+    String? coverUrl,
   }) async {
+    _coverUrl = (coverUrl != null && coverUrl.isNotEmpty) ? coverUrl : null;
     state = state.copyWith(
       audiobook: audiobook,
       isLoading: true,
@@ -449,6 +459,7 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
                 : '第 ${state.currentChunkIndex + 1} 章',
             mediaDuration:
                 Duration(milliseconds: (chunk.durationS * 1000).round()),
+            mediaArtUrl: _coverUrl,
           )
           .timeout(const Duration(seconds: 30));
       await _engine.setSpeed(state.speed);
