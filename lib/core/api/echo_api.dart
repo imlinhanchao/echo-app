@@ -284,12 +284,12 @@ class EchoApi {
   }
 
   /// 任务列表：`GET /api/jobs?limit=&offset=`
-  Future<JobsPage> listJobs({int limit = 20, int offset = 0}) async {
+  Future<JobsPageInfo> listJobs({int limit = 20, int offset = 0}) async {
     final uri = Uri(path: '/api/jobs', queryParameters: <String, String>{
       'limit': '$limit',
       'offset': '$offset',
     });
-    return JobsPage.fromJson(await _getJson(uri.toString()));
+    return JobsPageInfo.fromJson(await _getJson(uri.toString()));
   }
 
   /// 取消任务：`POST /api/jobs/{id}/cancel`

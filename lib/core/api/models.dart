@@ -562,10 +562,10 @@ class JobInfo {
 }
 
 @immutable
-class JobsPage {
-  const JobsPage({required this.jobs, required this.total});
+class JobsPageInfo {
+  const JobsPageInfo({required this.jobs, required this.total});
 
-  factory JobsPage.fromJson(Map<String, dynamic> json) => JobsPage(
+  factory JobsPageInfo.fromJson(Map<String, dynamic> json) => JobsPageInfo(
         jobs: (json['jobs'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
             .map(JobInfo.fromJson)
@@ -578,7 +578,6 @@ class JobsPage {
 }
 
 // ---- 章节预览（library.go chapterView）----
-
 @immutable
 class ChapterPreview {
   const ChapterPreview({

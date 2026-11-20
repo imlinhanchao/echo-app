@@ -6,7 +6,7 @@ import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_page.dart';
-import 'features/library/library_shell.dart';
+import 'features/shell/echo_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,12 +80,12 @@ class _Splash extends StatelessWidget {
   }
 }
 
-/// 已登录根视图：委托给 [LibraryShell]（书架 + 有声书 + 分块播放器）。
+/// 已登录根视图：委托给 [EchoShell]（4-Tab：书架/发现/任务/我的 + 迷你播放条）。
 class EchoHome extends StatelessWidget {
   const EchoHome({super.key, required this.user});
 
   final EchoUser user;
 
   @override
-  Widget build(BuildContext context) => LibraryShell(user: user);
+  Widget build(BuildContext context) => EchoShell(user: user);
 }

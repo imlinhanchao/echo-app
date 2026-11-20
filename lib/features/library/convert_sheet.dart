@@ -3,11 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../core/api/models.dart';
-import '../../core/audio/chunked_player_controller.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
-import '../../core/api/echo_api.dart';
 import '../jobs/jobs_controller.dart';
 import '../library/library_controller.dart';
 
@@ -28,7 +26,7 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
   TtsModelsResponse? _modelsResponse;
   List<TtsVoiceInfo> _voices = const <TtsVoiceInfo>[];
   List<ChapterPreview> _chapters = const <ChapterPreview>[];
-  final Set<int> _selectedChapterIndexes = <int>{};
+  Set<int> _selectedChapterIndexes = <int>{};
 
   String? _selectedModel;
   String? _selectedVoice;
