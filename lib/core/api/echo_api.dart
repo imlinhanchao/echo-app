@@ -298,9 +298,14 @@ class EchoApi {
 
   // ---- 章节预览（EPUB 解析结果）----
 
-  /// 章节预览清单：`GET /api/library/{id}/chapters` → `{"chapters":[...]}`
-  Future<List<ChapterPreview>> bookChapters(int bookId) async {
-    final json = await _getJson('/api/library/$bookId/chapters');
+  /// 章节预览/正文清单：`GET /api/library/{id}/chapters`（`?full=1` 含正文）。
+  Future<List<ChapterPreview>> bookChapters(
+    int bookId, {
+    bool full = false,
+  }) async {
+    final json = await _getJson(
+      full ? '/api/library/$bookId/chapters?full=1' : '/api/library/$bookId/chapters',
+    );
     return (json['chapters'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(ChapterPreview.fromJson)

@@ -5,6 +5,7 @@ import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
+import '../reader/reader_page.dart';
 import 'convert_sheet.dart';
 import 'library_controller.dart';
 
@@ -265,6 +266,19 @@ class _BooksList extends ConsumerWidget {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                IconButton(
+                  key: Key('book_read_${book.id}'),
+                  tooltip: '阅读',
+                  icon: Icon(
+                    Icons.menu_book_outlined,
+                    color: tokens.textPrimary,
+                  ),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ReaderPage(book: book),
+                    ),
+                  ),
+                ),
                 if (isEpub)
                   IconButton(
                     key: Key('book_convert_${book.id}'),
