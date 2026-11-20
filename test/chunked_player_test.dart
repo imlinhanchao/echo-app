@@ -192,6 +192,20 @@ void main() {
       );
     });
 
+    test('媒体元数据传播：锁屏通知的书名/章节/块时长', () async {
+      final h = await createHarness();
+      await h.controller.loadAudiobook(sampleBook);
+
+      expect(h.engine.lastMediaTitle, '三体');
+      expect(h.engine.lastMediaArtist, '第一章 科学边界');
+      expect(h.engine.lastMediaDuration, const Duration(seconds: 60));
+
+      // 块间切换后章节名跟随更新。
+      h.engine.emitCompleted();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(h.engine.lastMediaArtist, '第二章 台球');
+    });
+
     test('±15s 跨块跳转：块尾前进跨入下一块，块首后退跨回上一块', () async {
       final h = await createHarness();
       await h.controller.loadAudiobook(sampleBook);

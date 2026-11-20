@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/api/models.dart';
+import 'core/audio/audio_service_engine.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
 import 'features/auth/auth_controller.dart';
@@ -10,6 +11,8 @@ import 'features/shell/echo_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 后台媒体会话（锁屏/通知栏播控）；桌面/测试等平台自动回退 just_audio。
+  await AudioServiceEngine.tryInit();
   // 深色优先（dark-first）：听读产品的主场景是夜间与沉浸。
   final tokens = await EchoTokens.load(Brightness.dark);
   runApp(

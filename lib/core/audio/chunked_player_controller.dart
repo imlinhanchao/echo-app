@@ -8,19 +8,26 @@ import '../../features/auth/auth_controller.dart';
 import '../api/echo_api.dart';
 import '../api/models.dart';
 import '../storage/progress_store.dart';
+import 'audio_service_engine.dart';
 import 'srt_parser.dart';
 
-/// 底层音频播放引擎抽象：生产环境由 [JustAudioEngine] 驱动，
+/// 底层音频播放引擎抽象：生产环境由 [JustAudioEngine] 或
+/// [AudioServiceEngine]（audio_service 后台媒体）驱动，
 /// 测试环境可注入 [FakeAudioEngine] 进行确定性断言。
 abstract class AudioEngine {
   Stream<Duration> get positionStream;
   Stream<bool> get playingStream;
   Stream<void> get completedStream;
 
+  /// [mediaTitle]/[mediaArtist]/[mediaDuration] 供系统媒体通知
+  /// （锁屏/通知栏：书名 + 章节名 + 进度条）。
   Future<void> setSource(
     Uri uri, {
     Map<String, String> headers = const <String, String>{},
     Duration initialPosition = Duration.zero,
+    String? mediaTitle,
+    String? mediaArtist,
+    Duration? mediaDuration,
   });
 
   Future<void> play();
@@ -29,6 +36,13 @@ abstract class AudioEngine {
   Future<void> seek(Duration position);
   Future<void> setSpeed(double speed);
   Future<void> dispose();
+}
+
+/// 系统播控（锁屏/通知栏）请求流：由支持后台媒体的引擎实现。
+/// 控制器把"上一首/下一首"映射为章节切换（书不是音乐，进度单位是章节）。
+abstract class LockScreenControls {
+  Stream<void> get skipToNextRequests;
+  Stream<void> get skipToPreviousRequests;
 }
 
 /// 基于 just_audio 的生产音频引擎（支持携带 Bearer Authorization 头）。
@@ -53,6 +67,9 @@ class JustAudioEngine implements AudioEngine {
     Uri uri, {
     Map<String, String> headers = const <String, String>{},
     Duration initialPosition = Duration.zero,
+    String? mediaTitle,
+    String? mediaArtist,
+    Duration? mediaDuration,
   }) async {
     final source = AudioSource.uri(
       uri,
@@ -91,6 +108,9 @@ class FakeAudioEngine implements AudioEngine {
 
   Uri? lastUri;
   Map<String, String> lastHeaders = const <String, String>{};
+  String? lastMediaTitle;
+  String? lastMediaArtist;
+  Duration? lastMediaDuration;
   Duration position = Duration.zero;
   bool playing = false;
   double speed = 1.0;
@@ -109,9 +129,15 @@ class FakeAudioEngine implements AudioEngine {
     Uri uri, {
     Map<String, String> headers = const <String, String>{},
     Duration initialPosition = Duration.zero,
+    String? mediaTitle,
+    String? mediaArtist,
+    Duration? mediaDuration,
   }) async {
     lastUri = uri;
     lastHeaders = headers;
+    lastMediaTitle = mediaTitle;
+    lastMediaArtist = mediaArtist;
+    lastMediaDuration = mediaDuration;
     position = initialPosition;
     _positionController.add(position);
   }
@@ -270,6 +296,14 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     _posSub = _engine.positionStream.listen(_onPosition);
     _playSub = _engine.playingStream.listen(_onPlayingChanged);
     _doneSub = _engine.completedStream.listen((_) => _onChunkCompleted());
+    // 锁屏/通知栏的"上一首/下一首"映射为章节切换。
+    if (_engine is LockScreenControls) {
+      final controls = _engine as LockScreenControls;
+      _lockScreenSubs
+          .add(controls.skipToNextRequests.listen((_) => unawaited(nextChunk())));
+      _lockScreenSubs.add(controls
+          .skipToPreviousRequests.listen((_) => unawaited(previousChunk())));
+    }
   }
 
   final EchoApi _api;
@@ -279,6 +313,8 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<bool>? _playSub;
   StreamSubscription<void>? _doneSub;
+  final List<StreamSubscription<void>> _lockScreenSubs =
+      <StreamSubscription<void>>[];
   int _lastSavedMs = -1;
 
   /// 载入有声书并自动恢复上次断点续听位置。
@@ -363,10 +399,21 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     try {
       final headers = await _api.authHeaders();
       final audioUri = _api.resolveUri(chunk.audioUrl);
+      final book = state.audiobook;
+      final bookTitle = (book?.bookTitle.isNotEmpty ?? false)
+          ? book!.bookTitle
+          : '有声书 #${book?.id ?? 0}';
       await _engine.setSource(
         audioUri,
         headers: headers,
         initialPosition: Duration(milliseconds: initialOffsetMs),
+        // 锁屏/通知栏媒体信息：书名 + 章节名 + 块时长（进度条刻度）。
+        mediaTitle: bookTitle,
+        mediaArtist: chunk.title.isNotEmpty
+            ? chunk.title
+            : '第 ${state.currentChunkIndex + 1} 章',
+        mediaDuration:
+            Duration(milliseconds: (chunk.durationS * 1000).round()),
       );
       await _engine.setSpeed(state.speed);
 
@@ -546,6 +593,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     _posSub?.cancel();
     _playSub?.cancel();
     _doneSub?.cancel();
+    for (final sub in _lockScreenSubs) {
+      sub.cancel();
+    }
     _engine.dispose();
     super.dispose();
   }
@@ -554,8 +604,13 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
 final Provider<ProgressStore> progressStoreProvider =
     Provider<ProgressStore>((ref) => PersistentProgressStore());
 
-final Provider<AudioEngine> audioEngineProvider =
-    Provider<AudioEngine>((ref) => JustAudioEngine());
+/// 生产引擎选择：Android/iOS 已初始化 audio_service（锁屏播控）时用
+/// [AudioServiceEngine]，桌面/测试等平台回退 [JustAudioEngine]。
+final Provider<AudioEngine> audioEngineProvider = Provider<AudioEngine>(
+  (ref) => AudioServiceEngine.initialized
+      ? AudioServiceEngine.instance
+      : JustAudioEngine(),
+);
 
 final StateNotifierProvider<ChunkedPlayerController, ChunkedPlayerState>
     chunkedPlayerProvider =
