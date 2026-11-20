@@ -23,9 +23,14 @@ cd echo-app
 export FVM_CACHE_PATH="$(dirname "$PWD")/.tmp/fvm" \
        PUB_CACHE="$(dirname "$PWD")/.tmp/pub-cache"
 fvm flutter pub get      # 安装依赖
-fvm flutter analyze      # 静态检查（当前 0 issues）
-fvm flutter test         # 测试（当前 25/25 通过）
+fvm flutter analyze       # 静态检查（当前 0 issues）
+fvm flutter test          # 测试（当前 43/43 通过）
 fvm flutter run -d chrome  # 运行（本机缺 Linux 桌面工具链，可先用 Chrome）
+
+# Android 模拟器真机运行（宿主机 echo-service 经 10.0.2.2 访问）
+fvm flutter build apk --debug --dart-define=ECHO_BASE_URL=http://10.0.2.2:8090
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell am start -n org.hancel.echo/org.hancel.echo.MainActivity
 ```
 
 ## 功能全景
@@ -43,7 +48,7 @@ fvm flutter run -d chrome  # 运行（本机缺 Linux 桌面工具链，可先�
 
 - [x] Phase 0 · 底座（fvm / 脚手架 / Token 主题）✅ 2026-11-20
 - [x] Phase 1 · 认证 + 消费 ✅ 2026-11-20（登录注册、书库/有声书双 Tab、分块播放、SRT 跟读、断点续听）
-- [ ] Phase 2 · 获取闭环（账号配置、搜索、转换、播放器 v3、阅读器）
+- [ ] Phase 2 · 获取闭环（✅ 功能与测试完成：账号配置/搜索/任务中心/转换表单 + 模拟器登录-主壳-搜索-登出真机验证；⏳ audio_service 锁屏播控、播放链路真机验证、阅读器）（账号配置、搜索、转换、播放器 v3、阅读器）
 - [ ] Phase 3 · 多端 + 笔记
 - [ ] Phase 4 · 增强（同步、导入、车机）
 
