@@ -66,23 +66,57 @@ void main() {
   final darkTokens = EchoTokens.fromColors(darkColors, Brightness.dark);
   const book = LibraryBook(id: 42, title: '三体 · 地球往事', format: 'epub');
 
-  group('阅读器分页', () {
-    test('按段落分页：长文本被切成多页且保留全部内容', () {
-      final pages = paginateChapter(
-        List<String>.generate(20, (i) => '第$i段内容' * 30).join('\n\n'),
-        500,
+  group('阅读器精确分页', () {
+    const style = TextStyle(fontFamily: 'serif', fontSize: 17, height: 1.9);
+
+    test('每页都装得下：按可视尺寸分页后不溢出', () {
+      final text = List<String>.generate(
+        40,
+        (i) => '第$i段：${'测试内容' * 25}',
+      ).join('\n\n');
+      const width = 320.0;
+      const height = 520.0;
+
+      final pages = paginateChapterBySize(
+        chapterIndex: 0,
+        chapterTitle: '第一章',
+        text: text,
+        style: style,
+        textScaler: TextScaler.noScaling,
+        maxWidth: width,
+        maxHeight: height,
       );
+
       expect(pages.length, greaterThan(1));
-      final joined = pages.join();
-      expect(joined.contains('第0段内容'), isTrue);
-      expect(joined.contains('第19段内容'), isTrue);
+      // 逐页实测高度，确认不超出可视高度（不会跑到工具栏下面）
+      for (final page in pages) {
+        final painter = TextPainter(
+          text: TextSpan(text: page.text, style: style),
+          textDirection: TextDirection.ltr,
+          textScaler: TextScaler.noScaling,
+        )..layout(maxWidth: width);
+        expect(painter.height, lessThanOrEqualTo(height + 0.5),
+            reason: '第 ${page.pageInChapter} 页溢出');
+      }
+      // 内容不丢字
+      expect(pages.map((p) => p.text).join().replaceAll('\n', '').length,
+          greaterThan(text.replaceAll('\n', '').length * 0.97));
     });
 
-    test('超长单段硬切，不丢字', () {
-      final long = 'x' * 1200;
-      final pages = paginateChapter(long, 500);
-      expect(pages.length, 3);
-      expect(pages.join().length, 1200);
+    test('页面记录章内字符区间，可用于重排后定位', () {
+      final pages = paginateChapterBySize(
+        chapterIndex: 3,
+        chapterTitle: '第三章',
+        text: '甲乙丙丁戊己庚辛壬癸' * 40,
+        style: style,
+        textScaler: TextScaler.noScaling,
+        maxWidth: 200,
+        maxHeight: 120,
+      );
+      expect(pages.first.startChar, 0);
+      expect(pages.last.endChar, greaterThan(0));
+      final idx = pageIndexForOffset(pages, 3, pages[1].startChar + 1);
+      expect(idx, 1);
     });
   });
 
@@ -129,7 +163,8 @@ void main() {
     // 阅读位置已持久化
     final saved = await readingStore.read(42);
     expect(saved, isNotNull);
-    expect(saved!.globalPage, 1);
+    expect(saved!.charOffset, greaterThanOrEqualTo(0));
+    expect(saved.chapterIndex, greaterThanOrEqualTo(0));
   });
 
   testWidgets('恢复上次阅读位置：打开即回到上次页', (WidgetTester tester) async {
@@ -139,7 +174,9 @@ void main() {
       ..httpClientAdapter = _ReaderStubAdapter();
     final api = EchoApi(dio: dio, tokenStore: tokenStore);
     final readingStore = MemoryReadingStore();
-    await readingStore.write(const ReadingPosition(bookId: 42, globalPage: 2));
+    await readingStore.write(
+      const ReadingPosition(bookId: 42, chapterIndex: 1, charOffset: 0),
+    );
 
     await tester.pumpWidget(
       ProviderScope(

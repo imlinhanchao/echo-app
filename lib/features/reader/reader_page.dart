@@ -14,10 +14,10 @@ import '../player/player_sheet.dart' show openPlayer;
 final Provider<ReadingStore> readingStoreProvider =
     Provider<ReadingStore>((ref) => PersistentReadingStore());
 
-/// 阅读器（对齐常规电子书交互）：
-/// - 左右滑动翻页（整本连续分页，跨章自动衔接）；
-/// - 记住上次阅读位置（关闭后重开回到该页）；
-/// - 顶部「从当前位置开始听书」：跳到该书有声书的对应章节起播。
+/// 阅读器（对齐常规电子书）：
+/// - 按可视尺寸精确分页，左右滑动翻页；
+/// - 记住上次阅读位置（章号 + 字符偏移，字号变化后仍精准）；
+/// - 顶部「从当前位置开始听书」。
 class ReaderPageView extends ConsumerStatefulWidget {
   const ReaderPageView({super.key, required this.book});
 
@@ -29,18 +29,25 @@ class ReaderPageView extends ConsumerStatefulWidget {
 
 class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
   final PageController _pageController = PageController();
+  List<ChapterPreview> _chapters = const <ChapterPreview>[];
   List<ReaderPage> _pages = const <ReaderPage>[];
   int _currentPage = 0;
   double _fontScale = 1.0;
   bool _loading = true;
   String? _error;
-  bool _restored = false;
   bool _listening = false;
+
+  /// 上次已知的阅读位置（章号 + 字符偏移），用于重排后复原。
+  int _chapterIndex = 0;
+  int _charOffset = 0;
+
+  /// 上一次分页使用的版心尺寸，尺寸变化时需要重排。
+  Size? _layoutSize;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadChapters();
   }
 
   @override
@@ -49,9 +56,14 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
     super.dispose();
   }
 
-  int get _charsPerPage => (480 / _fontScale).round();
+  TextStyle _textStyle(EchoTokens tokens) => TextStyle(
+        fontFamily: 'serif',
+        fontSize: 17 * _fontScale,
+        height: 1.9,
+        color: tokens.paperText,
+      );
 
-  Future<void> _load() async {
+  Future<void> _loadChapters() async {
     setState(() {
       _loading = true;
       _error = null;
@@ -60,32 +72,16 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
       final chapters = await ref
           .read(echoApiProvider)
           .bookChapters(widget.book.id, full: true);
-      final pages = buildReaderPages(chapters, charsPerPage: _charsPerPage);
-
-      // 恢复上次阅读位置。
-      int startPage = 0;
-      if (!_restored) {
-        final saved = await ref
-            .read(readingStoreProvider)
-            .read(widget.book.id);
-        if (saved != null && saved.globalPage > 0) {
-          startPage = saved.globalPage.clamp(0, pages.isEmpty ? 0 : pages.length - 1);
-        }
-        _restored = true;
-      }
-
+      final saved = await ref.read(readingStoreProvider).read(widget.book.id);
       if (!mounted) return;
       setState(() {
-        _pages = pages;
-        _currentPage = startPage;
-        _loading = false;
-      });
-      // PageView 首帧后跳到恢复页。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_pageController.hasClients) return;
-        if (startPage > 0) {
-          _pageController.jumpToPage(startPage);
+        _chapters = chapters;
+        if (saved != null) {
+          _chapterIndex = saved.chapterIndex;
+          _charOffset = saved.charOffset;
         }
+        _loading = false;
+        _layoutSize = null; // 触发下一次布局时重新分页
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -96,37 +92,70 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
     }
   }
 
+  /// 按当前版心尺寸精确分页（保证每页都放得下，不会溢出到工具栏下面）。
+  Future<void> _repaginate(Size size, EchoTokens tokens) async {
+    if (_chapters.isEmpty) return;
+    final style = _textStyle(tokens);
+    final textScaler = MediaQuery.textScalerOf(context);
+    final pages = <ReaderPage>[];
+    for (var i = 0; i < _chapters.length; i++) {
+      final chapter = _chapters[i];
+      pages.addAll(
+        paginateChapterBySize(
+          chapterIndex: chapter.index,
+          chapterTitle:
+              chapter.title.isNotEmpty ? chapter.title : '第 ${i + 1} 章',
+          text: chapter.text,
+          style: style,
+          textScaler: textScaler,
+          maxWidth: size.width,
+          maxHeight: size.height,
+        ),
+      );
+      // 大书分页耗时较长，逐章让出事件循环避免卡顿。
+      if (i % 4 == 3) await Future<void>.delayed(Duration.zero);
+    }
+    if (!mounted) return;
+    final target = pageIndexForOffset(pages, _chapterIndex, _charOffset);
+    setState(() {
+      _pages = pages;
+      _currentPage = target;
+      _layoutSize = size;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pageController.hasClients) return;
+      if (_pageController.page?.round() != target) {
+        _pageController.jumpToPage(target);
+      }
+    });
+  }
+
   Future<void> _onPageChanged(int index) async {
-    setState(() => _currentPage = index);
+    if (index < 0 || index >= _pages.length) return;
+    final page = _pages[index];
+    setState(() {
+      _currentPage = index;
+      _chapterIndex = page.chapterIndex;
+      _charOffset = page.startChar;
+    });
     await ref.read(readingStoreProvider).write(
-          ReadingPosition(bookId: widget.book.id, globalPage: index),
+          ReadingPosition(
+            bookId: widget.book.id,
+            chapterIndex: page.chapterIndex,
+            charOffset: page.startChar,
+          ),
         );
   }
 
-  /// 重新分页但保持阅读位置（字号变化时）。
   Future<void> _cycleFontScale() async {
-    final chapterIndex = _pages.isEmpty ? 0 : _pages[_currentPage].chapterIndex;
-    final pageInChapter = _pages.isEmpty ? 0 : _pages[_currentPage].pageInChapter;
     setState(() {
       _fontScale = switch (_fontScale) {
         1.0 => 1.18,
         1.18 => 0.9,
         _ => 1.0,
       };
+      _layoutSize = null; // 触发重排
     });
-    await _load();
-    // 尽量回到同一章同一页序。
-    final target = _pages.indexWhere(
-      (p) => p.chapterIndex == chapterIndex && p.pageInChapter == pageInChapter,
-    );
-    if (target > 0) {
-      setState(() => _currentPage = target);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _pageController.hasClients) {
-          _pageController.jumpToPage(target);
-        }
-      });
-    }
   }
 
   /// 从当前位置开始听书：跳到该书有声书的对应章节起播。
@@ -146,32 +175,23 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
         .audiobooks
         .where((a) => a.bookId == widget.book.id && a.isReady)
         .firstOrNull;
+    final messenger = ScaffoldMessenger.maybeOf(context);
     if (audio == null) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      messenger?.showSnackBar(
         const SnackBar(content: Text('这本书还没有有声书，先在书架转一本吧')),
       );
       return;
     }
-    if (_pages.isEmpty) return;
 
-    final chapterIndex = _pages[_currentPage].chapterIndex;
     final controller = ref.read(chunkedPlayerProvider.notifier);
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      const SnackBar(content: Text('正在定位到本章音频…')),
-    );
-
     final cover = ref
         .read(libraryControllerProvider)
         .books
         .where((b) => b.id == widget.book.id)
         .map((b) => b.coverUrl)
         .firstOrNull;
-    await controller.loadAudiobook(
-      audio,
-      autoPlay: false,
-      coverUrl: cover,
-    );
+
+    await controller.loadAudiobook(audio, autoPlay: false, coverUrl: cover);
     final chunks = ref.read(chunkedPlayerProvider).chunks;
     if (chunks.isEmpty) {
       messenger?.showSnackBar(
@@ -179,7 +199,7 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
       );
       return;
     }
-    // 找到当前章对应的分块；没有则取章节序号最接近的一块。
+    final chapterIndex = _chapterIndex;
     var index = chunks.indexWhere((c) => c.chapterIndex == chapterIndex);
     if (index == -1) {
       var best = 0;
@@ -206,8 +226,9 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
         .watch(libraryControllerProvider)
         .audiobooks
         .any((a) => a.bookId == widget.book.id && a.isReady);
-    final page = _pages.isEmpty ? null : _pages[_currentPage];
-    final chapterTitle = page?.chapterTitle ?? '';
+    final page = (_currentPage >= 0 && _currentPage < _pages.length)
+        ? _pages[_currentPage]
+        : null;
 
     return Scaffold(
       key: const Key('reader_page'),
@@ -226,7 +247,7 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
               style: textTheme.titleMedium?.copyWith(color: tokens.paperText),
             ),
             Text(
-              chapterTitle,
+              page?.chapterTitle ?? '',
               key: const Key('reader_chapter_label'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -239,8 +260,10 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
             key: const Key('reader_font_button'),
             tooltip: '字号',
             onPressed: _loading ? null : _cycleFontScale,
-            icon: Text('Aa',
-                style: textTheme.labelLarge?.copyWith(color: tokens.paperText)),
+            icon: Text(
+              'Aa',
+              style: textTheme.labelLarge?.copyWith(color: tokens.paperText),
+            ),
           ),
           IconButton(
             key: const Key('reader_play_button'),
@@ -270,11 +293,11 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
                               ?.copyWith(color: tokens.error),
                         ),
                       ),
-                      FilledButton(onPressed: _load, child: const Text('重试')),
+                      FilledButton(onPressed: _loadChapters, child: const Text('重试')),
                     ],
                   ),
                 )
-              : _pages.isEmpty
+              : _chapters.isEmpty
                   ? Center(
                       key: const Key('reader_empty'),
                       child: Text(
@@ -283,37 +306,15 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
                             ?.copyWith(color: tokens.textSecondary),
                       ),
                     )
-                  : PageView.builder(
-                      key: const Key('reader_pageview'),
-                      controller: _pageController,
-                      // 左右滑动翻页：常规电子书交互。
-                      scrollDirection: Axis.horizontal,
-                      pageSnapping: true,
+                  : _ReaderBody(
+                      pages: _pages,
+                      pageController: _pageController,
+                      textStyle: _textStyle(tokens),
+                      layoutSize: _layoutSize,
+                      onNeedPagination: _repaginate,
                       onPageChanged: _onPageChanged,
-                      itemCount: _pages.length,
-                      itemBuilder: (context, index) {
-                        final p = _pages[index];
-                        return SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(
-                            EchoMetrics.space3,
-                            EchoMetrics.space2,
-                            EchoMetrics.space3,
-                            EchoMetrics.space3,
-                          ),
-                          child: Text(
-                            p.text,
-                            key: Key('reader_page_text_$index'),
-                            style: TextStyle(
-                              fontFamily: 'serif',
-                              fontSize: 17 * _fontScale,
-                              height: 1.9,
-                              color: tokens.paperText,
-                            ),
-                          ),
-                        );
-                      },
                     ),
-      bottomNavigationBar: _pages.isEmpty || _loading
+      bottomNavigationBar: _loading || _pages.isEmpty
           ? null
           : BottomAppBar(
               color: tokens.paperWarm,
@@ -344,6 +345,67 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// 版心：用 LayoutBuilder 拿到可用宽高，交给父级做精确分页。
+class _ReaderBody extends StatelessWidget {
+  const _ReaderBody({
+    required this.pages,
+    required this.pageController,
+    required this.textStyle,
+    required this.layoutSize,
+    required this.onNeedPagination,
+    required this.onPageChanged,
+  });
+
+  final List<ReaderPage> pages;
+  final PageController pageController;
+  final TextStyle textStyle;
+  final Size? layoutSize;
+  final Future<void> Function(Size size, EchoTokens tokens) onNeedPagination;
+  final ValueChanged<int> onPageChanged;
+
+  static const EdgeInsets _insets = EdgeInsets.fromLTRB(
+    EchoMetrics.space3,
+    EchoMetrics.space2,
+    EchoMetrics.space3,
+    EchoMetrics.space1,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = Size(
+          constraints.maxWidth - _insets.horizontal,
+          constraints.maxHeight - _insets.vertical,
+        );
+        // 尺寸变化（首次布局/旋转/字号）触发重新分页
+        if (layoutSize == null ||
+            (layoutSize!.width - available.width).abs() > 0.5 ||
+            (layoutSize!.height - available.height).abs() > 0.5) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            onNeedPagination(available, tokens);
+          });
+        }
+        return PageView.builder(
+          key: const Key('reader_pageview'),
+          controller: pageController,
+          onPageChanged: onPageChanged,
+          itemCount: pages.length,
+          itemBuilder: (context, index) => Padding(
+            padding: _insets,
+            child: Text(
+              pages[index].text,
+              key: Key('reader_page_text_$index'),
+              style: textStyle,
+            ),
+          ),
+        );
+      },
     );
   }
 }
