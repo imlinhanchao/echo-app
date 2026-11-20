@@ -71,9 +71,10 @@ class BookshelfTab extends ConsumerWidget {
       onRefresh: libController.refresh,
       child: ListView(
         key: const Key('bookshelf_scroll'),
-        padding: const EdgeInsets.fromLTRB(
+        // 顶部预留状态栏高度（首页无 AppBar，避免问候语被状态栏压住）
+        padding: EdgeInsets.fromLTRB(
           EchoMetrics.space3,
-          EchoMetrics.space2,
+          MediaQuery.paddingOf(context).top + EchoMetrics.space2,
           EchoMetrics.space2,
           EchoMetrics.space2,
         ),
@@ -489,7 +490,7 @@ class _BookRow extends ConsumerWidget {
       borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
       onTap: () => Navigator.of(
         context,
-      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book))),
+      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPageView(book: book))),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space1),
         child: Row(
@@ -524,7 +525,7 @@ class _BookRow extends ConsumerWidget {
               key: Key('book_read_${book.id}'),
               tooltip: '阅读',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
+                MaterialPageRoute<void>(builder: (_) => ReaderPageView(book: book)),
               ),
               icon: Icon(Icons.menu_book_outlined, color: tokens.textPrimary),
             ),

@@ -429,9 +429,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       clearError: true,
     );
 
+    final audioUri = _api.resolveUri(chunk.audioUrl);
     try {
       final headers = await _api.authHeaders();
-      final audioUri = _api.resolveUri(chunk.audioUrl);
       final book = state.audiobook;
       final bookTitle = (book?.bookTitle.isNotEmpty ?? false)
           ? book!.bookTitle
@@ -478,10 +478,13 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
         await _engine.play();
       }
     } catch (e) {
+      final raw = e.toString();
       final message = switch (e) {
         TimeoutException() => '音频加载超时：请检查网络或服务地址是否可达',
         ApiException(:final message) => message,
-        _ => '音频加载失败：$e',
+        _ when raw.contains('Source error') =>
+          '音频无法加载：服务地址不可达，或被系统拦截明文 HTTP（$audioUri）',
+        _ => '音频加载失败：$raw',
       };
       state = state.copyWith(isLoading: false, error: message);
     }
