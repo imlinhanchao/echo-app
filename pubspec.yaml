@@ -1,0 +1,26 @@
+name: echo
+description: "Echo · 回声 — 跨平台听看一体书客户端（Flutter）"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.4.0
+  flutter_riverpod: ^2.5.1
+  flutter_secure_storage: ^9.2.2
+  just_audio: ^0.9.40
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/design-tokens.json

@@ -1,0 +1,142 @@
+{
+  "$meta": {
+    "app": "Echo",
+    "appNameZh": "回声",
+    "version": "1.0.0",
+    "updated": "2026-11-20",
+    "mode": "dark-first",
+    "grid": "8pt (4pt for micro-adjustments)",
+    "notes": "三层 Token 模型：primitive(原始色板) → semantic(语义层, light/dark 双值) → component(组件层)。组件代码中禁止出现裸色值与魔法数字，一律引用语义 Token。"
+  },
+  "primitive": {
+    "indigo": {
+      "600": "#4F46E5",
+      "500": "#6366F1",
+      "400": "#818CF8"
+    },
+    "orange": {
+      "500": "#F97316",
+      "400": "#FB923C"
+    },
+    "slate": {
+      "50": "#F8FAFC",
+      "100": "#E2E8F0",
+      "200": "#E2E8F0",
+      "700": "#334155",
+      "800": "#1E293B",
+      "900": "#0F172A",
+      "950": "#020617"
+    }
+  },
+  "light": {
+    "colors": {
+      "primary": {
+        "base": "#4F46E5",
+        "hover": "#4338CA",
+        "active": "#3730A3"
+      },
+      "accent": {
+        "base": "#F97316",
+        "usage": "封面氛围点缀、正在播放动效；不用于可交互状态"
+      },
+      "surface": {
+        "base": "#F8FAFC",
+        "elevated": "#FFFFFF",
+        "subtle": "#E2E8F0"
+      },
+      "text": {
+        "primary": "#0F172A",
+        "secondary": "#475569",
+        "disabled": "#94A3B8",
+        "on-primary": "#FFFFFF"
+      },
+      "status": {
+        "success": "#16A34A",
+        "error": "#DC2626",
+        "warning": "#D97706"
+      },
+      "focus": {
+        "ring": "#4F46E5"
+      }
+    }
+  },
+  "dark": {
+    "colors": {
+      "primary": {
+        "base": "#6366F1",
+        "hover": "#818CF8",
+        "active": "#4F46E5"
+      },
+      "accent": {
+        "base": "#FB923C",
+        "usage": "封面氛围点缀、正在播放动效；不用于可交互状态"
+      },
+      "surface": {
+        "base": "#020617",
+        "elevated": "#0F172A",
+        "subtle": "#1E293B"
+      },
+      "text": {
+        "primary": "#F1F5F9",
+        "secondary": "#94A3B8",
+        "disabled": "#475569",
+        "on-primary": "#FFFFFF"
+      },
+      "status": {
+        "success": "#4ADE80",
+        "error": "#F87171",
+        "warning": "#FBBF24"
+      },
+      "focus": {
+        "ring": "#818CF8"
+      },
+      "reading": {
+        "highlight-sentence": "rgba(99, 102, 241, 0.24)",
+        "paper-warm": "#0B1220",
+        "paper-text": "#E8E3D8"
+      }
+    }
+  },
+  "typography": {
+    "unit": "rem",
+    "bodyMinPx": 14,
+    "scale": {
+      "hero": { "desktop": "2rem", "mobile": "1.5rem" },
+      "h2": "1.25rem",
+      "h3": "1.0625rem",
+      "body": { "size": "1rem", "lineHeight": "1.6" },
+      "caption": "0.875rem",
+      "metadata": "0.75rem"
+    },
+    "reading": {
+      "serif": "true",
+      "note": "阅读器正文使用衬线字体，行长 45-75ch，行高 1.8-2.0"
+    },
+    "dynamicType": "跟随系统字号缩放 (MediaQuery.textScaler)，禁止锁定缩放"
+  },
+  "spacing": {
+    "base": 8,
+    "scale": [4, 8, 16, 24, 32, 48]
+  },
+  "radius": {
+    "card": "12px",
+    "control": "8px",
+    "pill": "999px",
+    "sheet": "16px"
+  },
+  "elevation": {
+    "dark": "以 surface 层级色区分，不依赖阴影",
+    "glassmorphism": "backdrop-filter: blur(20px) + surface 70% 透明度，用于桌面侧边栏、锁屏播控卡、迷你播放条"
+  },
+  "motion": {
+    "duration": { "fast": "150ms", "base": "250ms", "sheet": "300ms" },
+    "easing": { "enter": "ease-out", "exit": "ease-in" },
+    "rules": "仅动画 transform/opacity；遵循 prefers-reduced-motion",
+    "signature": "迷你播放条 → 全屏播放器的 Hero 展开；句子高亮呼吸"
+  },
+  "a11y": {
+    "touchTarget": "44pt (iOS) / 48dp (Android) / 24px (WCAG 2.2 最低)",
+    "contrast": "正文 4.5:1，UI 控件 3:1，light/dark 双模式均需验证",
+    "focus": "所有交互元素 focus-visible 可见焦点环"
+  }
+}
