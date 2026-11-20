@@ -85,6 +85,23 @@ void main() {
       expect(controller.state.books, isEmpty);
     });
 
+    test('搜索历史：置顶去重并可删除', () async {
+      final adapter = buildAdapter();
+      final controller = SearchController(
+        EchoApi(dio: stubDio(adapter), tokenStore: MemoryTokenStore()),
+      );
+
+      await controller.search('三体');
+      await controller.search('kafka');
+      await controller.search('三体');
+
+      expect(controller.state.history.first, '三体', reason: '重复搜索应置顶去重');
+      expect(controller.state.history, hasLength(2));
+
+      controller.removeHistory('三体');
+      expect(controller.state.history, <String>['kafka']);
+    });
+
     test('搜索失败：错误态直显服务端文案（如书源未配置）', () async {
       final adapter = StubAdapter(<String, Responder Function()>{
         '/api/search': () =>

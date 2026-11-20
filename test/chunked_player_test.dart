@@ -206,6 +206,23 @@ void main() {
       expect(h.engine.lastMediaArtist, '第二章 台球');
     });
 
+    test('睡眠定时：到点自动暂停并清除定时', () async {
+      final h = await createHarness();
+      // loadAudiobook 默认 autoPlay，载入即开始播放。
+      await h.controller.loadAudiobook(sampleBook);
+      await Future<void>.delayed(Duration.zero);
+      expect(h.controller.state.isPlaying, isTrue);
+
+      await h.controller.setSleepTimer(const Duration(milliseconds: 80));
+      expect(h.controller.sleepTimerActive, isTrue);
+      expect(h.controller.state.sleepUntil, isNotNull);
+
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(h.engine.playing, isFalse, reason: '定时到点应自动暂停');
+      expect(h.controller.state.isPlaying, isFalse);
+      expect(h.controller.state.sleepUntil, isNull, reason: '暂停后清除定时');
+    });
+
     test('±15s 跨块跳转：块尾前进跨入下一块，块首后退跨回上一块', () async {
       final h = await createHarness();
       await h.controller.loadAudiobook(sampleBook);

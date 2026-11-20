@@ -5,9 +5,40 @@ import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
+import '../player/player_sheet.dart' show PlayerSheet;
 import '../reader/reader_page.dart';
 import 'convert_sheet.dart';
 import 'library_controller.dart';
+
+/// 删除二次确认（防误触：文件删除不可恢复）。
+Future<bool> confirmDelete(
+  BuildContext context,
+  String title,
+  String message,
+) async {
+  return await showDialog<bool>(
+        context: context,
+        builder: (dialogCtx) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor:
+                    Theme.of(dialogCtx).extension<EchoTokens>()?.error,
+              ),
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+}
 
 String formatDurationMs(int ms) {
   final totalSeconds = (ms / 1000).floor().clamp(0, 86400 * 10);
@@ -29,6 +60,7 @@ class BookshelfTab extends ConsumerWidget {
     final textTheme = Theme.of(context).textTheme;
     final libState = ref.watch(libraryControllerProvider);
     final libController = ref.read(libraryControllerProvider.notifier);
+    final playerState = ref.watch(chunkedPlayerProvider);
 
     return DefaultTabController(
       length: 2,
@@ -67,6 +99,18 @@ class BookshelfTab extends ConsumerWidget {
               ],
             ),
           ),
+          // 「正在收听」hero 卡（设计图 ui-mobile-library：封面 + 圆形进度环 + 播放按钮）。
+          if (playerState.hasBook) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                EchoMetrics.space2,
+                EchoMetrics.space1,
+                EchoMetrics.space2,
+                0,
+              ),
+              child: _NowPlayingHeroCard(state: playerState),
+            ),
+          ],
           if (libState.error != null)
             Container(
               key: const Key('library_error_banner'),
@@ -192,9 +236,18 @@ class _AudiobooksList extends ConsumerWidget {
                   key: Key('audiobook_delete_${item.id}'),
                   tooltip: '删除',
                   icon: Icon(Icons.delete_outline, color: tokens.textSecondary),
-                  onPressed: () => ref
-                      .read(libraryControllerProvider.notifier)
-                      .deleteAudiobook(item.id),
+                  onPressed: () async {
+                    final confirmed = await confirmDelete(
+                      context,
+                      '删除有声书',
+                      '将删除《${item.bookTitle}》的有声书音频与字幕，操作不可恢复。',
+                    );
+                    if (confirmed && context.mounted) {
+                      await ref
+                          .read(libraryControllerProvider.notifier)
+                          .deleteAudiobook(item.id);
+                    }
+                  },
                 ),
               ],
             ),
@@ -295,15 +348,136 @@ class _BooksList extends ConsumerWidget {
                   key: Key('book_delete_${book.id}'),
                   tooltip: '删除',
                   icon: Icon(Icons.delete_outline, color: tokens.textSecondary),
-                  onPressed: () => ref
-                      .read(libraryControllerProvider.notifier)
-                      .deleteBook(book.id),
+                  onPressed: () async {
+                    final confirmed = await confirmDelete(
+                      context,
+                      '删除书籍',
+                      '将删除《${book.title}》及其文件，关联有声书将一并删除。',
+                    );
+                    if (confirmed && context.mounted) {
+                      await ref
+                          .read(libraryControllerProvider.notifier)
+                          .deleteBook(book.id);
+                    }
+                  },
                 ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+/// 「正在收听」hero 卡（设计图 ui-mobile-library 顶部区域）：
+/// 封面缩略 + 书名/当前句 + 圆形进度环播放按钮，点击展开 v3 播放器。
+class _NowPlayingHeroCard extends ConsumerWidget {
+  const _NowPlayingHeroCard({required this.state});
+
+  final ChunkedPlayerState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+    final controller = ref.read(chunkedPlayerProvider.notifier);
+
+    final title = (state.audiobook?.bookTitle.isNotEmpty ?? false)
+        ? state.audiobook!.bookTitle
+        : '有声书 #${state.audiobook?.id ?? 0}';
+    final chunk = state.currentChunk;
+    final subtitle = state.activeCue?.text ??
+        (chunk?.title.isNotEmpty == true ? chunk!.title : '第 ${state.currentChunkIndex + 1} 章');
+    final totalMs = state.totalDurationMs;
+    final progress =
+        totalMs > 0 ? (state.globalPositionMs / totalMs).clamp(0.0, 1.0) : 0.0;
+
+    return Card(
+      key: const Key('now_playing_hero_card'),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
+        onTap: () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => const PlayerSheet(),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(EchoMetrics.space2),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: tokens.accent.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
+                ),
+                child: Icon(Icons.headphones, color: tokens.accent),
+              ),
+              const SizedBox(width: EchoMetrics.space2),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '正在收听',
+                      style: textTheme.labelSmall
+                          ?.copyWith(color: tokens.textSecondary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      title,
+                      key: const Key('now_playing_title'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleMedium
+                          ?.copyWith(color: tokens.textPrimary),
+                    ),
+                    Text(
+                      subtitle,
+                      key: const Key('now_playing_subtitle'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.bodySmall
+                          ?.copyWith(color: tokens.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: EchoMetrics.space1),
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      key: const Key('now_playing_progress_ring'),
+                      value: progress,
+                      strokeWidth: 3,
+                      color: tokens.primary,
+                      backgroundColor: tokens.surfaceSubtle,
+                    ),
+                    IconButton(
+                      key: const Key('now_playing_toggle'),
+                      tooltip: state.isPlaying ? '暂停' : '播放',
+                      onPressed: controller.togglePlayPause,
+                      icon: Icon(
+                        state.isPlaying
+                            ? Icons.pause
+                            : Icons.play_arrow,
+                        color: tokens.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -27,6 +27,7 @@ class SearchState {
     this.isLoading = false,
     this.error,
     this.lastQuery = '',
+    this.history = const <String>[],
   });
 
   final List<SearchBook> books;
@@ -35,6 +36,9 @@ class SearchState {
   final bool isLoading;
   final String? error;
   final String lastQuery;
+
+  /// 搜索历史（会话内，去重置顶，最多 8 条；设计图 ui-mobile-search）。
+  final List<String> history;
 
   bool get hasMore => page < totalPages;
 
@@ -46,6 +50,7 @@ class SearchState {
     String? error,
     bool clearError = false,
     String? lastQuery,
+    List<String>? history,
   }) {
     return SearchState(
       books: books ?? this.books,
@@ -54,6 +59,7 @@ class SearchState {
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
       lastQuery: lastQuery ?? this.lastQuery,
+      history: history ?? this.history,
     );
   }
 }
@@ -72,11 +78,22 @@ class SearchController extends StateNotifier<SearchState> {
   Future<void> search(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
+    final history = [trimmed, ...state.history.where((e) => e != trimmed)]
+        .take(8)
+        .toList();
     state = SearchState(
       isLoading: true,
       lastQuery: trimmed,
+      history: history,
     );
     await _fetch(page: 1, query: trimmed, append: false);
+  }
+
+  /// 删除一条搜索历史。
+  void removeHistory(String query) {
+    state = state.copyWith(
+      history: state.history.where((e) => e != query).toList(),
+    );
   }
 
   Future<void> loadMore() async {

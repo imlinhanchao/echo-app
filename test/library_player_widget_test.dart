@@ -139,7 +139,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('mini_player_bar')), findsOneWidget);
-    expect(find.text('叶文洁凝视着雷达峰。'), findsOneWidget);
+    // 「正在收听」hero 卡与迷你播放条都应展示当前跟读句。
+    expect(find.text('叶文洁凝视着雷达峰。'), findsWidgets);
+    expect(find.byKey(const Key('now_playing_hero_card')), findsOneWidget);
 
     // 3. 点击 MiniPlayerBar 展开全屏 v3 播放器
     await tester.tap(find.byKey(const Key('mini_player_bar')));

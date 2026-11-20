@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/api/models.dart';
 import 'core/audio/audio_service_engine.dart';
+import 'core/settings/theme_mode_controller.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
 import 'features/auth/auth_controller.dart';
@@ -13,29 +14,61 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 后台媒体会话（锁屏/通知栏播控）；桌面/测试等平台自动回退 just_audio。
   await AudioServiceEngine.tryInit();
-  // 深色优先（dark-first）：听读产品的主场景是夜间与沉浸。
-  final tokens = await EchoTokens.load(Brightness.dark);
+  // 恢复亮/暗偏好（dark-first，默认深色）。
+  await ThemeModeController.init();
+  // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。
+  final darkTokens = await EchoTokens.load(Brightness.dark);
+  final lightTokens = await EchoTokens.load(Brightness.light);
   runApp(
     ProviderScope(
-      child: EchoApp(theme: buildEchoTheme(Brightness.dark, tokens)),
+      child: EchoApp(
+        theme: buildEchoTheme(Brightness.dark, darkTokens),
+        lightTheme: buildEchoTheme(Brightness.light, lightTokens),
+        darkModeListenable: ThemeModeController.darkMode,
+      ),
     ),
   );
 }
 
 class EchoApp extends StatelessWidget {
-  const EchoApp({super.key, required this.theme, this.home});
+  const EchoApp({
+    super.key,
+    required this.theme,
+    this.lightTheme,
+    this.darkModeListenable,
+    this.home,
+  });
 
+  /// 深色基准主题（darkTheme）。
   final ThemeData theme;
+
+  /// 亮色对偶主题；提供后经 [darkModeListenable] 切换，仅深色亦可运行。
+  final ThemeData? lightTheme;
+
+  final ValueNotifier<bool>? darkModeListenable;
 
   /// 测试可注入确定性首页；缺省走 [AuthGate]。
   final Widget? home;
 
   @override
   Widget build(BuildContext context) {
+    final listenable = darkModeListenable;
+    if (listenable == null) {
+      return _materialApp(true);
+    }
+    return AnimatedBuilder(
+      animation: listenable,
+      builder: (context, _) => _materialApp(listenable.value),
+    );
+  }
+
+  Widget _materialApp(bool darkMode) {
     return MaterialApp(
       title: 'Echo · 回声',
       debugShowCheckedModeBanner: false,
-      theme: theme,
+      theme: lightTheme ?? theme,
+      darkTheme: theme,
+      themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       home: home ?? const AuthGate(),
     );
   }

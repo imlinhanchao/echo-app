@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/settings/theme_mode_controller.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
@@ -69,6 +70,24 @@ class ProfilePage extends ConsumerWidget {
                 leading: Icon(Icons.dns_outlined, color: tokens.accent),
                 title: const Text('服务地址'),
                 subtitle: Text(kEchoBaseUrl),
+              ),
+              // 亮/暗模式（dark-first：默认深色）。
+              ValueListenableBuilder<bool>(
+                valueListenable: ThemeModeController.darkMode,
+                builder: (context, dark, _) => ListTile(
+                  key: const Key('profile_dark_mode'),
+                  leading: Icon(
+                    dark ? Icons.dark_mode : Icons.light_mode,
+                    color: tokens.accent,
+                  ),
+                  title: const Text('深色模式'),
+                  subtitle: Text(dark ? '当前：深色（推荐夜间听读）' : '当前：浅色'),
+                  trailing: Switch(
+                    key: const Key('profile_dark_mode_switch'),
+                    value: dark,
+                    onChanged: (_) => ThemeModeController.toggle(),
+                  ),
+                ),
               ),
               ListTile(
                 key: const Key('profile_providers'),

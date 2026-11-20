@@ -204,6 +204,7 @@ class ChunkedPlayerState {
     this.cues = const <SrtCue>[],
     this.activeCueIndex = -1,
     this.error,
+    this.sleepUntil,
   });
 
   final AudiobookInfo? audiobook;
@@ -216,6 +217,9 @@ class ChunkedPlayerState {
   final List<SrtCue> cues;
   final int activeCueIndex;
   final String? error;
+
+  /// 睡眠定时到点时刻（null = 未启用）。UI 显示"至 HH:mm"。
+  final DateTime? sleepUntil;
 
   bool get hasBook => audiobook != null && chunks.isNotEmpty;
 
@@ -266,6 +270,8 @@ class ChunkedPlayerState {
     int? activeCueIndex,
     String? error,
     bool clearError = false,
+    DateTime? sleepUntil,
+    bool clearSleepUntil = false,
   }) {
     return ChunkedPlayerState(
       audiobook: audiobook ?? this.audiobook,
@@ -278,6 +284,7 @@ class ChunkedPlayerState {
       cues: cues ?? this.cues,
       activeCueIndex: activeCueIndex ?? this.activeCueIndex,
       error: clearError ? null : (error ?? this.error),
+      sleepUntil: clearSleepUntil ? null : (sleepUntil ?? this.sleepUntil),
     );
   }
 }
@@ -542,6 +549,30 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     state = state.copyWith(speed: speed);
   }
 
+  // ---- 睡眠定时 ----
+
+  Timer? _sleepTimer;
+
+  bool get sleepTimerActive => state.sleepUntil != null;
+
+  /// 设置睡眠定时：到点自动暂停并保存进度（播着睡着的场景）。
+  Future<void> setSleepTimer(Duration duration) async {
+    _sleepTimer?.cancel();
+    final until = DateTime.now().add(duration);
+    _sleepTimer = Timer(duration, () async {
+      await _engine.pause();
+      await _saveProgress();
+      state = state.copyWith(isPlaying: false, clearSleepUntil: true);
+    });
+    state = state.copyWith(sleepUntil: until);
+  }
+
+  /// 关闭睡眠定时。
+  void cancelSleepTimer() {
+    _sleepTimer?.cancel();
+    state = state.copyWith(clearSleepUntil: true);
+  }
+
   void _onPosition(Duration pos) {
     final ms = pos.inMilliseconds;
     final cueIdx = SrtParser.activeCueIndex(state.cues, ms);
@@ -593,6 +624,7 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     _posSub?.cancel();
     _playSub?.cancel();
     _doneSub?.cancel();
+    _sleepTimer?.cancel();
     for (final sub in _lockScreenSubs) {
       sub.cancel();
     }

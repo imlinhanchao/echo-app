@@ -110,7 +110,7 @@ class MiniPlayerBar extends ConsumerWidget {
                 onPressed: () => ref
                     .read(chunkedPlayerProvider.notifier)
                     .skipBy(const Duration(seconds: 15)),
-                icon: Icon(Icons.forward_10, color: tokens.textSecondary),
+                icon: Icon(Icons.fast_forward, color: tokens.textSecondary),
               ),
             ],
           ),
@@ -354,7 +354,11 @@ class PlayerSheet extends ConsumerWidget {
                       tooltip: '后退 15 秒',
                       onPressed: () =>
                           controller.skipBy(const Duration(seconds: -15)),
-                      icon: const Icon(Icons.replay_10),
+                      icon: Text(
+                        '-15s',
+                        style: textTheme.labelLarge
+                            ?.copyWith(color: tokens.textPrimary),
+                      ),
                     ),
                     FilledButton(
                       key: const Key('player_toggle_play'),
@@ -373,7 +377,11 @@ class PlayerSheet extends ConsumerWidget {
                       tooltip: '前进 15 秒',
                       onPressed: () =>
                           controller.skipBy(const Duration(seconds: 15)),
-                      icon: const Icon(Icons.forward_10),
+                      icon: Text(
+                        '+15s',
+                        style: textTheme.labelLarge
+                            ?.copyWith(color: tokens.textPrimary),
+                      ),
                     ),
                     IconButton(
                       key: const Key('player_next_chunk'),
@@ -386,7 +394,7 @@ class PlayerSheet extends ConsumerWidget {
                 ),
                 const SizedBox(height: EchoMetrics.space1),
 
-                // 次级入口：倍速切换 + 章节列表抽屉
+                // 次级入口：倍速 + 睡眠定时 + 章节抽屉
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -401,6 +409,18 @@ class PlayerSheet extends ConsumerWidget {
                       label: Text('${state.speed}x'),
                     ),
                     TextButton.icon(
+                      key: const Key('player_sleep_button'),
+                      onPressed: () => _showSleepDialog(context, ref),
+                      icon: const Icon(Icons.bedtime, size: 18),
+                      label: Text(
+                        key: const Key('player_sleep_label'),
+                        state.sleepUntil == null
+                            ? '睡眠定时'
+                            : '至 ${state.sleepUntil!.toLocal().hour.toString().padLeft(2, '0')}:'
+                                '${state.sleepUntil!.toLocal().minute.toString().padLeft(2, '0')}',
+                      ),
+                    ),
+                    TextButton.icon(
                       key: const Key('player_chapters_button'),
                       onPressed: () => _showChaptersDrawer(context, ref),
                       icon: const Icon(Icons.list, size: 18),
@@ -412,6 +432,63 @@ class PlayerSheet extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 睡眠定时：到点自动暂停（设计文档 §5.1 播放器次级入口）。
+  void _showSleepDialog(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(chunkedPlayerProvider.notifier);
+    final active = ref.read(chunkedPlayerProvider).sleepUntil != null;
+
+    void pick(Duration? duration) {
+      if (duration == null) {
+        controller.cancelSleepTimer();
+      } else {
+        controller.setSleepTimer(duration);
+      }
+      Navigator.of(context).pop();
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: EchoMetrics.space2),
+            ListTile(
+              key: const Key('sleep_option_off'),
+              leading: const Icon(Icons.bedtime_off),
+              title: const Text('关闭定时'),
+              onTap: () => pick(null),
+            ),
+            for (final minutes in const [15, 30, 60, 90])
+              ListTile(
+                key: Key('sleep_option_${minutes}min'),
+                leading: const Icon(Icons.bedtime),
+                title: Text('$minutes 分钟后暂停'),
+                onTap: () => pick(Duration(minutes: minutes)),
+              ),
+            if (active)
+              Padding(
+                padding: const EdgeInsets.all(EchoMetrics.space2),
+                child: Builder(
+                  builder: (ctx) {
+                    final tokens = Theme.of(ctx).extension<EchoTokens>()!;
+                    return Text(
+                      '当前定时生效中',
+                      style: Theme.of(ctx)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: tokens.textSecondary),
+                    );
+                  },
+                ),
+              ),
+            const SizedBox(height: EchoMetrics.space2),
+          ],
+        ),
       ),
     );
   }
