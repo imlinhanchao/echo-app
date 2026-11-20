@@ -367,15 +367,22 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       return;
     }
 
-    // 检查断点续听记录。
+    // 恢复断点续听记录；若上次已听完（最后一块末尾 ≥2s）则从头重播，
+    // 避免"恢复到块尾 → 瞬间 completed → 暂停"的假死循环。
     int targetIndex = 0;
     int initialOffsetMs = 0;
     final saved = await _progressStore.read(audiobook.id);
     if (saved != null) {
       final foundIdx = chunks.indexWhere((c) => c.n == saved.chunkN);
       if (foundIdx != -1) {
-        targetIndex = foundIdx;
-        initialOffsetMs = saved.offsetMs;
+        final chunkMs = (chunks[foundIdx].durationS * 1000).round();
+        final listenedToEnd = foundIdx == chunks.length - 1 &&
+            chunkMs > 0 &&
+            saved.offsetMs >= chunkMs - 2000;
+        if (!listenedToEnd) {
+          targetIndex = foundIdx;
+          initialOffsetMs = saved.offsetMs;
+        }
       }
     }
 
@@ -385,6 +392,25 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       initialOffsetMs: initialOffsetMs,
       autoPlay: autoPlay,
     );
+  }
+
+  /// 重新加载当前分块（播放失败/卡住时的重试入口）。
+  Future<void> reload() async {
+    if (!state.hasBook) return;
+    final index = state.currentChunkIndex;
+    final offset = state.positionMs;
+    state = state.copyWith(clearError: true);
+    await _loadChunk(
+      index,
+      initialOffsetMs: offset > 0 ? offset - 3000 : 0,
+      autoPlay: true,
+    );
+  }
+
+  /// 跳到指定分块内的毫秒位置（进度条跨章拖动）。
+  Future<void> selectChunkAt(int index, int offsetMs) async {
+    if (index < 0 || index >= state.chunks.length) return;
+    await _loadChunk(index, initialOffsetMs: offsetMs, autoPlay: true);
   }
 
   Future<void> _loadChunk(
@@ -410,18 +436,21 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       final bookTitle = (book?.bookTitle.isNotEmpty ?? false)
           ? book!.bookTitle
           : '有声书 #${book?.id ?? 0}';
-      await _engine.setSource(
-        audioUri,
-        headers: headers,
-        initialPosition: Duration(milliseconds: initialOffsetMs),
-        // 锁屏/通知栏媒体信息：书名 + 章节名 + 块时长（进度条刻度）。
-        mediaTitle: bookTitle,
-        mediaArtist: chunk.title.isNotEmpty
-            ? chunk.title
-            : '第 ${state.currentChunkIndex + 1} 章',
-        mediaDuration:
-            Duration(milliseconds: (chunk.durationS * 1000).round()),
-      );
+      // 音频源加载超时兜底：网络不可达时避免无限"假播放"（停留在 00:00）。
+      await _engine
+          .setSource(
+            audioUri,
+            headers: headers,
+            initialPosition: Duration(milliseconds: initialOffsetMs),
+            // 锁屏/通知栏媒体信息：书名 + 章节名 + 块时长（进度条刻度）。
+            mediaTitle: bookTitle,
+            mediaArtist: chunk.title.isNotEmpty
+                ? chunk.title
+                : '第 ${state.currentChunkIndex + 1} 章',
+            mediaDuration:
+                Duration(milliseconds: (chunk.durationS * 1000).round()),
+          )
+          .timeout(const Duration(seconds: 30));
       await _engine.setSpeed(state.speed);
 
       // 异步拉取当前分块 SRT 字幕（失败或无字幕时自动降级为纯封面模式）。
@@ -449,10 +478,12 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
         await _engine.play();
       }
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e is ApiException ? e.message : '音频加载失败',
-      );
+      final message = switch (e) {
+        TimeoutException() => '音频加载超时：请检查网络或服务地址是否可达',
+        ApiException(:final message) => message,
+        _ => '音频加载失败：$e',
+      };
+      state = state.copyWith(isLoading: false, error: message);
     }
   }
 
@@ -462,6 +493,13 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       await _engine.pause();
       await _saveProgress();
     } else {
+      // 已播到块尾时按播放：先回到开头，避免"点播放没反应"。
+      final endMs = state.currentChunkDurationMs;
+      if (endMs > 0 && state.positionMs >= endMs - 500) {
+        await _engine.seek(Duration.zero);
+        final cueIdx = SrtParser.activeCueIndex(state.cues, 0);
+        state = state.copyWith(positionMs: 0, activeCueIndex: cueIdx);
+      }
       await _engine.play();
     }
   }

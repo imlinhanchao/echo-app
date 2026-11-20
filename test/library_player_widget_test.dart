@@ -132,7 +132,8 @@ void main() {
 
     // 1. 有声书卡片已渲染
     expect(find.byKey(const Key('audiobook_card_101')), findsOneWidget);
-    expect(find.text('三体 · 地球往事'), findsOneWidget);
+    // 有声书行与书库行同书同名，应出现两处。
+    expect(find.text('三体 · 地球往事'), findsWidgets);
 
     // 2. 点击播放按钮 -> 底部浮现 MiniPlayerBar 并展示首句跟读字幕
     await tester.tap(find.byKey(const Key('audiobook_play_101')));

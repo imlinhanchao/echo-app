@@ -123,5 +123,5 @@ class EchoHome extends StatelessWidget {
   final EchoUser user;
 
   @override
-  Widget build(BuildContext context) => EchoShell(user: user);
+  Widget build(BuildContext context) => EchoShell(key: EchoShell.shellKey, user: user);
 }
