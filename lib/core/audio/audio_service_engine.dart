@@ -132,8 +132,10 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'org.hancel.echo.playback',
           androidNotificationChannelName: 'Echo 播放',
-          androidNotificationOngoing: true,
-          androidStopForegroundOnPause: true,
+          // 暂停后仍保留通知与锁屏媒体卡片（网易云同类体验），
+          // 此时通知可被用户划掉，因此 ongoing 必须为 false（audio_service 有断言）。
+          androidNotificationOngoing: false,
+          androidStopForegroundOnPause: false,
         ),
       );
       _instance = AudioServiceEngine._(handler);
@@ -171,7 +173,8 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
         duration: mediaDuration,
         title: mediaTitle ?? '',
         artist: mediaArtist ?? '',
-        artUri: (mediaArtUrl != null && mediaArtUrl.startsWith('http'))
+        // 本地缓存文件（file://）或远端地址都可；本地文件在 HarmonyOS/华为上更稳
+        artUri: (mediaArtUrl != null && mediaArtUrl.isNotEmpty)
             ? Uri.tryParse(mediaArtUrl)
             : null,
       );

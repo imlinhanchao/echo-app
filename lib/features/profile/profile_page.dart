@@ -7,6 +7,7 @@ import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../providers/provider_account_page.dart';
+import 'playback_settings_page.dart';
 
 /// 我的 Tab：账号信息、服务地址、书源账号入口、登出。
 class ProfilePage extends ConsumerWidget {
@@ -98,6 +99,19 @@ class ProfilePage extends ConsumerWidget {
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const ProviderAccountPage(),
+                  ),
+                ),
+              ),
+              ListTile(
+                key: const Key('profile_notification_settings'),
+                leading: Icon(Icons.notifications_active_outlined,
+                    color: tokens.accent),
+                title: const Text('通知与锁屏播控'),
+                subtitle: const Text('华为/小米等机型需开启通知与后台运行，才能在锁屏显示播放控件'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const PlaybackSettingsPage(),
                   ),
                 ),
               ),

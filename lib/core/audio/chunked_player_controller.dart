@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 import '../../features/auth/auth_controller.dart';
 import '../api/echo_api.dart';
 import '../api/models.dart';
+import '../media/cover_cache.dart';
 import '../storage/progress_store.dart';
 import 'audio_service_engine.dart';
 import 'srt_parser.dart';
@@ -325,6 +326,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   /// 当前有声书封面对应的书籍封面地址（用于锁屏/通知栏封面图）。
   String? _coverUrl;
 
+  /// 封面本地缓存：锁屏/通知栏需要的是系统能直接读取的本地图。
+  final CoverCache _coverCache = CoverCache();
+
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<bool>? _playSub;
   StreamSubscription<void>? _doneSub;
@@ -440,6 +444,8 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     );
 
     final audioUri = _api.resolveUri(chunk.audioUrl);
+    // 封面预先落到本地缓存，供 MediaSession/通知栏/锁屏使用
+    final cachedCover = await _coverCache.resolve(_coverUrl);
     try {
       final headers = await _api.authHeaders();
       final book = state.audiobook;
@@ -459,7 +465,7 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
                 : '第 ${state.currentChunkIndex + 1} 章',
             mediaDuration:
                 Duration(milliseconds: (chunk.durationS * 1000).round()),
-            mediaArtUrl: _coverUrl,
+            mediaArtUrl: cachedCover ?? _coverUrl,
           )
           .timeout(const Duration(seconds: 30));
       await _engine.setSpeed(state.speed);
