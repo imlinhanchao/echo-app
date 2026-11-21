@@ -132,12 +132,10 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'org.hancel.echo.playback',
           androidNotificationChannelName: 'Echo 播放',
-          // 常驻通知（播放中不可划掉），配合前台服务让系统持续展示媒体卡片，
-          // 华为/荣耀锁屏媒体控件依赖这一点。audio_service 断言要求两者同时为 true。
-          androidNotificationOngoing: true,
-          androidStopForegroundOnPause: true,
-          // 用自绘的音符小图标，避免默认 Flutter 图标
-          androidNotificationIcon: 'drawable/ic_stat_echo',
+          // 暂停后仍保留通知与锁屏媒体卡片（网易云同类体验），
+          // 通知可被划掉，因此 ongoing 必须为 false（audio_service 有断言）。
+          androidNotificationOngoing: false,
+          androidStopForegroundOnPause: false,
         ),
       );
       _instance = AudioServiceEngine._(handler);
