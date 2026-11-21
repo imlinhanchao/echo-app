@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'core/api/models.dart';
 import 'core/audio/audio_service_engine.dart';
+import 'core/offline/offline_store.dart';
 import 'core/settings/theme_mode_controller.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
@@ -30,6 +31,8 @@ Future<void> main() async {
       // 权限申请失败不阻塞启动。
     }
   }
+  // 离线目录初始化（播放路径只读缓存值，不触发插件调用）。
+  await OfflineFiles.init();
   // 恢复亮/暗偏好（dark-first，默认深色）。
   await ThemeModeController.init();
   // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。

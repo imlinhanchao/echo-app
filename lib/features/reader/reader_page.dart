@@ -130,6 +130,61 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
     });
   }
 
+  /// 章节目录：跳到该章第一页。
+  void _showToc() {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    // 每章第一页的下标
+    final firstPageOfChapter = <int, int>{};
+    for (var i = 0; i < _pages.length; i++) {
+      firstPageOfChapter.putIfAbsent(_pages[i].chapterIndex, () => i);
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        builder: (sheetCtx, controller) => ListView.builder(
+          key: const Key('reader_toc_list'),
+          controller: controller,
+          padding: const EdgeInsets.all(EchoMetrics.space2),
+          itemCount: _chapters.length,
+          itemBuilder: (_, i) {
+            final chapter = _chapters[i];
+            final firstPage = firstPageOfChapter[chapter.index];
+            final selected = _chapterIndex == chapter.index;
+            return ListTile(
+              key: Key('reader_toc_item_$i'),
+              selected: selected,
+              selectedTileColor: tokens.readingHighlight,
+              leading: Icon(
+                selected ? Icons.bookmark : Icons.article_outlined,
+                color: selected ? tokens.primary : tokens.textSecondary,
+              ),
+              title: Text(
+                chapter.title.isNotEmpty ? chapter.title : '第 ${i + 1} 章',
+                style: TextStyle(
+                  color: selected ? tokens.primary : tokens.paperText,
+                ),
+              ),
+              subtitle: Text(
+                '${chapter.chars} 字',
+                style: TextStyle(color: tokens.textSecondary),
+              ),
+              onTap: firstPage == null
+                  ? null
+                  : () {
+                      Navigator.of(sheetCtx).pop();
+                      _pageController.jumpToPage(firstPage);
+                    },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _onPageChanged(int index) async {
     if (index < 0 || index >= _pages.length) return;
     final page = _pages[index];
@@ -257,6 +312,12 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
         ),
         actions: [
           IconButton(
+            key: const Key('reader_toc_button'),
+            tooltip: '目录',
+            onPressed: _loading || _chapters.isEmpty ? null : _showToc,
+            icon: Icon(Icons.list, color: tokens.paperText),
+          ),
+          IconButton(
             key: const Key('reader_font_button'),
             tooltip: '字号',
             onPressed: _loading ? null : _cycleFontScale,
@@ -328,7 +389,10 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
                         ?.copyWith(color: tokens.textSecondary),
                   ),
                   Text(
-                    '${_currentPage + 1} / ${_pages.length}',
+                    _pages.isEmpty
+                        ? '0%'
+                        : '${_currentPage + 1}/${_pages.length} · '
+                            '${((_currentPage + 1) / _pages.length * 100).round()}%',
                     key: const Key('reader_global_indicator'),
                     style: textTheme.labelMedium
                         ?.copyWith(color: tokens.textSecondary),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +10,7 @@ import '../../features/auth/auth_controller.dart';
 import '../api/echo_api.dart';
 import '../api/models.dart';
 import '../media/cover_cache.dart';
+import '../offline/offline_store.dart';
 import '../storage/progress_store.dart';
 import 'audio_service_engine.dart';
 import 'srt_parser.dart';
@@ -354,6 +357,40 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       final manifest = await _api.getAudiobookChapters(audiobook.id);
       chunks = manifest.chunks;
     } on ApiException catch (e) {
+      // 离线回退：断网时用本地缓存的章节清单
+      final localManifest = await OfflineFiles.readManifest(audiobook.id);
+      if (localManifest != null) {
+        try {
+          final json = jsonDecode(localManifest) as Map<String, dynamic>;
+          final burst = ChaptersManifestInfo.fromJson(json);
+          if (burst.chunks.isNotEmpty) {
+            state = state.copyWith(chunks: burst.chunks);
+            final saved = await _progressStore.read(audiobook.id);
+            var idx = 0;
+            var offset = 0;
+            if (saved != null) {
+              final found = burst.chunks.indexWhere((c) => c.n == saved.chunkN);
+              if (found != -1) {
+                final chunkMs =
+                    (burst.chunks[found].durationS * 1000).round();
+                // 与在线路径一致：已听完（末尾 2s 内）则从头重播
+                final listenedToEnd = found == burst.chunks.length - 1 &&
+                    chunkMs > 0 &&
+                    saved.offsetMs >= chunkMs - 2000;
+                if (!listenedToEnd) {
+                  idx = found;
+                  offset = saved.offsetMs;
+                }
+              }
+            }
+            state = state.copyWith(chunks: burst.chunks);
+            await _loadChunk(idx, initialOffsetMs: offset, autoPlay: autoPlay);
+            return;
+          }
+        } catch (_) {
+          // 本地清单损坏，继续走降级/报错
+        }
+      }
       // 兼容尚未分块的旧有声书：若存在整本 audioUrl 则构造单块降级播放。
       if (audiobook.audioUrl.isNotEmpty) {
         chunks = <ChapterChunk>[
@@ -443,11 +480,26 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       clearError: true,
     );
 
-    final audioUri = _api.resolveUri(chunk.audioUrl);
+    final audiobookId = state.audiobook?.id ?? 0;
+    // 优先使用离线下载的本地文件（无网络也能听）；查找失败自动回退网络
+    File? localAudio;
+    if (audiobookId > 0) {
+      try {
+        localAudio = await OfflineFiles.audioFile(audiobookId, chunk.n)
+            .timeout(const Duration(milliseconds: 400));
+      } catch (_) {
+        localAudio = null;
+      }
+    }
+    final audioUri = localAudio != null
+        ? Uri.file(localAudio.path)
+        : _api.resolveUri(chunk.audioUrl);
     // 封面预先落到本地缓存，供 MediaSession/通知栏/锁屏使用
     final cachedCover = await _coverCache.resolve(_coverUrl);
     try {
-      final headers = await _api.authHeaders();
+      final headers = localAudio != null
+          ? const <String, String>{}
+          : await _api.authHeaders();
       final book = state.audiobook;
       final bookTitle = (book?.bookTitle.isNotEmpty ?? false)
           ? book!.bookTitle
@@ -471,8 +523,21 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       await _engine.setSpeed(state.speed);
 
       // 异步拉取当前分块 SRT 字幕（失败或无字幕时自动降级为纯封面模式）。
-      List<SrtCue> parsedCues = const <SrtCue>[];
-      if (chunk.srtUrl.isNotEmpty) {
+      var parsedCues = const <SrtCue>[];
+      // 1) 离线字幕（独立容错）
+      if (audiobookId > 0) {
+        try {
+          final localSrt = await OfflineFiles.srtFile(audiobookId, chunk.n)
+              .timeout(const Duration(milliseconds: 400));
+          if (localSrt != null) {
+            parsedCues = SrtParser.parse(await localSrt.readAsString());
+          }
+        } catch (_) {
+          // 忽略，走网络
+        }
+      }
+      // 2) 网络字幕（本地没有时兜底）
+      if (parsedCues.isEmpty && chunk.srtUrl.isNotEmpty) {
         try {
           final rawSrt = await _api.fetchText(chunk.srtUrl);
           parsedCues = SrtParser.parse(rawSrt);

@@ -167,6 +167,43 @@ void main() {
     expect(saved.chapterIndex, greaterThanOrEqualTo(0));
   });
 
+  testWidgets('目录：打开章节目录并跳转到目标章', (WidgetTester tester) async {
+    final tokenStore = MemoryTokenStore();
+    await tokenStore.write('echo_pat_reader');
+    final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+      ..httpClientAdapter = _ReaderStubAdapter();
+    final api = EchoApi(dio: dio, tokenStore: tokenStore);
+    final readingStore = MemoryReadingStore();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          echoApiProvider.overrideWithValue(api),
+          readingStoreProvider.overrideWithValue(readingStore),
+        ],
+        child: MaterialApp(
+          theme: buildEchoTheme(Brightness.dark, darkTokens),
+          home: const ReaderPageView(book: book),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 阅读百分比展示
+    expect(find.byKey(const Key('reader_global_indicator')), findsOneWidget);
+
+    // 打开目录
+    await tester.tap(find.byKey(const Key('reader_toc_button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('reader_toc_list')), findsOneWidget);
+    expect(find.byKey(const Key('reader_toc_item_2')), findsOneWidget);
+
+    // 跳到第 3 章
+    await tester.tap(find.byKey(const Key('reader_toc_item_2')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('第3章'), findsWidgets);
+  });
+
   testWidgets('恢复上次阅读位置：打开即回到上次页', (WidgetTester tester) async {
     final tokenStore = MemoryTokenStore();
     await tokenStore.write('echo_pat_reader');

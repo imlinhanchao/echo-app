@@ -8,6 +8,7 @@ import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
 import '../reader/reader_page.dart';
+import 'book_detail_page.dart';
 import '../shell/echo_shell.dart' show EchoShell;
 import 'convert_sheet.dart';
 import 'library_controller.dart';
@@ -390,14 +391,15 @@ class _AudiobookRow extends ConsumerWidget {
     return InkWell(
       key: Key('audiobook_card_${item.id}'),
       borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
-      onTap: item.isReady
-          ? () async {
-              await ref
-                  .read(chunkedPlayerProvider.notifier)
-                  .loadAudiobook(item, coverUrl: cover);
-              if (context.mounted) await openPlayer(context);
-            }
-          : null,
+      onTap: () {
+        final book = books.where((b) => b.id == item.bookId).firstOrNull;
+        if (book == null) return;
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BookDetailPage(book: book, audiobook: item),
+          ),
+        );
+      },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space1),
         child: Row(
@@ -488,9 +490,9 @@ class _BookRow extends ConsumerWidget {
     return InkWell(
       key: Key('book_card_${book.id}'),
       borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
-      onTap: () => Navigator.of(
-        context,
-      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPageView(book: book))),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => BookDetailPage(book: book)),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space1),
         child: Row(
