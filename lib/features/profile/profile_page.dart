@@ -122,7 +122,7 @@ class ProfilePage extends ConsumerWidget {
                 key: const Key('profile_about'),
                 leading: Icon(Icons.info_outline, color: tokens.accent),
                 title: const Text('关于'),
-                subtitle: const Text('回声 v0.2.0'),
+                subtitle: const Text('回声 v0.3.0'),
               ),
             ],
           ),
