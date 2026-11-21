@@ -8,7 +8,9 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'core/api/models.dart';
 import 'core/audio/audio_service_engine.dart';
+import 'core/notes/note_store.dart';
 import 'core/offline/offline_store.dart';
+import 'core/stats/stats_store.dart';
 import 'core/settings/theme_mode_controller.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
@@ -33,6 +35,9 @@ Future<void> main() async {
   }
   // 离线目录初始化（播放路径只读缓存值，不触发插件调用）。
   await OfflineFiles.init();
+  // 本地收听统计
+  await StatsStore.instance.load();
+  await NoteStore.instance.load();
   // 恢复亮/暗偏好（dark-first，默认深色）。
   await ThemeModeController.init();
   // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。
@@ -83,7 +88,7 @@ class EchoApp extends StatelessWidget {
 
   Widget _materialApp(bool darkMode) {
     return MaterialApp(
-      title: 'Echo · 回声',
+      title: '回声',
       debugShowCheckedModeBanner: false,
       theme: lightTheme ?? theme,
       darkTheme: theme,
@@ -120,7 +125,7 @@ class _Splash extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              'Echo',
+              '回声',
               style: Theme.of(context).textTheme.displaySmall?.copyWith(
                     color: tokens.primary,
                     fontWeight: FontWeight.bold,

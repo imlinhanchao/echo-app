@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/reader/reading_store.dart';
+import '../../core/stats/stats_store.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
@@ -193,6 +194,7 @@ class _ReaderPageViewState extends ConsumerState<ReaderPageView> {
       _chapterIndex = page.chapterIndex;
       _charOffset = page.startChar;
     });
+    StatsStore.instance.addPageRead();
     await ref.read(readingStoreProvider).write(
           ReadingPosition(
             bookId: widget.book.id,

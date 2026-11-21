@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/export/book_exporter.dart';
 import '../../core/offline/offline_store.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_metrics.dart';
@@ -73,6 +74,33 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     await openPlayer(context);
   }
 
+  Future<void> _exportEpub() async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
+      const SnackBar(content: Text('正在导出…')),
+    );
+    try {
+      final path = await BookExporter.export(
+        ref.read(echoApiProvider),
+        widget.book,
+      );
+      if (!mounted) return;
+      if (path == null) {
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('导出失败：文件为空')),
+        );
+        return;
+      }
+      messenger?.showSnackBar(
+        SnackBar(content: Text('已导出到：$path')),
+      );
+      await BookExporter.share(path, title: widget.book.title);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      messenger?.showSnackBar(SnackBar(content: Text('导出失败：${e.message}')));
+    }
+  }
+
   Future<void> _openReader() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -99,7 +127,27 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
 
     return Scaffold(
       key: const Key('book_detail_page'),
-      appBar: AppBar(title: const Text('书籍详情')),
+      appBar: AppBar(
+        title: const Text('书籍详情'),
+        actions: [
+          PopupMenuButton<String>(
+            key: const Key('detail_menu'),
+            onSelected: (value) async {
+              if (value == 'export') await _exportEpub();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'export',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.file_download_outlined),
+                  title: Text('导出 EPUB'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
           EchoMetrics.space3,

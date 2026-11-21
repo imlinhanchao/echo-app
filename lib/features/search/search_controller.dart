@@ -10,12 +10,53 @@ import '../auth/auth_controller.dart';
 class SearchFilters {
   const SearchFilters({
     this.extensions = const <String>[],
+    this.languages = const <String>[],
+    this.yearFrom = 0,
+    this.yearTo = 0,
     this.order = '',
   });
 
   /// 扩展名筛选（如仅 EPUB：`['EPUB']`）。
   final List<String> extensions;
+
+  /// 语言筛选（zlib 使用 `chinese`/`english`/`japanese` 等值）。
+  final List<String> languages;
+
+  /// 出版年份范围（0 表示不限）。
+  final int yearFrom;
+  final int yearTo;
+
+  /// 排序：空=相关度，`popular`=最热，`date`=最新。
   final String order;
+
+  bool get isDefault =>
+      extensions.isEmpty &&
+      languages.isEmpty &&
+      yearFrom == 0 &&
+      yearTo == 0 &&
+      order.isEmpty;
+
+  /// 当前生效的筛选条数（用于按钮上的角标）。
+  int get activeCount =>
+      (extensions.isEmpty ? 0 : 1) +
+      (languages.isEmpty ? 0 : 1) +
+      (order.isEmpty ? 0 : 1) +
+      ((yearFrom > 0 || yearTo > 0) ? 1 : 0);
+
+  SearchFilters copyWith({
+    List<String>? extensions,
+    List<String>? languages,
+    int? yearFrom,
+    int? yearTo,
+    String? order,
+  }) =>
+      SearchFilters(
+        extensions: extensions ?? this.extensions,
+        languages: languages ?? this.languages,
+        yearFrom: yearFrom ?? this.yearFrom,
+        yearTo: yearTo ?? this.yearTo,
+        order: order ?? this.order,
+      );
 }
 
 @immutable
@@ -119,6 +160,9 @@ class SearchController extends StateNotifier<SearchState> {
         query: query,
         page: page,
         extensions: _filters.extensions,
+        languages: _filters.languages,
+        yearFrom: _filters.yearFrom,
+        yearTo: _filters.yearTo,
         order: _filters.order,
       );
       state = state.copyWith(
@@ -138,3 +182,6 @@ final StateNotifierProvider<SearchController, SearchState>
     StateNotifierProvider<SearchController, SearchState>((ref) {
   return SearchController(ref.watch(echoApiProvider));
 });
+
+/// 与 flutter/material 的同名类区分。
+typedef SearchControllerImpl = SearchController;

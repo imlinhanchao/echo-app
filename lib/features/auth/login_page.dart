@@ -68,7 +68,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Echo',
+                  '回声',
                   key: const Key('login_title'),
                   textAlign: TextAlign.center,
                   style: textTheme.displaySmall
@@ -76,7 +76,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ),
                 const SizedBox(height: EchoMetrics.space1),
                 Text(
-                  '回声 · 听看一体书客户端',
+                  '听书 · 看书 · 转有声书',
                   textAlign: TextAlign.center,
                   style: textTheme.bodyLarge?.copyWith(color: tokens.textSecondary),
                 ),

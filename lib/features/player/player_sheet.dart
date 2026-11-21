@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/notes/note_store.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -200,15 +201,20 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
   }
 
   void _centerCue(int active, int totalCues, {int attempt = 0}) {
-    if (!mounted) return;
+    // 页面已销毁或列表未挂载时不能滚动，否则触发 ScrollPosition.attached 断言
+    if (!mounted || !_textScroll.hasClients) return;
     final ctx = _cueKeys[active]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: Duration(milliseconds: attempt == 0 ? 320 : 200),
-        curve: Curves.easeOut,
-      );
+    if (ctx != null && ctx.mounted) {
+      try {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: Duration(milliseconds: attempt == 0 ? 320 : 200),
+          curve: Curves.easeOut,
+        );
+      } catch (_) {
+        // 滚动过程中目标被回收，忽略
+      }
       return;
     }
     if (attempt >= 3 || !_textScroll.hasClients || totalCues <= 1) return;
@@ -316,6 +322,13 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                           ),
                         ],
                       ),
+                    ),
+                    IconButton(
+                      key: const Key('player_notes_button'),
+                      tooltip: '时间戳笔记',
+                      onPressed: () => _showNotes(context, state),
+                      icon: Icon(Icons.sticky_note_2_outlined,
+                          color: tokens.textPrimary),
                     ),
                     _CircleAction(
                       key: const Key('player_top_prev_chapter'),
@@ -616,6 +629,157 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
         ),
       ),
     );
+  }
+
+  /// 时间戳笔记：在当前播放位置打点，点击笔记可跳转。
+  Future<void> _showNotes(BuildContext context, ChunkedPlayerState state) async {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final audiobookId = state.audiobook?.id ?? 0;
+    final positionMs = state.globalPositionMs;
+    final chapterTitle = state.currentChunk?.title ?? '';
+    final controller = TextEditingController(
+      text: state.activeCue?.text ?? '',
+    );
+    final player = ref.read(chunkedPlayerProvider.notifier);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom,
+        ),
+        child: StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            final notes = NoteStore.instance.notesFor(audiobookId);
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(EchoMetrics.space3),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '笔记 · 当前位置 ${formatDurationMs(positionMs)}',
+                      key: const Key('notes_sheet_title'),
+                      style: Theme.of(sheetCtx).textTheme.titleSmall?.copyWith(
+                            color: tokens.textPrimary,
+                          ),
+                    ),
+                    const SizedBox(height: EchoMetrics.space2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const Key('note_input'),
+                            controller: controller,
+                            decoration: const InputDecoration(
+                              hintText: '记点什么…',
+                              isDense: true,
+                            ),
+                            maxLines: 2,
+                          ),
+                        ),
+                        const SizedBox(width: EchoMetrics.space1),
+                        FilledButton(
+                          key: const Key('note_add'),
+                          onPressed: () async {
+                            final text = controller.text.trim();
+                            if (text.isEmpty) return;
+                            await NoteStore.instance.add(
+                              audiobookId: audiobookId,
+                              positionMs: positionMs,
+                              text: text,
+                              chapterTitle: chapterTitle,
+                            );
+                            controller.clear();
+                            setSheetState(() {});
+                          },
+                          child: const Text('添加'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: EchoMetrics.space2),
+                    if (notes.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: EchoMetrics.space3,
+                        ),
+                        child: Text(
+                          '还没有笔记。听到有感触的地方，点「添加」记下来。',
+                          style: Theme.of(sheetCtx)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: tokens.textSecondary),
+                        ),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 280),
+                        child: ListView.builder(
+                          key: const Key('notes_list'),
+                          shrinkWrap: true,
+                          itemCount: notes.length,
+                          itemBuilder: (_, i) {
+                            final note = notes[i];
+                            return ListTile(
+                              key: Key('note_item_${note.id}'),
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: tokens.primary.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  note.positionLabel,
+                                  style: Theme.of(sheetCtx)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(color: tokens.primary),
+                                ),
+                              ),
+                              title: Text(
+                                note.text,
+                                style: TextStyle(color: tokens.textPrimary),
+                              ),
+                              subtitle: note.chapterTitle.isEmpty
+                                  ? null
+                                  : Text(
+                                      note.chapterTitle,
+                                      style: TextStyle(
+                                        color: tokens.textSecondary,
+                                      ),
+                                    ),
+                              onTap: () {
+                                Navigator.of(sheetCtx).pop();
+                                player.seekToMs(note.positionMs);
+                              },
+                              trailing: IconButton(
+                                key: Key('note_delete_${note.id}'),
+                                icon: Icon(Icons.close, size: 18),
+                                onPressed: () {
+                                  NoteStore.instance.remove(note.id);
+                                  setSheetState(() {});
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    controller.dispose();
   }
 
   void _showSleepDialog(BuildContext context, WidgetRef ref) {

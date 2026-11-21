@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/stats/stats_store.dart';
 import '../../core/settings/theme_mode_controller.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -63,6 +64,8 @@ class ProfilePage extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: EchoMetrics.space2),
+        _StatsCard(),
+        const SizedBox(height: EchoMetrics.space2),
         Card(
           child: Column(
             children: [
@@ -119,7 +122,7 @@ class ProfilePage extends ConsumerWidget {
                 key: const Key('profile_about'),
                 leading: Icon(Icons.info_outline, color: tokens.accent),
                 title: const Text('关于'),
-                subtitle: const Text('Echo · 回声 v0.1.0 · Phase 2 获取闭环'),
+                subtitle: const Text('回声 v0.2.0'),
               ),
             ],
           ),
@@ -132,6 +135,81 @@ class ProfilePage extends ConsumerWidget {
           label: const Text('退出登录'),
         ),
       ],
+    );
+  }
+}
+
+
+/// 收听统计卡（设计图 ui-mobile-profile）：本周时长 / 连续天数 / 已听完本数。
+class _StatsCard extends StatefulWidget {
+  @override
+  State<_StatsCard> createState() => _StatsCardState();
+}
+
+class _StatsCardState extends State<_StatsCard> {
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+    final stats = StatsStore.instance;
+
+    String formatMs(int ms) {
+      if (ms < 60000) return '${(ms / 1000).round()} 秒';
+      final minutes = ms ~/ 60000;
+      if (minutes < 60) return '$minutes 分钟';
+      final hours = minutes ~/ 60;
+      final rest = minutes % 60;
+      return rest == 0 ? '$hours 小时' : '$hours 小时 $rest 分';
+    }
+
+    Widget item(String value, String label, {Key? key}) => Expanded(
+          child: Column(
+            children: [
+              Text(
+                value,
+                key: key,
+                style: textTheme.titleLarge?.copyWith(
+                  color: tokens.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: textTheme.bodySmall
+                    ?.copyWith(color: tokens.textSecondary),
+              ),
+            ],
+          ),
+        );
+
+    return Card(
+      key: const Key('profile_stats_card'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: EchoMetrics.space2,
+          vertical: EchoMetrics.space3,
+        ),
+        child: Row(
+          children: [
+            item(
+              formatMs(stats.weekListenMs),
+              '本周收听',
+              key: const Key('stat_week_listen'),
+            ),
+            item(
+              '${stats.streakDays} 天',
+              '连续收听',
+              key: const Key('stat_streak'),
+            ),
+            item(
+              '${stats.finishedCount} 本',
+              '已听完',
+              key: const Key('stat_finished'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

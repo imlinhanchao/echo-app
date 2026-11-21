@@ -137,6 +137,19 @@ class EchoApi {
         await _getJson('/api/audiobooks/$id/chapters'),
       );
 
+  /// 下载书籍文件字节（EPUB 导出用）。
+  Future<List<int>> downloadBookBytes(int bookId) async {
+    try {
+      final response = await _dio.get<List<int>>(
+        '/api/files/books/$bookId',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return response.data ?? const <int>[];
+    } on DioException catch (e) {
+      throw ApiException.fromResponse(e.response);
+    }
+  }
+
   /// 拉取 SRT 字幕文本（如 `/api/files/audiobooks/1?variant=chapter_srt&n=0`）。
   Future<String> fetchText(String pathOrUrl) async {
     try {

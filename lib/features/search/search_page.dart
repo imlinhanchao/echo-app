@@ -8,6 +8,8 @@ import '../auth/auth_controller.dart';
 import '../jobs/jobs_controller.dart';
 import '../providers/provider_account_page.dart';
 import 'search_controller.dart';
+// flutter/material 自带同名 SearchController，这里显式指向本项目的控制器类型
+typedef Record = void;
 
 /// 发现 Tab：跨书源搜索（zlib）→ 搜索历史 / 结果列表 → 详情弹层 / 一键下载。
 class SearchPage extends ConsumerStatefulWidget {
@@ -63,6 +65,161 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         setState(() => _pendingRefs.remove(bookRef));
       }
     }
+  }
+
+  /// 高级筛选：语言 / 年份 / 排序。
+  Future<void> _showFilters(SearchControllerImpl controller) async {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    var languages = List<String>.of(controller.filters.languages);
+    var yearFrom = controller.filters.yearFrom;
+    var yearTo = controller.filters.yearTo;
+    var order = controller.filters.order;
+
+    const languageOptions = <String, String>{
+      'chinese': '中文',
+      'english': '英文',
+      'japanese': '日文',
+      'german': '德文',
+      'french': '法文',
+      'spanish': '西班牙文',
+      'russian': '俄文',
+    };
+    const orderOptions = <String, String>{
+      '': '相关度',
+      'popular': '最热',
+      'date': '最新',
+    };
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(EchoMetrics.space3),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('筛选',
+                    style: Theme.of(sheetCtx)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(color: tokens.textPrimary)),
+                const SizedBox(height: EchoMetrics.space2),
+                Text('语言',
+                    style: Theme.of(sheetCtx)
+                        .textTheme
+                        .labelLarge
+                        ?.copyWith(color: tokens.textSecondary)),
+                const SizedBox(height: EchoMetrics.space1),
+                Wrap(
+                  spacing: EchoMetrics.space1,
+                  runSpacing: EchoMetrics.space1,
+                  children: [
+                    for (final entry in languageOptions.entries)
+                      FilterChip(
+                        key: Key('filter_lang_${entry.key}'),
+                        label: Text(entry.value),
+                        selected: languages.contains(entry.key),
+                        onSelected: (v) => setSheetState(() {
+                          v ? languages.add(entry.key)
+                            : languages.remove(entry.key);
+                        }),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: EchoMetrics.space2),
+                Text('出版年份',
+                    style: Theme.of(sheetCtx)
+                        .textTheme
+                        .labelLarge
+                        ?.copyWith(color: tokens.textSecondary)),
+                const SizedBox(height: EchoMetrics.space1),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        key: const Key('filter_year_from'),
+                        initialValue: yearFrom > 0 ? '$yearFrom' : '',
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(hintText: '起始年'),
+                        onChanged: (v) => yearFrom = int.tryParse(v) ?? 0,
+                      ),
+                    ),
+                    const SizedBox(width: EchoMetrics.space2),
+                    Expanded(
+                      child: TextFormField(
+                        key: const Key('filter_year_to'),
+                        initialValue: yearTo > 0 ? '$yearTo' : '',
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(hintText: '结束年'),
+                        onChanged: (v) => yearTo = int.tryParse(v) ?? 0,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: EchoMetrics.space2),
+                Text('排序',
+                    style: Theme.of(sheetCtx)
+                        .textTheme
+                        .labelLarge
+                        ?.copyWith(color: tokens.textSecondary)),
+                const SizedBox(height: EchoMetrics.space1),
+                Wrap(
+                  spacing: EchoMetrics.space1,
+                  children: [
+                    for (final entry in orderOptions.entries)
+                      ChoiceChip(
+                        key: Key('filter_order_${entry.key.isEmpty ? 'relevance' : entry.key}'),
+                        label: Text(entry.value),
+                        selected: order == entry.key,
+                        onSelected: (_) =>
+                            setSheetState(() => order = entry.key),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: EchoMetrics.space3),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        key: const Key('filter_reset'),
+                        onPressed: () => setSheetState(() {
+                          languages = <String>[];
+                          yearFrom = 0;
+                          yearTo = 0;
+                          order = '';
+                        }),
+                        child: const Text('重置'),
+                      ),
+                    ),
+                    const SizedBox(width: EchoMetrics.space2),
+                    Expanded(
+                      child: FilledButton(
+                        key: const Key('filter_apply'),
+                        onPressed: () {
+                          Navigator.of(sheetCtx).pop();
+                          controller.setFilters(
+                            controller.filters.copyWith(
+                              languages: languages,
+                              yearFrom: yearFrom,
+                              yearTo: yearTo,
+                              order: order,
+                            ),
+                          );
+                        },
+                        child: const Text('应用'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// 搜索结果详情弹层（设计图 ui-mobile-search：行点击看简介再下载）。
@@ -145,11 +302,22 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 onSelected: (v) {
                   setState(() => _epubOnly = v);
                   controller.setFilters(
-                    SearchFilters(
+                    controller.filters.copyWith(
                       extensions: v ? const ['EPUB'] : const [],
                     ),
                   );
                 },
+              ),
+              const SizedBox(width: EchoMetrics.space1),
+              ActionChip(
+                key: const Key('search_filter_button'),
+                avatar: const Icon(Icons.tune, size: 16),
+                label: Text(
+                  controller.filters.activeCount == 0
+                      ? '筛选'
+                      : '筛选 ${controller.filters.activeCount}',
+                ),
+                onPressed: () => _showFilters(controller),
               ),
             ],
           ),

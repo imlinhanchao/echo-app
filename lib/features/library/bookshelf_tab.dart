@@ -56,6 +56,9 @@ class BookshelfTab extends ConsumerWidget {
     final libState = ref.watch(libraryControllerProvider);
     final libController = ref.read(libraryControllerProvider.notifier);
     final playerState = ref.watch(chunkedPlayerProvider);
+    // 只看真正有意义的条目：完成 / 转换中；失败与取消的不占首页
+    final shelfAudios =
+        libState.audiobooks.where((a) => a.showOnShelf).toList();
 
     final hour = DateTime.now().hour;
     final greeting = hour < 6
@@ -118,14 +121,14 @@ class BookshelfTab extends ConsumerWidget {
             ),
 
           // 有声书列表（主列表，对齐设计图）
-          if (libState.isLoading && libState.audiobooks.isEmpty)
+          if (libState.isLoading && shelfAudios.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space4),
               child: Center(
                 child: CircularProgressIndicator(color: tokens.primary),
               ),
             )
-          else if (libState.audiobooks.isEmpty)
+          else if (shelfAudios.isEmpty)
             Padding(
               key: const Key('audiobooks_empty'),
               padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space4),
@@ -161,7 +164,7 @@ class BookshelfTab extends ConsumerWidget {
               ),
             )
           else
-            for (final item in libState.audiobooks)
+            for (final item in shelfAudios)
               _AudiobookRow(item: item, books: libState.books),
 
           if (libState.books.isNotEmpty) ...[

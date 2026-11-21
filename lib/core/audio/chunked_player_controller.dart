@@ -11,6 +11,7 @@ import '../api/echo_api.dart';
 import '../api/models.dart';
 import '../media/cover_cache.dart';
 import '../offline/offline_store.dart';
+import '../stats/stats_store.dart';
 import '../storage/progress_store.dart';
 import 'audio_service_engine.dart';
 import 'srt_parser.dart';
@@ -471,6 +472,7 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   }) async {
     if (index < 0 || index >= state.chunks.length) return;
     final chunk = state.chunks[index];
+    _lastTickedMs = initialOffsetMs;
     state = state.copyWith(
       currentChunkIndex: index,
       positionMs: initialOffsetMs,
@@ -696,8 +698,16 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     state = state.copyWith(clearSleepUntil: true);
   }
 
+  int _lastTickedMs = 0;
+
   void _onPosition(Duration pos) {
     final ms = pos.inMilliseconds;
+    // 累计实际收听时长（仅统计正常推进，跳过 seek 跳变）
+    final delta = ms - _lastTickedMs;
+    if (delta > 0 && delta <= 5000) {
+      StatsStore.instance.addListenMs(delta);
+    }
+    _lastTickedMs = ms;
     final cueIdx = SrtParser.activeCueIndex(state.cues, ms);
     if (ms != state.positionMs || cueIdx != state.activeCueIndex) {
       state = state.copyWith(positionMs: ms, activeCueIndex: cueIdx);
@@ -725,6 +735,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       await _engine.pause();
       state = state.copyWith(isPlaying: false);
       await _saveProgress();
+      // 整本听完：计入「已听完本数」
+      final bookId = state.audiobook?.id;
+      if (bookId != null) StatsStore.instance.markFinished(bookId);
     }
   }
 

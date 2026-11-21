@@ -242,6 +242,13 @@ class AudiobookInfo {
 
   bool get isReady => status == 'done';
   bool get isRunning => status == 'running' || status == 'queued';
+
+  /// 失败/取消的产物不在书架上展示（避免首页被脏数据占满）。
+  bool get isFailedOrCancelled =>
+      status == 'failed' || status == 'cancelled' || status == 'error';
+
+  /// 书架可展示：已完成或正在转换。
+  bool get showOnShelf => isReady || isRunning;
 }
 
 // ---- 分章清单（chapters.go chunkView + audiobook.ChunkInfo）----
