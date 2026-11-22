@@ -88,6 +88,9 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   /// 上一次自动翻页匹配的字幕文本，避免同一句反复触发翻页。
   String? _lastAutoPagedCue;
 
+  /// 分页代数令牌：尺寸/字号变化或页面销毁时自增，立即中止旧的后台分页循环，防止并发卡死。
+  int _paginationGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +103,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
 
   @override
   void dispose() {
+    _paginationGen++;
     _pageController.dispose();
     super.dispose();
   }
@@ -164,9 +168,12 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
   }
 
-  /// 按当前版心尺寸精确分页（两阶段：优先排版目标章实现首屏即显，其余后台增量合并）。
+  /// 按当前版心尺寸精确分页（两阶段：优先排版目标章实现首屏即显，其余逐章让帧增量合并）。
   Future<void> _repaginate(Size size, EchoTokens tokens) async {
     if (_chapters.isEmpty) return;
+    // 立即锁定当前尺寸与代数，彻底避免 build 重入引发并发分页风暴（ANR 根因）
+    _layoutSize = size;
+    final gen = ++_paginationGen;
     final style = _textStyle(tokens);
     final textScaler = MediaQuery.textScalerOf(context);
 
@@ -175,7 +182,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     );
     final initialIdx = targetChapterIdx >= 0 ? targetChapterIdx : 0;
 
-    // 阶段 1：优先排版目标章，保证首屏在极短时间内立即可读
+    // 阶段 1：优先排版目标章，保证首屏立即可读
     final targetChapter = _chapters[initialIdx];
     final targetPages = paginateChapterBySize(
       chapterIndex: targetChapter.index,
@@ -189,36 +196,52 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       maxHeight: size.height,
     );
 
-    if (!mounted) return;
+    if (!mounted || gen != _paginationGen) return;
 
-    if (_pages.isEmpty) {
-      final initialTarget = pageIndexForOffset(
-        targetPages,
-        _chapterIndex,
-        _charOffset,
-      );
+    final initialTarget = pageIndexForOffset(
+      targetPages,
+      _chapterIndex,
+      _charOffset,
+    );
+    setState(() {
+      _pages = targetPages;
+      _currentPage = initialTarget;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pageController.hasClients) return;
+      if (_pageController.page?.round() != initialTarget) {
+        _pageController.jumpToPage(initialTarget);
+      }
+    });
+
+    if (_chapters.length <= 1) return;
+
+    // 阶段 2：逐章让出主线程增量排版其余章节，并定期刷新 _pages，确保超大书籍也能立刻往后翻页与跳章
+    final allPages = <ReaderPage>[];
+    void commitPartial() {
+      if (!mounted || gen != _paginationGen) return;
+      final target = pageIndexForOffset(allPages, _chapterIndex, _charOffset);
       setState(() {
-        _pages = targetPages;
-        _currentPage = initialTarget;
-        _layoutSize = size;
+        _pages = List<ReaderPage>.of(allPages);
+        _currentPage = target;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_pageController.hasClients) return;
-        if (_pageController.page?.round() != initialTarget) {
-          _pageController.jumpToPage(initialTarget);
+        if (!mounted || gen != _paginationGen || !_pageController.hasClients) {
+          return;
+        }
+        if (_pageController.page?.round() != target) {
+          _pageController.jumpToPage(target);
         }
       });
     }
 
-    if (_chapters.length <= 1) return;
-
-    // 阶段 2：增量排版全书其余章节，并在排完后统一整合
-    final allPages = <ReaderPage>[];
     for (var i = 0; i < _chapters.length; i++) {
-      if (!mounted) return;
+      if (!mounted || gen != _paginationGen) return;
       if (i == initialIdx) {
         allPages.addAll(targetPages);
       } else {
+        await Future<void>.delayed(const Duration(milliseconds: 4));
+        if (!mounted || gen != _paginationGen) return;
         final chapter = _chapters[i];
         allPages.addAll(
           paginateChapterBySize(
@@ -234,29 +257,16 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           ),
         );
       }
-      if (i % 2 == 1) await Future<void>.delayed(Duration.zero);
+      // 刚排完当前章的下一章，或每排完 8 章时，立即刷新一次可翻页范围
+      if (i == initialIdx + 1 || (i > initialIdx && (i - initialIdx) % 8 == 0)) {
+        commitPartial();
+      }
     }
 
-    if (!mounted) return;
-    final finalTarget = pageIndexForOffset(
-      allPages,
-      _chapterIndex,
-      _charOffset,
-    );
-    setState(() {
-      _pages = allPages;
-      _currentPage = finalTarget;
-      _layoutSize = size;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_pageController.hasClients) return;
-      if (_pageController.page?.round() != finalTarget) {
-        _pageController.jumpToPage(finalTarget);
-      }
-    });
+    commitPartial();
   }
 
-  /// 章节目录：跳到该章第一页。
+  /// 章节目录：跳到该章第一页（若后台分页尚未覆盖到该章，则立即以该章优先重排）。
   void _showToc() {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     // 每章第一页的下标
@@ -298,12 +308,21 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                 '${chapter.chars} 字',
                 style: TextStyle(color: tokens.textSecondary),
               ),
-              onTap: firstPage == null
-                  ? null
-                  : () {
-                      Navigator.of(sheetCtx).pop();
-                      _pageController.jumpToPage(firstPage);
-                    },
+              onTap: () {
+                Navigator.of(sheetCtx).pop();
+                if (firstPage != null) {
+                  _pageController.jumpToPage(firstPage);
+                } else {
+                  setState(() {
+                    _chapterIndex = chapter.index;
+                    _charOffset = 0;
+                  });
+                  final size = _layoutSize;
+                  if (size != null) {
+                    _repaginate(size, tokens);
+                  }
+                }
+              },
             );
           },
         ),

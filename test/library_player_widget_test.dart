@@ -107,6 +107,10 @@ void main() {
   testWidgets('书架加载有声书 → 点击播放浮现迷你播放条 → 展开 v3 跟读播放器', (
     WidgetTester tester,
   ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
     final tokenStore = MemoryTokenStore();
     await tokenStore.write('echo_pat_test');
     final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))

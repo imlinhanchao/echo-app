@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../library/book_detail_page.dart';
@@ -14,8 +15,8 @@ import 'jobs_controller.dart';
 
 enum _JobFilter { all, active, completed }
 
-/// 任务中心 Tab（对齐设计 §4.1）：
-/// 全部 / 进行中 / 已完成筛选 + 书名/封面/音色/章级进度 + 完成直达「立即收听」。
+/// 任务中心 Tab（高保真对齐 ui-mobile-tasks.png）：
+/// 发光筛选胶囊（全部/进行中/已完成）+ 细高光描边卡片 + 分段式转换进度条 + 描边音色标签 + 立即收听。
 class JobsPage extends ConsumerStatefulWidget {
   const JobsPage({super.key, this.isActive = true});
 
@@ -62,6 +63,9 @@ class _JobsPageState extends ConsumerState<JobsPage> {
     final textTheme = Theme.of(context).textTheme;
     final state = ref.watch(jobsControllerProvider);
     final controller = ref.read(jobsControllerProvider.notifier);
+    final hasPlayer = ref.watch(
+      chunkedPlayerProvider.select((s) => s.hasBook),
+    );
 
     final activeCount = state.jobs.where((j) => j.isActive).length;
     final doneCount = state.jobs.where((j) => j.status == JobStatus.done).length;
@@ -76,18 +80,19 @@ class _JobsPageState extends ConsumerState<JobsPage> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
-            EchoMetrics.space2,
+            EchoMetrics.space3,
+            EchoMetrics.space3,
             EchoMetrics.space2,
             EchoMetrics.space1,
-            0,
           ),
           child: Row(
             children: [
               Text(
-                '任务',
+                '任务中心',
                 key: const Key('jobs_title'),
                 style: textTheme.headlineSmall?.copyWith(
                   color: tokens.textPrimary,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const Spacer(),
@@ -100,36 +105,35 @@ class _JobsPageState extends ConsumerState<JobsPage> {
             ],
           ),
         ),
-        // 顶部三态筛选：全部 / 进行中 / 已完成
+        // 顶部三态发光胶囊筛选：全部 / 进行中 / 已完成
         Padding(
           padding: const EdgeInsets.fromLTRB(
-            EchoMetrics.space2,
+            EchoMetrics.space3,
             EchoMetrics.space1,
+            EchoMetrics.space3,
             EchoMetrics.space2,
-            EchoMetrics.space1,
           ),
           child: Row(
             children: [
-              ChoiceChip(
+              _GlowFilterPill(
                 key: const Key('jobs_filter_all'),
-                label: Text('全部 (${state.jobs.length})'),
+                label: '全部 (${state.jobs.length})',
                 selected: _filter == _JobFilter.all,
-                onSelected: (_) => setState(() => _filter = _JobFilter.all),
+                onTap: () => setState(() => _filter = _JobFilter.all),
               ),
               const SizedBox(width: EchoMetrics.space1),
-              ChoiceChip(
+              _GlowFilterPill(
                 key: const Key('jobs_filter_active'),
-                label: Text('进行中 ($activeCount)'),
+                label: '进行中 ($activeCount)',
                 selected: _filter == _JobFilter.active,
-                onSelected: (_) => setState(() => _filter = _JobFilter.active),
+                onTap: () => setState(() => _filter = _JobFilter.active),
               ),
               const SizedBox(width: EchoMetrics.space1),
-              ChoiceChip(
+              _GlowFilterPill(
                 key: const Key('jobs_filter_completed'),
-                label: Text('已完成 ($doneCount)'),
+                label: '已完成 ($doneCount)',
                 selected: _filter == _JobFilter.completed,
-                onSelected: (_) =>
-                    setState(() => _filter = _JobFilter.completed),
+                onTap: () => setState(() => _filter = _JobFilter.completed),
               ),
             ],
           ),
@@ -165,10 +169,15 @@ class _JobsPageState extends ConsumerState<JobsPage> {
                 )
               : ListView.separated(
                   key: const Key('jobs_list'),
-                  padding: const EdgeInsets.all(EchoMetrics.space2),
+                  padding: EdgeInsets.fromLTRB(
+                    EchoMetrics.space3,
+                    0,
+                    EchoMetrics.space3,
+                    hasPlayer ? 104 : EchoMetrics.space3,
+                  ),
                   itemCount: filteredJobs.length,
                   separatorBuilder: (_, _) =>
-                      const SizedBox(height: EchoMetrics.space1),
+                      const SizedBox(height: EchoMetrics.space2),
                   itemBuilder: (context, index) {
                     final job = filteredJobs[index];
                     return _JobCard(job: job);
@@ -176,6 +185,62 @@ class _JobsPageState extends ConsumerState<JobsPage> {
                 ),
         ),
       ],
+    );
+  }
+}
+
+/// 设计稿风格发光筛选胶囊（ui-mobile-tasks.png）。
+class _GlowFilterPill extends StatelessWidget {
+  const _GlowFilterPill({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: EchoMetrics.motionFast,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? tokens.primary.withValues(alpha: 0.28)
+                : tokens.surfaceElevated.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? tokens.primary.withValues(alpha: 0.75)
+                  : Colors.white.withValues(alpha: 0.08),
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: tokens.primary.withValues(alpha: 0.35),
+                      blurRadius: 14,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: selected ? tokens.textOnPrimary : tokens.textSecondary,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -209,8 +274,7 @@ class _JobCard extends ConsumerWidget {
         book = libState.books.where((b) => b.id == bookId).firstOrNull;
       }
     } else if (job.kind == JobKind.download) {
-      final bookId =
-          (job.result?['book_id'] as num?)?.toInt() ?? job.refId;
+      final bookId = (job.result?['book_id'] as num?)?.toInt() ?? job.refId;
       if (bookId != null) {
         book = libState.books.where((b) => b.id == bookId).firstOrNull;
       }
@@ -253,200 +317,249 @@ class _JobCard extends ConsumerWidget {
       JobStatus.unknown => ('未知', tokens.textSecondary),
     };
 
-    return Card(
+    return Container(
       key: Key('job_card_${job.id}'),
-      child: Padding(
-        padding: const EdgeInsets.all(EchoMetrics.space2),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                if (book != null)
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      BookCover(url: book.coverUrl, width: 42, height: 54),
-                      if (job.status == JobStatus.done)
-                        Positioned(
-                          right: -4,
-                          bottom: -4,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: tokens.surfaceElevated,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.check_circle,
-                              size: 16,
-                              color: tokens.success,
-                            ),
+      padding: const EdgeInsets.all(EchoMetrics.space2),
+      decoration: echoElevatedCardDecoration(context, radius: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (book != null)
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    BookCover(url: book.coverUrl, width: 44, height: 56),
+                    if (job.status == JobStatus.done)
+                      Positioned(
+                        right: -4,
+                        bottom: -4,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: tokens.surfaceElevated,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.check_circle,
+                            size: 18,
+                            color: tokens.success,
                           ),
                         ),
-                    ],
-                  )
-                else
-                  Icon(
-                    job.status == JobStatus.done
-                        ? Icons.check_circle
-                        : (job.kind == JobKind.download
-                              ? Icons.file_download
-                              : Icons.graphic_eq),
-                    color: job.status == JobStatus.done
-                        ? tokens.success
-                        : (job.kind == JobKind.download
-                              ? tokens.accent
-                              : tokens.primary),
-                  ),
-                const SizedBox(width: EchoMetrics.space2),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        resolvedTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.titleSmall?.copyWith(
-                          color: tokens.textPrimary,
-                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        voiceMeta.isNotEmpty
-                            ? '${job.kindLabel} · $voiceMeta'
-                            : '${job.kindLabel} #${job.id}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.labelSmall?.copyWith(
-                          color: tokens.textSecondary,
-                        ),
+                  ],
+                )
+              else
+                Icon(
+                  job.status == JobStatus.done
+                      ? Icons.check_circle
+                      : (job.kind == JobKind.download
+                            ? Icons.file_download
+                            : Icons.graphic_eq),
+                  color: job.status == JobStatus.done
+                      ? tokens.success
+                      : (job.kind == JobKind.download
+                            ? tokens.accent
+                            : tokens.primary),
+                ),
+              const SizedBox(width: EchoMetrics.space2),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      resolvedTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: tokens.textPrimary,
+                        fontWeight: FontWeight.w600,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          statusLabel,
+                          key: Key('job_status_${job.id}'),
+                          style: textTheme.labelSmall?.copyWith(
+                            color: statusColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (voiceMeta.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: tokens.primary.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: tokens.primary.withValues(alpha: 0.45),
+                                ),
+                              ),
+                              child: Text(
+                                voiceMeta,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.labelSmall?.copyWith(
+                                  color: tokens.primaryHover,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(width: EchoMetrics.space1),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: EchoMetrics.space1,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    statusLabel,
-                    key: Key('job_status_${job.id}'),
-                    style: textTheme.labelSmall?.copyWith(color: statusColor),
-                  ),
+              ),
+              if (job.isActive)
+                IconButton(
+                  key: Key('job_cancel_${job.id}'),
+                  tooltip: '取消任务',
+                  icon: Icon(Icons.close, color: tokens.textSecondary),
+                  onPressed: () async {
+                    final error = await controller.cancel(job.id);
+                    if (error != null && context.mounted) {
+                      ScaffoldMessenger.maybeOf(
+                        context,
+                      )?.showSnackBar(SnackBar(content: Text(error)));
+                    }
+                  },
                 ),
-                if (job.isActive)
-                  IconButton(
-                    key: Key('job_cancel_${job.id}'),
-                    tooltip: '取消任务',
-                    icon: Icon(Icons.close, color: tokens.error),
-                    onPressed: () async {
-                      final error = await controller.cancel(job.id);
-                      if (error != null && context.mounted) {
-                        ScaffoldMessenger.maybeOf(
-                          context,
-                        )?.showSnackBar(SnackBar(content: Text(error)));
-                      }
-                    },
-                  ),
-              ],
+            ],
+          ),
+          if (job.status == JobStatus.running ||
+              job.status == JobStatus.cancelling)
+            Padding(
+              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              child: job.kind == JobKind.audiobook
+                  ? _SegmentedProgressBar(
+                      key: Key('job_progress_${job.id}'),
+                      progress: (job.progress / 100).clamp(0.0, 1.0),
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        key: Key('job_progress_${job.id}'),
+                        value: (job.progress / 100).clamp(0.0, 1.0),
+                        minHeight: 5,
+                        backgroundColor: tokens.surfaceSubtle,
+                        color: tokens.primary,
+                      ),
+                    ),
             ),
-            if (job.status == JobStatus.running ||
-                job.status == JobStatus.cancelling)
-              Padding(
-                padding: const EdgeInsets.only(top: EchoMetrics.space1),
-                child: LinearProgressIndicator(
-                  key: Key('job_progress_${job.id}'),
-                  value: (job.progress / 100).clamp(0.0, 1.0),
-                  minHeight: 4,
-                  backgroundColor: tokens.surfaceSubtle,
-                  color: tokens.primary,
+          if (job.error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: EchoMetrics.space1),
+              child: Text(
+                job.error,
+                key: Key('job_error_${job.id}'),
+                style: textTheme.bodySmall?.copyWith(color: tokens.error),
+              ),
+            ),
+          // 完成直达 / 失败重试操作行
+          if (job.status == JobStatus.done &&
+              audiobook != null &&
+              audiobook.isReady)
+            Padding(
+              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  key: Key('job_listen_${job.id}'),
+                  onPressed: () async {
+                    await ref
+                        .read(chunkedPlayerProvider.notifier)
+                        .loadAudiobook(audiobook!, coverUrl: book?.coverUrl);
+                    if (context.mounted) {
+                      await openPlayer(context);
+                    }
+                  },
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('立即收听'),
                 ),
               ),
-            if (job.error.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: EchoMetrics.space1),
-                child: Text(
-                  job.error,
-                  key: Key('job_error_${job.id}'),
-                  style: textTheme.bodySmall?.copyWith(color: tokens.error),
-                ),
-              ),
-            // 完成直达 / 失败重试操作行
-            if (job.status == JobStatus.done &&
-                audiobook != null &&
-                audiobook.isReady)
-              Padding(
-                padding: const EdgeInsets.only(top: EchoMetrics.space1),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.tonalIcon(
-                    key: Key('job_listen_${job.id}'),
-                    onPressed: () async {
-                      await ref
-                          .read(chunkedPlayerProvider.notifier)
-                          .loadAudiobook(
-                            audiobook!,
-                            coverUrl: book?.coverUrl,
-                          );
-                      if (context.mounted) {
-                        await openPlayer(context);
-                      }
-                    },
-                    icon: const Icon(Icons.play_arrow, size: 18),
-                    label: const Text('立即收听'),
-                  ),
-                ),
-              )
-            else if (job.status == JobStatus.done &&
-                job.kind == JobKind.download &&
-                book != null)
-              Padding(
-                padding: const EdgeInsets.only(top: EchoMetrics.space1),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.tonalIcon(
-                    key: Key('job_detail_${job.id}'),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => BookDetailPage(book: book!),
-                      ),
+            )
+          else if (job.status == JobStatus.done &&
+              job.kind == JobKind.download &&
+              book != null)
+            Padding(
+              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonalIcon(
+                  key: Key('job_detail_${job.id}'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => BookDetailPage(book: book!),
                     ),
-                    icon: const Icon(Icons.menu_book_outlined, size: 18),
-                    label: const Text('查看详情'),
                   ),
-                ),
-              )
-            else if (job.status == JobStatus.failed &&
-                job.kind == JobKind.audiobook &&
-                book != null)
-              Padding(
-                padding: const EdgeInsets.only(top: EchoMetrics.space1),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton.icon(
-                    key: Key('job_retry_${job.id}'),
-                    onPressed: () => showModalBottomSheet<void>(
-                      context: context,
-                      isScrollControlled: true,
-                      useSafeArea: true,
-                      builder: (_) => ConvertSheet(book: book!),
-                    ),
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('重新转换'),
-                  ),
+                  icon: const Icon(Icons.menu_book_outlined, size: 18),
+                  label: const Text('查看详情'),
                 ),
               ),
-          ],
-        ),
+            )
+          else if (job.status == JobStatus.failed &&
+              job.kind == JobKind.audiobook &&
+              book != null)
+            Padding(
+              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  key: Key('job_retry_${job.id}'),
+                  onPressed: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    useSafeArea: true,
+                    builder: (_) => ConvertSheet(book: book!),
+                  ),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('重新转换'),
+                ),
+              ),
+            ),
+        ],
       ),
+    );
+  }
+}
+
+/// 分段式转换进度条（对齐设计图 ui-mobile-tasks.png）。
+class _SegmentedProgressBar extends StatelessWidget {
+  const _SegmentedProgressBar({super.key, required this.progress});
+
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    const segments = 6;
+    final filledExact = progress * segments;
+    return Row(
+      children: [
+        for (var i = 0; i < segments; i++) ...[
+          if (i > 0) const SizedBox(width: 4),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: (filledExact - i).clamp(0.0, 1.0),
+                minHeight: 5,
+                backgroundColor: tokens.surfaceSubtle,
+                color: tokens.primary,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

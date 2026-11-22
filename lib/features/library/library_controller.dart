@@ -59,27 +59,31 @@ class LibraryController extends StateNotifier<LibraryState> {
       ]);
       final audiobooks = results[0] as List<AudiobookInfo>;
       final books = results[1] as List<LibraryBook>;
-      final progressMap = Map<int, PlaybackProgress>.of(state.progressMap);
+      state = state.copyWith(
+        audiobooks: audiobooks,
+        books: books,
+        isLoading: false,
+      );
       final store = _progressStore;
       if (store != null) {
+        final progressMap = Map<int, PlaybackProgress>.of(state.progressMap);
+        var changed = false;
         for (final audio in audiobooks) {
           if (!audio.isReady) continue;
           try {
             final p = await store.read(audio.id);
             if (p != null) {
               progressMap[audio.id] = p;
+              changed = true;
             }
           } catch (_) {
             // 单本进度读取失败不阻塞书架渲染
           }
         }
+        if (changed && mounted) {
+          state = state.copyWith(progressMap: progressMap);
+        }
       }
-      state = state.copyWith(
-        audiobooks: audiobooks,
-        books: books,
-        progressMap: progressMap,
-        isLoading: false,
-      );
     } on ApiException catch (e) {
       state = state.copyWith(isLoading: false, error: e.message);
     }

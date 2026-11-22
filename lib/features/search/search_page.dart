@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/audio/chunked_player_controller.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -396,7 +397,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               ? const Center(child: CircularProgressIndicator())
               : ListView.separated(
                   key: const Key('search_results'),
-                  padding: const EdgeInsets.all(EchoMetrics.space2),
+                  padding: EdgeInsets.fromLTRB(
+                    EchoMetrics.space2,
+                    EchoMetrics.space2,
+                    EchoMetrics.space2,
+                    ref.watch(chunkedPlayerProvider).hasBook
+                        ? 104
+                        : EchoMetrics.space2,
+                  ),
                   itemCount: state.books.length + (state.hasMore ? 1 : 0),
                   separatorBuilder: (_, _) =>
                       const SizedBox(height: EchoMetrics.space1),

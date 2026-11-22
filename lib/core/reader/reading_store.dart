@@ -157,17 +157,36 @@ List<ReaderPage> paginateChapterBySize({
     textScaler: textScaler,
   );
 
+  // 单页最多能容纳的字符数估算上限，避免二分第一步把整章数万字丢进 TextPainter 导致主线程卡死
+  final scaledFontSize = math.max(
+    10.0,
+    textScaler.scale(style.fontSize ?? 17.0),
+  );
+  final lineHeightPx = scaledFontSize * (style.height ?? 1.6);
+  final estLines = math.max(1, (maxHeight / lineHeightPx).ceil());
+  final estCharsPerLine = math.max(4, (maxWidth / (scaledFontSize * 0.45)).ceil());
+  final maxCandidateChars = math.max(
+    80,
+    (estLines * estCharsPerLine * 1.8).ceil(),
+  );
+
   bool fits(String candidate) {
     painter.text = TextSpan(text: candidate, style: style);
     painter.layout(maxWidth: maxWidth);
     return painter.height <= maxHeight;
   }
 
-  // 二分查找：从 offset 起最多能容纳多少字符
+  // 有界二分查找：从 offset 起最多能容纳多少字符
   int fitLength(int offset) {
+    final remaining = trimmed.length - offset;
     var lo = 1;
-    var hi = trimmed.length - offset;
-    var best = 0;
+    var hi = math.min(remaining, maxCandidateChars);
+    // 极端窄字符场景（如全英文/数字）若估算上限仍装得下，倍增扩窗
+    while (hi < remaining && fits(trimmed.substring(offset, offset + hi))) {
+      lo = hi;
+      hi = math.min(remaining, hi * 2);
+    }
+    var best = lo == 1 ? 0 : lo;
     while (lo <= hi) {
       final mid = (lo + hi) ~/ 2;
       if (fits(trimmed.substring(offset, offset + mid))) {

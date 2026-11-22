@@ -668,31 +668,37 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        _SecondaryAction(
-                          key: const Key('player_speed_button'),
-                          icon: Icons.speed,
-                          label: '倍速 ${state.speed}x',
-                          onTap: () {
-                            final idx = _speeds.indexOf(state.speed);
-                            controller.setSpeed(
-                              _speeds[(idx + 1) % _speeds.length],
-                            );
-                          },
+                        Flexible(
+                          child: _SecondaryAction(
+                            key: const Key('player_speed_button'),
+                            icon: Icons.speed,
+                            label: '倍速 ${state.speed}x',
+                            onTap: () {
+                              final idx = _speeds.indexOf(state.speed);
+                              controller.setSpeed(
+                                _speeds[(idx + 1) % _speeds.length],
+                              );
+                            },
+                          ),
                         ),
-                        _SecondaryAction(
-                          key: const Key('player_sleep_button'),
-                          icon: Icons.bedtime_outlined,
-                          label: state.sleepUntil == null
-                              ? '睡眠定时'
-                              : '至 ${state.sleepUntil!.toLocal().hour.toString().padLeft(2, '0')}:'
-                                    '${state.sleepUntil!.toLocal().minute.toString().padLeft(2, '0')}',
-                          onTap: () => _showSleepDialog(context, ref),
+                        Flexible(
+                          child: _SecondaryAction(
+                            key: const Key('player_sleep_button'),
+                            icon: Icons.bedtime_outlined,
+                            label: state.sleepUntil == null
+                                ? '睡眠定时'
+                                : '至 ${state.sleepUntil!.toLocal().hour.toString().padLeft(2, '0')}:'
+                                      '${state.sleepUntil!.toLocal().minute.toString().padLeft(2, '0')}',
+                            onTap: () => _showSleepDialog(context, ref),
+                          ),
                         ),
-                        _SecondaryAction(
-                          key: const Key('player_chapters_button'),
-                          icon: Icons.list,
-                          label: '章节列表',
-                          onTap: () => _showChaptersDrawer(context, ref),
+                        Flexible(
+                          child: _SecondaryAction(
+                            key: const Key('player_chapters_button'),
+                            icon: Icons.list,
+                            label: '章节列表',
+                            onTap: () => _showChaptersDrawer(context, ref),
+                          ),
                         ),
                       ],
                     ),
@@ -1394,7 +1400,7 @@ class _SecondaryAction extends StatelessWidget {
       borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
       child: Padding(
         padding: const EdgeInsets.symmetric(
-          horizontal: EchoMetrics.space1,
+          horizontal: 6,
           vertical: EchoMetrics.space1,
         ),
         child: Row(
@@ -1402,11 +1408,15 @@ class _SecondaryAction extends StatelessWidget {
           children: [
             Icon(icon, size: 16, color: tokens.textSecondary),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: tokens.textSecondary),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: tokens.textSecondary),
+              ),
             ),
           ],
         ),

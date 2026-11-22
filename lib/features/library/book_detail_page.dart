@@ -6,6 +6,7 @@ import '../../core/audio/chunked_player_controller.dart';
 import '../../core/export/book_exporter.dart';
 import '../../core/offline/offline_store.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
@@ -14,9 +15,8 @@ import '../library/library_controller.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
 import '../reader/reader_page.dart';
 
-/// 书籍 / 有声书详情页（设计图 ui-mobile-book-detail）：
-/// 大封面 + 元信息 + 主操作（继续收听 / 开始阅读 / 转有声书）
-/// + 简介 + 有声书列表（含离线下载）+ 章节预览（可跳转阅读器）。
+/// 书籍 / 有声书详情页（高保真对齐 ui-mobile-book-detail.png）：
+/// 深靛蓝氛围顶区 + 居中大封面 → 大圆角深色内容板（书名/作者/简介/有声书/章节）→ 固定渐变底栏。
 class BookDetailPage extends ConsumerStatefulWidget {
   const BookDetailPage({super.key, required this.book, this.audiobook});
 
@@ -125,8 +125,10 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
 
     return Scaffold(
       key: const Key('book_detail_page'),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('书籍详情'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         actions: [
           PopupMenuButton<String>(
             key: const Key('detail_menu'),
@@ -146,61 +148,83 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          EchoMetrics.space3,
-          EchoMetrics.space2,
-          EchoMetrics.space3,
-          EchoMetrics.space4,
-        ),
-        children: [
-          // 头部：封面 + 标题/作者/元信息
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              BookCover(url: book.coverUrl, width: 110, height: 150),
-              const SizedBox(width: EchoMetrics.space3),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      book.title,
-                      key: const Key('detail_title'),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: textTheme.titleLarge?.copyWith(
-                        color: tokens.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: EchoMetrics.spaceHalf),
-                    Text(
-                      authorText,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: tokens.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: EchoMetrics.space1),
-                    Wrap(
-                      spacing: EchoMetrics.spaceHalf,
-                      runSpacing: EchoMetrics.spaceHalf,
-                      children: [
-                        if (book.format.isNotEmpty)
-                          _pill(book.format.toUpperCase()),
-                        if (book.year.isNotEmpty) _pill(book.year),
-                        if (book.language.isNotEmpty) _pill(book.language),
-                        if (readyAudio.isNotEmpty)
-                          _pill('有声书 ${readyAudio.length}')
-                        else if (audiobooks.isNotEmpty)
-                          _pill('转换中'),
-                      ],
+      body: EchoAmbientBackground(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            // 顶部居中大封面氛围区（对齐 ui-mobile-book-detail.png）
+            SizedBox(height: MediaQuery.paddingOf(context).top + 48),
+            Center(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(EchoMetrics.radiusSheet),
+                  boxShadow: [
+                    BoxShadow(
+                      color: tokens.primary.withValues(alpha: 0.28),
+                      blurRadius: 32,
+                      offset: const Offset(0, 14),
                     ),
                   ],
                 ),
+                child: BookCover(url: book.coverUrl, width: 164, height: 212),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: EchoMetrics.space3),
+
+            // 下方大圆角深色内容面板
+            Container(
+              padding: const EdgeInsets.fromLTRB(
+                EchoMetrics.space3,
+                EchoMetrics.space3,
+                EchoMetrics.space3,
+                EchoMetrics.space4,
+              ),
+              decoration: BoxDecoration(
+                color: tokens.surfaceElevated.withValues(alpha: 0.92),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(28),
+                ),
+                border: Border(
+                  top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    book.title,
+                    key: const Key('detail_title'),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.headlineSmall?.copyWith(
+                      color: tokens.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: EchoMetrics.spaceHalf),
+                  Text(
+                    authorText,
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: tokens.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: EchoMetrics.space1),
+                  Wrap(
+                    spacing: EchoMetrics.spaceHalf,
+                    runSpacing: EchoMetrics.spaceHalf,
+                    children: [
+                      if (book.format.isNotEmpty)
+                        _pill(book.format.toUpperCase()),
+                      if (book.year.isNotEmpty) _pill(book.year),
+                      if (book.language.isNotEmpty) _pill(book.language),
+                      if (readyAudio.isNotEmpty)
+                        _pill(
+                          '总时长 ${formatDurationMs((readyAudio.first.durationS * 1000).round())}',
+                        )
+                      else if (audiobooks.isNotEmpty)
+                        _pill('转换中'),
+                    ],
+                  ),
 
           // 简介
           if (book.description.isNotEmpty) ...[
@@ -300,7 +324,11 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                 ),
               ),
             ),
-        ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
       // 底部固定操作栏（对齐设计 §4.1：靛蓝渐变主按钮 + 次级圆角操作）
       bottomNavigationBar: (readyAudio.isNotEmpty || isEpub)

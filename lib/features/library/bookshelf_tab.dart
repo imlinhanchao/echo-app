@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
@@ -76,12 +77,12 @@ class BookshelfTab extends ConsumerWidget {
       onRefresh: libController.refresh,
       child: ListView(
         key: const Key('bookshelf_scroll'),
-        // 顶部预留状态栏高度（首页无 AppBar，避免问候语被状态栏压住）
+        // 顶部预留状态栏高度；底部在迷你播放条悬浮时预留 104dp，让末项也能滚出播放条上方
         padding: EdgeInsets.fromLTRB(
           EchoMetrics.space3,
           MediaQuery.paddingOf(context).top + EchoMetrics.space2,
-          EchoMetrics.space2,
-          EchoMetrics.space2,
+          EchoMetrics.space3,
+          playerState.hasBook ? 104 : EchoMetrics.space3,
         ),
         children: [
           // 问候语
@@ -317,10 +318,9 @@ class _NowPlayingHeroCard extends ConsumerWidget {
       onTap: () => openPlayer(context),
       child: Container(
         padding: const EdgeInsets.all(EchoMetrics.space2),
-        decoration: BoxDecoration(
-          color: tokens.surfaceElevated,
-          borderRadius: BorderRadius.circular(EchoMetrics.radiusSheet),
-          border: Border.all(color: tokens.surfaceSubtle),
+        decoration: echoElevatedCardDecoration(
+          context,
+          radius: EchoMetrics.radiusSheet,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

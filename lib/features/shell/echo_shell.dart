@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/sync/progress_sync_service.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_breakpoints.dart';
 import '../../design/echo_tokens.dart';
 import '../jobs/jobs_page.dart';
@@ -17,8 +18,8 @@ import 'desktop_shortcuts.dart';
 import 'desktop_sidebar.dart';
 
 /// 已登录主壳（对齐设计规划 §2.1 三断点响应式与 §4 界面规范）：
-/// - Compact (< 600dp): 底部纯图标导航 + 悬浮胶囊迷你播放条；
-/// - Medium (600–1024dp): 左侧 NavigationRail + 胶囊播放条（含快捷打点）；
+/// - Compact (< 600dp): 底部纯图标导航 + Stack 悬浮磨砂迷你播放条（列表从背后透出模糊）；
+/// - Medium (600–1024dp): 左侧 NavigationRail + Stack 悬浮胶囊播放条（含快捷打点）；
 /// - Expanded (> 1024dp): 左侧完整 DesktopSidebar + 右侧笔记抽屉 + 底部全宽专业播控台。
 class EchoShell extends ConsumerStatefulWidget {
   const EchoShell({super.key, required this.user});
@@ -90,109 +91,126 @@ class EchoShellState extends ConsumerState<EchoShell> {
           if (screenType == EchoScreenType.expanded) {
             return Scaffold(
               key: const Key('echo_home'),
-              body: Column(
-                children: [
-                  Expanded(
-                    child: Row(
-                      children: [
-                        DesktopSidebar(
-                          user: widget.user,
-                          selectedIndex: _currentIndex,
-                          onSelect: select,
-                        ),
-                        Expanded(
-                          child: SafeArea(
-                            top: true,
-                            bottom: false,
-                            child: contentStack(),
+              body: EchoAmbientBackground(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          DesktopSidebar(
+                            user: widget.user,
+                            selectedIndex: _currentIndex,
+                            onSelect: select,
                           ),
-                        ),
-                        if (_isNotesOpen)
-                          DesktopNotesDrawer(
-                            onClose: () => setState(() => _isNotesOpen = false),
+                          Expanded(
+                            child: SafeArea(
+                              top: true,
+                              bottom: false,
+                              child: contentStack(),
+                            ),
                           ),
-                      ],
+                          if (_isNotesOpen)
+                            DesktopNotesDrawer(
+                              onClose: () =>
+                                  setState(() => _isNotesOpen = false),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  DesktopPlayerBar(
-                    onToggleNotes: toggleNotes,
-                    isNotesOpen: _isNotesOpen,
-                  ),
-                ],
+                    DesktopPlayerBar(
+                      onToggleNotes: toggleNotes,
+                      isNotesOpen: _isNotesOpen,
+                    ),
+                  ],
+                ),
               ),
             );
           }
 
-          // 2. 平板中屏模式 (600–1024dp)
+          // 2. 平板中屏模式 (600–1024dp)：Stack 悬浮胶囊播放条，列表滚过背后产生真磨砂
           if (screenType == EchoScreenType.medium) {
             return Scaffold(
               key: const Key('echo_home'),
-              body: Row(
-                children: [
-                  NavigationRail(
-                    key: const Key('echo_nav_rail'),
-                    selectedIndex: _currentIndex,
-                    onDestinationSelected: select,
-                    labelType: NavigationRailLabelType.all,
-                    backgroundColor: tokens.surfaceBase,
-                    indicatorColor: tokens.primary.withValues(alpha: 0.18),
-                    destinations: const [
-                      NavigationRailDestination(
-                        icon: Icon(Icons.home_outlined),
-                        selectedIcon: Icon(Icons.home),
-                        label: Text('书架'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.search),
-                        selectedIcon: Icon(Icons.manage_search),
-                        label: Text('发现'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.grid_view_outlined),
-                        selectedIcon: Icon(Icons.grid_view),
-                        label: Text('任务'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.person_outline),
-                        selectedIcon: Icon(Icons.person),
-                        label: Text('我的'),
-                      ),
-                    ],
-                  ),
-                  const VerticalDivider(width: 1, thickness: 1),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: SafeArea(
-                            top: true,
-                            bottom: false,
-                            child: contentStack(),
-                          ),
+              body: EchoAmbientBackground(
+                child: Row(
+                  children: [
+                    NavigationRail(
+                      key: const Key('echo_nav_rail'),
+                      selectedIndex: _currentIndex,
+                      onDestinationSelected: select,
+                      labelType: NavigationRailLabelType.all,
+                      backgroundColor: Colors.transparent,
+                      indicatorColor: tokens.primary.withValues(alpha: 0.18),
+                      destinations: const [
+                        NavigationRailDestination(
+                          icon: Icon(Icons.home_outlined),
+                          selectedIcon: Icon(Icons.home),
+                          label: Text('书架'),
                         ),
-                        const TabletCapsulePlayerBar(),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.search),
+                          selectedIcon: Icon(Icons.manage_search),
+                          label: Text('发现'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.grid_view_outlined),
+                          selectedIcon: Icon(Icons.grid_view),
+                          label: Text('任务'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.person_outline),
+                          selectedIcon: Icon(Icons.person),
+                          label: Text('我的'),
+                        ),
                       ],
                     ),
-                  ),
-                ],
+                    const VerticalDivider(width: 1, thickness: 1),
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: SafeArea(
+                              top: true,
+                              bottom: false,
+                              child: contentStack(),
+                            ),
+                          ),
+                          const Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: TabletCapsulePlayerBar(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           }
 
-          // 3. 手机紧凑模式 (< 600dp)
+          // 3. 手机紧凑模式 (< 600dp)：Stack 悬浮玻璃拟态迷你播放条
           return Scaffold(
             key: const Key('echo_home'),
-            body: Column(
-              children: [
-                Expanded(
-                  child: SafeArea(
-                    top: true,
-                    bottom: false,
-                    child: contentStack(),
+            body: EchoAmbientBackground(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: SafeArea(
+                      top: true,
+                      bottom: false,
+                      child: contentStack(),
+                    ),
                   ),
-                ),
-                const MiniPlayerBar(),
-              ],
+                  const Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: MiniPlayerBar(),
+                  ),
+                ],
+              ),
             ),
             bottomNavigationBar: NavigationBar(
               key: const Key('echo_nav_bar'),
