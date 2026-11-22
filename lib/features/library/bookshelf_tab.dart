@@ -515,18 +515,22 @@ class _AudiobookRow extends ConsumerWidget {
                   Text(
                     item.isReady
                         ? readySubtitle()
+                        : item.isPlayable
+                        ? '转换中 ${item.progress}% · 可抢先收听'
                         : '状态：${item.status} (${item.progress}%)',
                     style: textTheme.bodySmall?.copyWith(
-                      color: tokens.textSecondary,
+                      color: item.isPlayable && !item.isReady
+                          ? tokens.primary
+                          : tokens.textSecondary,
                     ),
                   ),
                 ],
               ),
             ),
-            if (item.isReady)
+            if (item.isPlayable)
               IconButton(
                 key: Key('audiobook_play_${item.id}'),
-                tooltip: '播放',
+                tooltip: item.isReady ? '播放' : '抢先收听',
                 onPressed: () => ref
                     .read(chunkedPlayerProvider.notifier)
                     .loadAudiobook(item, coverUrl: cover),
@@ -739,12 +743,16 @@ class _AudiobookGridCardState extends ConsumerState<_AudiobookGridCard> {
                       left: EchoMetrics.space1,
                       top: EchoMetrics.space1,
                       child: _AssetBadge(
-                        label: item.isReady ? '可听' : '${item.progress}%',
+                        label: item.isReady
+                            ? '可听'
+                            : (item.isPlayable
+                                  ? '可抢先听 · ${item.progress}%'
+                                  : '${item.progress}%'),
                         color: tokens.primary,
                       ),
                     ),
                     // hover 或当前播放态浮现播放按钮 + 圆形进度环
-                    if (item.isReady)
+                    if (item.isPlayable)
                       AnimatedOpacity(
                         duration: EchoMetrics.motionFast,
                         opacity: (_hovered || isCurrent) ? 1.0 : 0.0,

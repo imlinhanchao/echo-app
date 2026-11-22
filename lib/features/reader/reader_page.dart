@@ -502,7 +502,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final audio = ref
         .read(libraryControllerProvider)
         .audiobooks
-        .where((a) => a.bookId == widget.book.id && a.isReady)
+        .where((a) => a.bookId == widget.book.id && a.isPlayable)
         .firstOrNull;
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (audio == null) {
@@ -621,7 +621,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final hasAudio = ref
         .watch(libraryControllerProvider)
         .audiobooks
-        .any((a) => a.bookId == widget.book.id && a.isReady);
+        .any((a) => a.bookId == widget.book.id && a.isPlayable);
     final page = (_currentPage >= 0 && _currentPage < _pages.length)
         ? _pages[_currentPage]
         : null;

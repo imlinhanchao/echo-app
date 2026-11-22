@@ -464,10 +464,10 @@ class _JobCard extends ConsumerWidget {
                 style: textTheme.bodySmall?.copyWith(color: tokens.error),
               ),
             ),
-          // 完成直达 / 失败重试操作行
-          if (job.status == JobStatus.done &&
-              audiobook != null &&
-              audiobook.isReady)
+          // 完成直达 / 抢先收听 / 失败重试操作行
+          if (audiobook != null &&
+              audiobook.isPlayable &&
+              (job.status == JobStatus.done || job.isActive))
             Padding(
               padding: const EdgeInsets.only(top: EchoMetrics.space2),
               child: Align(
@@ -483,7 +483,7 @@ class _JobCard extends ConsumerWidget {
                     }
                   },
                   icon: const Icon(Icons.play_arrow, size: 18),
-                  label: const Text('立即收听'),
+                  label: Text(audiobook.isReady ? '立即收听' : '抢先收听'),
                 ),
               ),
             )

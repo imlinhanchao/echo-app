@@ -244,6 +244,9 @@ class AudiobookInfo {
   bool get isReady => status == 'done';
   bool get isRunning => status == 'running' || status == 'queued';
 
+  /// 已完成，或正在转换但已产出至少一个可播放章节分块时即可开始收听。
+  bool get isPlayable => isReady || (isRunning && chaptersUrl.isNotEmpty);
+
   /// 失败/取消的产物不在书架上展示（避免首页被脏数据占满）。
   bool get isFailedOrCancelled =>
       status == 'failed' || status == 'cancelled' || status == 'error';

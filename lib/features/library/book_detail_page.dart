@@ -117,7 +117,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     final audiobooks = lib.audiobooks
         .where((a) => a.bookId == book.id)
         .toList();
-    final readyAudio = audiobooks.where((a) => a.isReady).toList();
+    final readyAudio = audiobooks.where((a) => a.isPlayable).toList();
     final isEpub = book.format.toLowerCase() == 'epub';
     final authorText = book.authors.isNotEmpty
         ? book.authors.join(', ')
@@ -480,17 +480,23 @@ class _AudiobookTile extends ConsumerWidget {
     final state = ref.read(offlineStoreProvider.notifier).stateOf(audio.id);
     final label = audio.isReady
         ? '${audio.model} · ${audio.voice} · ${formatDurationMs((audio.durationS * 1000).round())}'
+        : audio.isPlayable
+        ? '${audio.model} · 转换中 ${audio.progress}% · 可抢先收听'
         : '状态：${audio.status} (${audio.progress}%)';
 
     return Card(
       key: Key('detail_audio_${audio.id}'),
       child: ListTile(
         leading: Icon(
-          audio.isReady ? Icons.headphones : Icons.hourglass_top,
-          color: audio.isReady ? tokens.primary : tokens.textSecondary,
+          audio.isPlayable ? Icons.headphones : Icons.hourglass_top,
+          color: audio.isPlayable ? tokens.primary : tokens.textSecondary,
         ),
         title: Text(
-          audio.isReady ? '有声书 #${audio.id}' : '转码中 #${audio.id}',
+          audio.isReady
+              ? '有声书 #${audio.id}'
+              : (audio.isPlayable
+                    ? '转码中 #${audio.id}（可抢先听）'
+                    : '转码中 #${audio.id}'),
           style: textTheme.bodyMedium?.copyWith(color: tokens.textPrimary),
         ),
         subtitle: Column(
@@ -510,7 +516,7 @@ class _AudiobookTile extends ConsumerWidget {
               ),
             if (state.status == OfflineStatus.done)
               Text(
-                '已下载 · 离线可听',
+                '已缓存 · 离线可听',
                 style: textTheme.labelSmall?.copyWith(color: tokens.success),
               ),
           ],
@@ -518,38 +524,32 @@ class _AudiobookTile extends ConsumerWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              key: Key('detail_download_${audio.id}'),
-              tooltip: state.status == OfflineStatus.done
-                  ? '已下载（点击删除）'
-                  : (state.status == OfflineStatus.downloading
-                        ? '取消下载'
-                        : '下载离线'),
-              onPressed: () async {
-                final controller = ref.read(offlineStoreProvider.notifier);
-                if (state.status == OfflineStatus.downloading) {
-                  controller.cancelDownload(audio.id);
-                } else if (state.status == OfflineStatus.done) {
-                  await controller.remove(audio);
-                } else {
-                  await controller.download(audio);
-                }
-              },
-              icon: Icon(
-                state.status == OfflineStatus.done
-                    ? Icons.download_done
-                    : (state.status == OfflineStatus.downloading
-                          ? Icons.close
-                          : Icons.download_outlined),
-                color: state.status == OfflineStatus.done
-                    ? tokens.success
-                    : tokens.textSecondary,
+            // 已缓存的有声书不再显示下载按钮；转换未完成时也不触发整本离线下载。
+            if (audio.isReady && state.status != OfflineStatus.done)
+              IconButton(
+                key: Key('detail_download_${audio.id}'),
+                tooltip: state.status == OfflineStatus.downloading
+                    ? '取消下载'
+                    : '下载离线',
+                onPressed: () async {
+                  final controller = ref.read(offlineStoreProvider.notifier);
+                  if (state.status == OfflineStatus.downloading) {
+                    controller.cancelDownload(audio.id);
+                  } else {
+                    await controller.download(audio);
+                  }
+                },
+                icon: Icon(
+                  state.status == OfflineStatus.downloading
+                      ? Icons.close
+                      : Icons.download_outlined,
+                  color: tokens.textSecondary,
+                ),
               ),
-            ),
-            if (audio.isReady)
+            if (audio.isPlayable)
               IconButton(
                 key: Key('detail_audio_play_${audio.id}'),
-                tooltip: '播放',
+                tooltip: audio.isReady ? '播放' : '抢先收听',
                 onPressed: onPlay,
                 icon: Icon(Icons.play_arrow, color: tokens.primary),
               ),

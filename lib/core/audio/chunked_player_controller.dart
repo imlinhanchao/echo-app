@@ -798,7 +798,25 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     await _loadChunk(index, initialOffsetMs: 0, autoPlay: true);
   }
 
+  Future<bool> _refreshManifestIfGrowing() async {
+    final book = state.audiobook;
+    if (book == null || !book.isRunning) return false;
+    try {
+      final fresh = await _api.getAudiobookChapters(book.id);
+      if (fresh.chunks.length > state.chunks.length) {
+        state = state.copyWith(chunks: fresh.chunks);
+        return true;
+      }
+    } catch (_) {
+      // 刷新失败时静默保持当前清单
+    }
+    return false;
+  }
+
   Future<void> nextChunk() async {
+    if (!state.hasNextChunk) {
+      await _refreshManifestIfGrowing();
+    }
     if (state.hasNextChunk) {
       await selectChunk(state.currentChunkIndex + 1);
     }
@@ -925,6 +943,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   }
 
   Future<void> _onChunkCompleted() async {
+    if (!state.hasNextChunk) {
+      await _refreshManifestIfGrowing();
+    }
     if (state.hasNextChunk) {
       await _loadChunk(
         state.currentChunkIndex + 1,
@@ -935,9 +956,11 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       await _engine.pause();
       state = state.copyWith(isPlaying: false);
       await _saveProgress();
-      // 整本听完：计入「已听完本数」
-      final bookId = state.audiobook?.id;
-      if (bookId != null) StatsStore.instance.markFinished(bookId);
+      // 仅在整本已转换完成且听完最后一块时，计入「已听完本数」
+      final audio = state.audiobook;
+      if (audio != null && audio.isReady) {
+        StatsStore.instance.markFinished(audio.id);
+      }
     }
   }
 
