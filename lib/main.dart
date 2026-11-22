@@ -13,6 +13,7 @@ import 'core/offline/offline_store.dart';
 import 'core/stats/stats_store.dart';
 import 'core/settings/server_address_store.dart';
 import 'core/settings/theme_mode_controller.dart';
+import 'design/echo_splash_screen.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
 import 'features/auth/auth_controller.dart';
@@ -109,37 +110,10 @@ class AuthGate extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authControllerProvider);
     return switch (auth) {
-      AuthLoading() => const _Splash(),
+      AuthLoading() => const EchoSplashScreen(),
       AuthLoggedOut(:final reason) => LoginPage(initialError: reason),
       AuthLoggedIn(:final user) => EchoHome(user: user),
     };
-  }
-}
-
-class _Splash extends StatelessWidget {
-  const _Splash();
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<EchoTokens>()!;
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '回声',
-              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                color: tokens.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 24),
-            CircularProgressIndicator(color: tokens.primary),
-          ],
-        ),
-      ),
-    );
   }
 }
 
