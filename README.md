@@ -2,7 +2,7 @@
 
 跨平台听看一体书客户端（Flutter）。搜书、下载、转有声书、听与看——一本"书"的完整生命周期。
 
-> 版本 **v0.3.0** · 质量门禁 `flutter analyze` 0 issues、`flutter test` 51/51 通过
+> 版本 **v0.3.2** · 质量门禁 `flutter analyze` 0 issues、`flutter test` 70/70 通过
 
 ## 文档
 

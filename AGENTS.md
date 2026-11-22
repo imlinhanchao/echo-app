@@ -97,7 +97,7 @@ docs/              主文档、API 契约、设计规划（原始）、截图
 - `audio_service` 有断言：`androidNotificationOngoing` 为 true 时 `androidStopForegroundOnPause` 必须为 true；
 - **通知渠道一经创建，重要性不可修改**；音频播放渠道由 audio_service 自行创建（id `org.hancel.echo.playback`）；
   曾尝试在 `MainActivity` 预建 DEFAULT 渠道 + 自定义小图标，在华为真机上导致媒体通知整个消失，已回退——改动此处需真机验证；
-- 版本号在 `pubspec.yaml`（当前 0.3.0）；发版前同步更新 `profile_page.dart` 里的"关于"文案。
+- 版本号在 `pubspec.yaml`（当前 0.3.2）；发版前同步更新 `profile_page.dart` 里的"关于"文案。
 
 ## 已知坑位清单
 
