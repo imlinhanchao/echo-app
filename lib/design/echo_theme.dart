@@ -24,10 +24,80 @@ ThemeData buildEchoTheme(Brightness brightness, EchoTokens tokens) {
     outlineVariant: tokens.focusRing,
   );
 
+  final baseTextTheme =
+      (brightness == Brightness.dark
+              ? Typography.material2021().white
+              : Typography.material2021().black)
+          .copyWith(
+            // 对齐 design-tokens.json typography.scale（正文基准 16px/1.6，全局正文下限 14px）
+            headlineMedium: TextStyle(
+              fontSize: 32,
+              height: 1.25,
+              fontWeight: FontWeight.w700,
+              color: tokens.textPrimary,
+            ),
+            headlineSmall: TextStyle(
+              fontSize: 24,
+              height: 1.3,
+              fontWeight: FontWeight.w700,
+              color: tokens.textPrimary,
+            ),
+            titleLarge: TextStyle(
+              fontSize: 20,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+              color: tokens.textPrimary,
+            ),
+            titleMedium: TextStyle(
+              fontSize: 17,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+              color: tokens.textPrimary,
+            ),
+            titleSmall: TextStyle(
+              fontSize: 15,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+              color: tokens.textPrimary,
+            ),
+            bodyLarge: TextStyle(
+              fontSize: 16,
+              height: 1.6,
+              color: tokens.textPrimary,
+            ),
+            bodyMedium: TextStyle(
+              fontSize: 16,
+              height: 1.6,
+              color: tokens.textPrimary,
+            ),
+            bodySmall: TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: tokens.textSecondary,
+            ),
+            labelLarge: TextStyle(
+              fontSize: 15,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+              color: tokens.textPrimary,
+            ),
+            labelMedium: TextStyle(
+              fontSize: 14,
+              height: 1.35,
+              color: tokens.textSecondary,
+            ),
+            labelSmall: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              color: tokens.textSecondary,
+            ),
+          );
+
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
+    textTheme: baseTextTheme,
     scaffoldBackgroundColor: tokens.surfaceBase,
     appBarTheme: AppBarTheme(
       backgroundColor: tokens.surfaceBase,

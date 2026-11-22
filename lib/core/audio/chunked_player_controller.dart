@@ -13,6 +13,7 @@ import '../media/cover_cache.dart';
 import '../offline/offline_store.dart';
 import '../stats/stats_store.dart';
 import '../storage/progress_store.dart';
+import '../sync/progress_sync_service.dart';
 import 'audio_service_engine.dart';
 import 'srt_parser.dart';
 
@@ -41,14 +42,17 @@ abstract class AudioEngine {
   Future<void> stop();
   Future<void> seek(Duration position);
   Future<void> setSpeed(double speed);
+  Future<void> setVolume(double volume);
   Future<void> dispose();
 }
 
 /// 系统播控（锁屏/通知栏）请求流：由支持后台媒体的引擎实现。
-/// 控制器把"上一首/下一首"映射为章节切换（书不是音乐，进度单位是章节）。
+/// 控制器把"上一首/下一首"映射为章节切换，把快进/快退映射为 ±15s（支持跨块边界）。
 abstract class LockScreenControls {
   Stream<void> get skipToNextRequests;
   Stream<void> get skipToPreviousRequests;
+  Stream<void> get fastForwardRequests;
+  Stream<void> get rewindRequests;
 }
 
 /// 基于 just_audio 的生产音频引擎（支持携带 Bearer Authorization 头）。
@@ -101,16 +105,28 @@ class JustAudioEngine implements AudioEngine {
   Future<void> setSpeed(double speed) => _player.setSpeed(speed);
 
   @override
+  Future<void> setVolume(double volume) =>
+      _player.setVolume(volume.clamp(0.0, 1.0));
+
+  @override
   Future<void> dispose() => _player.dispose();
 }
 
-/// 纯内存音频引擎：供单元测试与 Widget 测试驱动分块续播、跨块跳转与字幕同步。
-class FakeAudioEngine implements AudioEngine {
+/// 纯内存音频引擎：供单元测试与 Widget 测试驱动分块续播、跨块跳转、锁屏播控与字幕同步。
+class FakeAudioEngine implements AudioEngine, LockScreenControls {
   final StreamController<Duration> _positionController =
       StreamController<Duration>.broadcast();
   final StreamController<bool> _playingController =
       StreamController<bool>.broadcast();
   final StreamController<void> _completedController =
+      StreamController<void>.broadcast();
+  final StreamController<void> _skipNextController =
+      StreamController<void>.broadcast();
+  final StreamController<void> _skipPrevController =
+      StreamController<void>.broadcast();
+  final StreamController<void> _fastForwardController =
+      StreamController<void>.broadcast();
+  final StreamController<void> _rewindController =
       StreamController<void>.broadcast();
 
   Uri? lastUri;
@@ -122,6 +138,7 @@ class FakeAudioEngine implements AudioEngine {
   Duration position = Duration.zero;
   bool playing = false;
   double speed = 1.0;
+  double volume = 1.0;
 
   @override
   Stream<Duration> get positionStream => _positionController.stream;
@@ -131,6 +148,18 @@ class FakeAudioEngine implements AudioEngine {
 
   @override
   Stream<void> get completedStream => _completedController.stream;
+
+  @override
+  Stream<void> get skipToNextRequests => _skipNextController.stream;
+
+  @override
+  Stream<void> get skipToPreviousRequests => _skipPrevController.stream;
+
+  @override
+  Stream<void> get fastForwardRequests => _fastForwardController.stream;
+
+  @override
+  Stream<void> get rewindRequests => _rewindController.stream;
 
   @override
   Future<void> setSource(
@@ -181,6 +210,11 @@ class FakeAudioEngine implements AudioEngine {
     speed = targetSpeed;
   }
 
+  @override
+  Future<void> setVolume(double targetVolume) async {
+    volume = targetVolume.clamp(0.0, 1.0);
+  }
+
   /// 测试辅助：推进播放位置。
   void emitPosition(Duration next) {
     position = next;
@@ -192,11 +226,21 @@ class FakeAudioEngine implements AudioEngine {
     _completedController.add(null);
   }
 
+  /// 测试辅助：模拟锁屏快进 15s / 快退 15s / 切章。
+  void emitFastForward() => _fastForwardController.add(null);
+  void emitRewind() => _rewindController.add(null);
+  void emitSkipNext() => _skipNextController.add(null);
+  void emitSkipPrevious() => _skipPrevController.add(null);
+
   @override
   Future<void> dispose() async {
     await _positionController.close();
     await _playingController.close();
     await _completedController.close();
+    await _skipNextController.close();
+    await _skipPrevController.close();
+    await _fastForwardController.close();
+    await _rewindController.close();
   }
 }
 
@@ -211,10 +255,12 @@ class ChunkedPlayerState {
     this.isPlaying = false,
     this.isLoading = false,
     this.speed = 1.0,
+    this.volume = 1.0,
     this.cues = const <SrtCue>[],
     this.activeCueIndex = -1,
     this.error,
     this.sleepUntil,
+    this.isSkimming = false,
   });
 
   final AudiobookInfo? audiobook;
@@ -224,6 +270,7 @@ class ChunkedPlayerState {
   final bool isPlaying;
   final bool isLoading;
   final double speed;
+  final double volume;
   final List<SrtCue> cues;
   final int activeCueIndex;
   final String? error;
@@ -231,12 +278,15 @@ class ChunkedPlayerState {
   /// 睡眠定时到点时刻（null = 未启用）。UI 显示"至 HH:mm"。
   final DateTime? sleepUntil;
 
+  /// 跨章略读模式（每章预览 30s 自动切下一章）。
+  final bool isSkimming;
+
   bool get hasBook => audiobook != null && chunks.isNotEmpty;
 
   ChapterChunk? get currentChunk =>
       (currentChunkIndex >= 0 && currentChunkIndex < chunks.length)
-          ? chunks[currentChunkIndex]
-          : null;
+      ? chunks[currentChunkIndex]
+      : null;
 
   bool get hasPreviousChunk => currentChunkIndex > 0;
   bool get hasNextChunk => currentChunkIndex + 1 < chunks.length;
@@ -263,10 +313,9 @@ class ChunkedPlayerState {
     return (chunk.startS * 1000).round() + positionMs;
   }
 
-  SrtCue? get activeCue =>
-      (activeCueIndex >= 0 && activeCueIndex < cues.length)
-          ? cues[activeCueIndex]
-          : null;
+  SrtCue? get activeCue => (activeCueIndex >= 0 && activeCueIndex < cues.length)
+      ? cues[activeCueIndex]
+      : null;
 
   ChunkedPlayerState copyWith({
     AudiobookInfo? audiobook,
@@ -276,12 +325,14 @@ class ChunkedPlayerState {
     bool? isPlaying,
     bool? isLoading,
     double? speed,
+    double? volume,
     List<SrtCue>? cues,
     int? activeCueIndex,
     String? error,
     bool clearError = false,
     DateTime? sleepUntil,
     bool clearSleepUntil = false,
+    bool? isSkimming,
   }) {
     return ChunkedPlayerState(
       audiobook: audiobook ?? this.audiobook,
@@ -291,10 +342,12 @@ class ChunkedPlayerState {
       isPlaying: isPlaying ?? this.isPlaying,
       isLoading: isLoading ?? this.isLoading,
       speed: speed ?? this.speed,
+      volume: volume ?? this.volume,
       cues: cues ?? this.cues,
       activeCueIndex: activeCueIndex ?? this.activeCueIndex,
       error: clearError ? null : (error ?? this.error),
       sleepUntil: clearSleepUntil ? null : (sleepUntil ?? this.sleepUntil),
+      isSkimming: isSkimming ?? this.isSkimming,
     );
   }
 }
@@ -308,24 +361,40 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   ChunkedPlayerController(
     this._api,
     this._engine,
-    this._progressStore,
-  ) : super(const ChunkedPlayerState()) {
+    this._progressStore, {
+    this.onProgressSaved,
+  }) : super(const ChunkedPlayerState()) {
     _posSub = _engine.positionStream.listen(_onPosition);
     _playSub = _engine.playingStream.listen(_onPlayingChanged);
     _doneSub = _engine.completedStream.listen((_) => _onChunkCompleted());
-    // 锁屏/通知栏的"上一首/下一首"映射为章节切换。
+    // 锁屏/通知栏的"上一首/下一首"映射为章节切换，"快退/快进"映射为 ±15s。
     if (_engine is LockScreenControls) {
       final controls = _engine as LockScreenControls;
-      _lockScreenSubs
-          .add(controls.skipToNextRequests.listen((_) => unawaited(nextChunk())));
-      _lockScreenSubs.add(controls
-          .skipToPreviousRequests.listen((_) => unawaited(previousChunk())));
+      _lockScreenSubs.add(
+        controls.skipToNextRequests.listen((_) => unawaited(nextChunk())),
+      );
+      _lockScreenSubs.add(
+        controls.skipToPreviousRequests.listen(
+          (_) => unawaited(previousChunk()),
+        ),
+      );
+      _lockScreenSubs.add(
+        controls.fastForwardRequests.listen(
+          (_) => unawaited(skipBy(const Duration(seconds: 15))),
+        ),
+      );
+      _lockScreenSubs.add(
+        controls.rewindRequests.listen(
+          (_) => unawaited(skipBy(const Duration(seconds: -15))),
+        ),
+      );
     }
   }
 
   final EchoApi _api;
   final AudioEngine _engine;
   final ProgressStore _progressStore;
+  final ValueChanged<PlaybackProgress>? onProgressSaved;
 
   /// 当前有声书封面对应的书籍封面地址（用于锁屏/通知栏封面图）。
   String? _coverUrl;
@@ -339,6 +408,43 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   final List<StreamSubscription<void>> _lockScreenSubs =
       <StreamSubscription<void>>[];
   int _lastSavedMs = -1;
+
+  int? _prefetchedChunkIndex;
+  List<SrtCue>? _prefetchedCues;
+  bool _isPrefetching = false;
+
+  Future<void> _prefetchNextChunk(int nextIndex) async {
+    if (nextIndex < 0 || nextIndex >= state.chunks.length) return;
+    _isPrefetching = true;
+    try {
+      final chunk = state.chunks[nextIndex];
+      final audiobookId = state.audiobook?.id ?? 0;
+      var cues = const <SrtCue>[];
+      if (audiobookId > 0) {
+        try {
+          final localSrt = await OfflineFiles.srtFile(
+            audiobookId,
+            chunk.n,
+          ).timeout(const Duration(milliseconds: 400));
+          if (localSrt != null) {
+            cues = SrtParser.parse(await localSrt.readAsString());
+          }
+        } catch (_) {}
+      }
+      if (cues.isEmpty && chunk.srtUrl.isNotEmpty) {
+        try {
+          final rawSrt = await _api.fetchText(chunk.srtUrl);
+          cues = SrtParser.parse(rawSrt);
+        } catch (_) {}
+      }
+      _prefetchedChunkIndex = nextIndex;
+      _prefetchedCues = cues;
+    } catch (_) {
+      // 预取失败静默忽略
+    } finally {
+      _isPrefetching = false;
+    }
+  }
 
   /// 载入有声书并自动恢复上次断点续听位置。
   Future<void> loadAudiobook(
@@ -372,10 +478,10 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
             if (saved != null) {
               final found = burst.chunks.indexWhere((c) => c.n == saved.chunkN);
               if (found != -1) {
-                final chunkMs =
-                    (burst.chunks[found].durationS * 1000).round();
+                final chunkMs = (burst.chunks[found].durationS * 1000).round();
                 // 与在线路径一致：已听完（末尾 2s 内）则从头重播
-                final listenedToEnd = found == burst.chunks.length - 1 &&
+                final listenedToEnd =
+                    found == burst.chunks.length - 1 &&
                     chunkMs > 0 &&
                     saved.offsetMs >= chunkMs - 2000;
                 if (!listenedToEnd) {
@@ -428,7 +534,8 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       final foundIdx = chunks.indexWhere((c) => c.n == saved.chunkN);
       if (foundIdx != -1) {
         final chunkMs = (chunks[foundIdx].durationS * 1000).round();
-        final listenedToEnd = foundIdx == chunks.length - 1 &&
+        final listenedToEnd =
+            foundIdx == chunks.length - 1 &&
             chunkMs > 0 &&
             saved.offsetMs >= chunkMs - 2000;
         if (!listenedToEnd) {
@@ -469,6 +576,7 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     int index, {
     int initialOffsetMs = 0,
     bool autoPlay = true,
+    int attempt = 0,
   }) async {
     if (index < 0 || index >= state.chunks.length) return;
     final chunk = state.chunks[index];
@@ -487,8 +595,10 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     File? localAudio;
     if (audiobookId > 0) {
       try {
-        localAudio = await OfflineFiles.audioFile(audiobookId, chunk.n)
-            .timeout(const Duration(milliseconds: 400));
+        localAudio = await OfflineFiles.audioFile(
+          audiobookId,
+          chunk.n,
+        ).timeout(const Duration(milliseconds: 400));
       } catch (_) {
         localAudio = null;
       }
@@ -517,8 +627,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
             mediaArtist: chunk.title.isNotEmpty
                 ? chunk.title
                 : '第 ${state.currentChunkIndex + 1} 章',
-            mediaDuration:
-                Duration(milliseconds: (chunk.durationS * 1000).round()),
+            mediaDuration: Duration(
+              milliseconds: (chunk.durationS * 1000).round(),
+            ),
             mediaArtUrl: cachedCover ?? _coverUrl,
           )
           .timeout(const Duration(seconds: 30));
@@ -526,11 +637,19 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
 
       // 异步拉取当前分块 SRT 字幕（失败或无字幕时自动降级为纯封面模式）。
       var parsedCues = const <SrtCue>[];
+      // 0) 命中预取字幕缓存
+      if (_prefetchedChunkIndex == index && _prefetchedCues != null) {
+        parsedCues = _prefetchedCues!;
+        _prefetchedChunkIndex = null;
+        _prefetchedCues = null;
+      }
       // 1) 离线字幕（独立容错）
-      if (audiobookId > 0) {
+      if (parsedCues.isEmpty && audiobookId > 0) {
         try {
-          final localSrt = await OfflineFiles.srtFile(audiobookId, chunk.n)
-              .timeout(const Duration(milliseconds: 400));
+          final localSrt = await OfflineFiles.srtFile(
+            audiobookId,
+            chunk.n,
+          ).timeout(const Duration(milliseconds: 400));
           if (localSrt != null) {
             parsedCues = SrtParser.parse(await localSrt.readAsString());
           }
@@ -562,6 +681,17 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
         await _engine.play();
       }
     } catch (e) {
+      if (attempt == 0 && hasListeners) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (hasListeners) {
+          return _loadChunk(
+            index,
+            initialOffsetMs: initialOffsetMs,
+            autoPlay: autoPlay,
+            attempt: attempt + 1,
+          );
+        }
+      }
       final raw = e.toString();
       final message = switch (e) {
         TimeoutException() => '音频加载超时：请检查网络或服务地址是否可达',
@@ -591,6 +721,16 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     }
   }
 
+  /// 播放 / 暂停切换（别名）。
+  Future<void> togglePlay() => togglePlayPause();
+
+  /// 绝对时间跳转（毫秒）。
+  Future<void> seekTo(int positionMs) => seekToMs(positionMs);
+
+  /// 相对时间跳转（毫秒偏移量，支持正负）。
+  Future<void> seekByRelativeMs(int offsetMs) =>
+      skipBy(Duration(milliseconds: offsetMs));
+
   /// 快进 / 快退（如 ±15s），支持无缝跨越分块边界。
   Future<void> skipBy(Duration delta) async {
     if (!state.hasBook) return;
@@ -601,8 +741,10 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
       if (state.hasPreviousChunk) {
         final prevIndex = state.currentChunkIndex - 1;
         final prevDurMs = (state.chunks[prevIndex].durationS * 1000).round();
-        final prevOffset =
-            (prevDurMs + targetMs).clamp(0, prevDurMs > 0 ? prevDurMs : 0);
+        final prevOffset = (prevDurMs + targetMs).clamp(
+          0,
+          prevDurMs > 0 ? prevDurMs : 0,
+        );
         await _loadChunk(
           prevIndex,
           initialOffsetMs: prevOffset,
@@ -619,8 +761,10 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
         final nextIndex = state.currentChunkIndex + 1;
         final nextDurMs = (state.chunks[nextIndex].durationS * 1000).round();
         final overflow = targetMs - chunkDurMs;
-        final nextOffset =
-            overflow.clamp(0, nextDurMs > 0 ? nextDurMs : overflow);
+        final nextOffset = overflow.clamp(
+          0,
+          nextDurMs > 0 ? nextDurMs : overflow,
+        );
         await _loadChunk(
           nextIndex,
           initialOffsetMs: nextOffset,
@@ -674,6 +818,12 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     state = state.copyWith(speed: speed);
   }
 
+  Future<void> setVolume(double volume) async {
+    final clamped = volume.clamp(0.0, 1.0);
+    await _engine.setVolume(clamped);
+    state = state.copyWith(volume: clamped);
+  }
+
   // ---- 睡眠定时 ----
 
   Timer? _sleepTimer;
@@ -698,6 +848,48 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     state = state.copyWith(clearSleepUntil: true);
   }
 
+  // ---- 跨章略读模式（设计 §5.1：每章预览 30s）----
+
+  Timer? _skimTimer;
+
+  /// 跨章略读：按 [delta]（+1 / -1）切到目标章并开启 30s 预览计时器，
+  /// 到点自动按同一方向进入下一章；到达边界或调用 [cancelSkim] 时停止。
+  Future<void> skimChapter(
+    int delta, {
+    Duration previewDuration = const Duration(seconds: 30),
+  }) async {
+    if (!state.hasBook || delta == 0) return;
+    final target = (state.currentChunkIndex + delta).clamp(
+      0,
+      state.chunks.length - 1,
+    );
+    if (target == state.currentChunkIndex) {
+      cancelSkim();
+      return;
+    }
+    _skimTimer?.cancel();
+    state = state.copyWith(isSkimming: true);
+    await _loadChunk(target, initialOffsetMs: 0, autoPlay: true);
+    _skimTimer = Timer(previewDuration, () {
+      if (!state.isSkimming) return;
+      final next = state.currentChunkIndex + (delta > 0 ? 1 : -1);
+      if (next >= 0 && next < state.chunks.length) {
+        unawaited(skimChapter(delta, previewDuration: previewDuration));
+      } else {
+        cancelSkim();
+      }
+    });
+  }
+
+  /// 退出跨章略读模式。
+  void cancelSkim() {
+    _skimTimer?.cancel();
+    _skimTimer = null;
+    if (state.isSkimming) {
+      state = state.copyWith(isSkimming: false);
+    }
+  }
+
   int _lastTickedMs = 0;
 
   void _onPosition(Duration pos) {
@@ -715,6 +907,14 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     if ((ms - _lastSavedMs).abs() >= 3000) {
       _lastSavedMs = ms;
       unawaited(_saveProgress());
+    }
+    final chunkDurMs = state.currentChunkDurationMs;
+    if (state.hasNextChunk &&
+        chunkDurMs > 0 &&
+        chunkDurMs - ms <= 25000 &&
+        !_isPrefetching &&
+        _prefetchedChunkIndex != state.currentChunkIndex + 1) {
+      unawaited(_prefetchNextChunk(state.currentChunkIndex + 1));
     }
   }
 
@@ -745,14 +945,15 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     final book = state.audiobook;
     final chunk = state.currentChunk;
     if (book == null || chunk == null) return;
-    await _progressStore.write(
-      PlaybackProgress(
-        audiobookId: book.id,
-        chapterIndex: chunk.chapterIndex,
-        chunkN: chunk.n,
-        offsetMs: state.positionMs,
-      ),
+    final progress = PlaybackProgress(
+      audiobookId: book.id,
+      chapterIndex: chunk.chapterIndex,
+      chunkN: chunk.n,
+      offsetMs: state.positionMs,
+      updatedAt: DateTime.now().toUtc(),
     );
+    await _progressStore.write(progress);
+    onProgressSaved?.call(progress);
   }
 
   @override
@@ -761,6 +962,7 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     _playSub?.cancel();
     _doneSub?.cancel();
     _sleepTimer?.cancel();
+    _skimTimer?.cancel();
     for (final sub in _lockScreenSubs) {
       sub.cancel();
     }
@@ -768,9 +970,6 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
     super.dispose();
   }
 }
-
-final Provider<ProgressStore> progressStoreProvider =
-    Provider<ProgressStore>((ref) => PersistentProgressStore());
 
 /// 生产引擎选择：Android/iOS 已初始化 audio_service（锁屏播控）时用
 /// [AudioServiceEngine]，桌面/测试等平台回退 [JustAudioEngine]。
@@ -781,11 +980,14 @@ final Provider<AudioEngine> audioEngineProvider = Provider<AudioEngine>(
 );
 
 final StateNotifierProvider<ChunkedPlayerController, ChunkedPlayerState>
-    chunkedPlayerProvider =
+chunkedPlayerProvider =
     StateNotifierProvider<ChunkedPlayerController, ChunkedPlayerState>((ref) {
-  return ChunkedPlayerController(
-    ref.watch(echoApiProvider),
-    ref.watch(audioEngineProvider),
-    ref.watch(progressStoreProvider),
-  );
-});
+      return ChunkedPlayerController(
+        ref.watch(echoApiProvider),
+        ref.watch(audioEngineProvider),
+        ref.watch(progressStoreProvider),
+        onProgressSaved: (p) {
+          ref.read(progressSyncServiceProvider.notifier).reportAudioProgress(p);
+        },
+      );
+    });

@@ -1,9 +1,11 @@
+import 'dart:io' show File;
+
 import 'package:flutter/material.dart';
 
 import 'echo_metrics.dart';
 import 'echo_tokens.dart';
 
-/// 书籍封面组件：优先展示真实 cover_url（书源 CDN），
+/// 书籍封面组件：优先展示真实 cover_url（远端 CDN 或本地文件），
 /// 加载失败或缺失时回退为设计风格占位（暖橙渐变 + 书本图标）。
 class BookCover extends StatelessWidget {
   const BookCover({
@@ -11,13 +13,13 @@ class BookCover extends StatelessWidget {
     this.url,
     this.width = 48,
     this.height = 64,
+    this.semanticLabel,
   });
 
   final String? url;
   final double width;
   final double height;
-
-  bool get _hasUrl => url != null && url!.startsWith('http');
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -41,21 +43,41 @@ class BookCover extends StatelessWidget {
       child: Icon(
         Icons.menu_book_outlined,
         color: tokens.textOnPrimary,
-        size: width * 0.42,
+        size: width.isFinite ? width * 0.42 : 48.0,
       ),
     );
 
-    if (!_hasUrl) return fallback;
-
-    return ClipRRect(
-      borderRadius: radius,
-      child: Image.network(
-        url!,
+    Widget imageWidget;
+    final coverUrl = url;
+    if (coverUrl != null &&
+        (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'))) {
+      imageWidget = Image.network(
+        coverUrl,
         width: width,
         height: height,
         fit: BoxFit.cover,
         errorBuilder: (_, _, _) => fallback,
-      ),
-    );
+      );
+    } else if (coverUrl != null &&
+        (coverUrl.startsWith('file://') || coverUrl.startsWith('/'))) {
+      final path = coverUrl.startsWith('file://')
+          ? coverUrl.substring(7)
+          : coverUrl;
+      imageWidget = Image.file(
+        File(path),
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => fallback,
+      );
+    } else {
+      imageWidget = fallback;
+    }
+
+    final widget = ClipRRect(borderRadius: radius, child: imageWidget);
+
+    return semanticLabel != null
+        ? Semantics(image: true, label: semanticLabel, child: widget)
+        : ExcludeSemantics(child: widget);
   }
 }

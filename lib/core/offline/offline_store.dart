@@ -9,6 +9,48 @@ import '../api/echo_api.dart';
 import '../api/models.dart';
 import '../../features/auth/auth_controller.dart';
 
+/// 单本有声书的离线存储统计。
+@immutable
+class OfflineBookEntry {
+  const OfflineBookEntry({
+    required this.audiobookId,
+    required this.chunks,
+    required this.bytes,
+  });
+
+  final int audiobookId;
+  final int chunks;
+  final int bytes;
+}
+
+/// 全部离线内容的存储汇总。
+@immutable
+class OfflineSummary {
+  const OfflineSummary({
+    this.entries = const <OfflineBookEntry>[],
+    this.totalChunks = 0,
+    this.totalBytes = 0,
+  });
+
+  final List<OfflineBookEntry> entries;
+  final int totalChunks;
+  final int totalBytes;
+
+  bool get isEmpty => entries.isEmpty;
+}
+
+/// 将字节数格式化为人类可读的体积文本（B / KB / MB / GB）。
+String formatBytes(int bytes) {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+  final mb = kb / 1024;
+  if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+  final gb = mb / 1024;
+  return '${gb.toStringAsFixed(2)} GB';
+}
+
 /// 离线文件定位：音频块与 SRT 字幕落在应用私有目录。
 ///
 /// 播放器载入分块时先查本地文件，命中即离线播放（不依赖网络）。
@@ -23,6 +65,12 @@ abstract final class OfflineFiles {
     } catch (_) {
       _root = null;
     }
+  }
+
+  /// 供测试注入临时离线根目录，避免依赖 path_provider 平台通道。
+  @visibleForTesting
+  static void setRootForTest(Directory? dir) {
+    _root = dir;
   }
 
   static bool get initialized => _root != null;
@@ -95,26 +143,86 @@ abstract final class OfflineFiles {
   /// 某本有声书已下载的分块数量与总体积。
   static Future<({int chunks, int bytes})> stats(int audiobookId) async {
     try {
-    final dir = await dirFor(audiobookId);
-    var count = 0;
-    var bytes = 0;
-    if (dir.existsSync()) {
-      for (final entity in dir.listSync()) {
-        if (entity is File) {
-          bytes += entity.lengthSync();
-          if (entity.path.endsWith('.audio')) count += 1;
+      final dir = await dirFor(audiobookId);
+      var count = 0;
+      var bytes = 0;
+      if (dir.existsSync()) {
+        for (final entity in dir.listSync()) {
+          if (entity is File) {
+            bytes += entity.lengthSync();
+            if (entity.path.endsWith('.audio')) count += 1;
+          }
         }
       }
-    }
-    return (chunks: count, bytes: bytes);
+      return (chunks: count, bytes: bytes);
     } catch (_) {
       return (chunks: 0, bytes: 0);
     }
   }
 
+  /// 扫描全部离线缓存目录，汇总各本有声书的章节数与占用体积（按体积倒序）。
+  static Future<OfflineSummary> scanAll() async {
+    try {
+      final base = _root;
+      if (base == null || !base.existsSync()) {
+        return const OfflineSummary();
+      }
+      final entries = <OfflineBookEntry>[];
+      var totalChunks = 0;
+      var totalBytes = 0;
+      for (final entity in base.listSync()) {
+        if (entity is! Directory) continue;
+        final name = entity.uri.pathSegments
+            .where((s) => s.isNotEmpty)
+            .lastOrNull;
+        final id = int.tryParse(name ?? '');
+        if (id == null) continue;
+        var count = 0;
+        var bytes = 0;
+        for (final child in entity.listSync()) {
+          if (child is File) {
+            bytes += child.lengthSync();
+            if (child.path.endsWith('.audio')) count += 1;
+          }
+        }
+        if (bytes > 0 || count > 0) {
+          entries.add(
+            OfflineBookEntry(audiobookId: id, chunks: count, bytes: bytes),
+          );
+          totalChunks += count;
+          totalBytes += bytes;
+        }
+      }
+      entries.sort((a, b) => b.bytes.compareTo(a.bytes));
+      return OfflineSummary(
+        entries: entries,
+        totalChunks: totalChunks,
+        totalBytes: totalBytes,
+      );
+    } catch (_) {
+      return const OfflineSummary();
+    }
+  }
+
   static Future<void> removeAudiobook(int audiobookId) async {
-    final dir = await dirFor(audiobookId);
-    if (dir.existsSync()) await dir.delete(recursive: true);
+    final base = _root ?? await root();
+    final dir = Directory('${base.path}/$audiobookId');
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  }
+
+  /// 清空全部离线缓存目录。
+  static Future<void> clearAll() async {
+    final base = _root;
+    if (base == null || !base.existsSync()) return;
+    for (final entity in base.listSync()) {
+      try {
+        if (entity.existsSync()) {
+          entity.deleteSync(recursive: true);
+        }
+      } catch (_) {
+        // 单个目录删除失败不中断其余清理
+      }
+    }
   }
 }
 
@@ -141,13 +249,12 @@ class OfflineState {
     String? error,
     int? chunks,
     bool clearError = false,
-  }) =>
-      OfflineState(
-        status: status ?? this.status,
-        progress: progress ?? this.progress,
-        error: clearError ? null : (error ?? this.error),
-        chunks: chunks ?? this.chunks,
-      );
+  }) => OfflineState(
+    status: status ?? this.status,
+    progress: progress ?? this.progress,
+    error: clearError ? null : (error ?? this.error),
+    chunks: chunks ?? this.chunks,
+  );
 }
 
 /// 离线下载管理器：按分块下载音频 + SRT，供播放器离线播放。
@@ -158,6 +265,7 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
 
   final EchoApi _api;
   final Set<int> _running = <int>{};
+  final Map<int, CancelToken> _cancelTokens = <int, CancelToken>{};
 
   OfflineState stateOf(int audiobookId) =>
       state[audiobookId] ?? const OfflineState();
@@ -166,6 +274,14 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
   Future<void> _restore() async {
     // 无法枚举所有有声书目录，按需在 stateOf 读取时再判断；
     // 这里只做一次轻量预热（目录可能为空）。
+  }
+
+  /// 取消指定有声书的正在进行的下载。
+  void cancelDownload(int audiobookId) {
+    final token = _cancelTokens.remove(audiobookId);
+    token?.cancel('用户取消下载');
+    _running.remove(audiobookId);
+    _set(audiobookId, const OfflineState(status: OfflineStatus.idle));
   }
 
   /// 刷新某本有声书的离线状态（判断本地是否已有全部分块）。
@@ -178,8 +294,8 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
         final file = await OfflineFiles.audioFile(audio.id, chunk.n);
         if (file != null) downloaded += 1;
       }
-      final done = manifest.chunks.isNotEmpty &&
-          downloaded == manifest.chunks.length;
+      final done =
+          manifest.chunks.isNotEmpty && downloaded == manifest.chunks.length;
       state = <int, OfflineState>{
         ...state,
         audio.id: OfflineState(
@@ -197,23 +313,30 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
     }
   }
 
-  /// 下载整本有声书（所有分块的音频 + SRT）。
+  /// 下载整本有声书（所有分块的音频 + SRT，支持断点跳过已存在分块）。
   Future<String?> download(AudiobookInfo audio) async {
     if (!audio.isReady || _running.contains(audio.id)) return null;
     _running.add(audio.id);
+    final cancelToken = CancelToken();
+    _cancelTokens[audio.id] = cancelToken;
     _set(
       audio.id,
       const OfflineState(status: OfflineStatus.downloading, progress: 0),
     );
     try {
       // 先取原始 JSON 存到本地，供断网时离线播放使用
-      final rawManifest = await _api.fetchText('/api/audiobooks/${audio.id}/chapters');
+      final rawManifest = await _api.fetchText(
+        '/api/audiobooks/${audio.id}/chapters',
+      );
       if (rawManifest.isNotEmpty) {
         await OfflineFiles.saveManifest(audio.id, rawManifest);
       }
       final manifest = await _api.getAudiobookChapters(audio.id);
       if (manifest.chunks.isEmpty) {
-        _set(audio.id, const OfflineState(status: OfflineStatus.failed, error: '无可下载分块'));
+        _set(
+          audio.id,
+          const OfflineState(status: OfflineStatus.failed, error: '无可下载分块'),
+        );
         return '无可下载分块';
       }
       final dir = await OfflineFiles.dirFor(audio.id);
@@ -222,21 +345,31 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
       final total = manifest.chunks.length;
 
       for (var i = 0; i < total; i++) {
+        if (cancelToken.isCancelled) break;
         final chunk = manifest.chunks[i];
         final audioFile = File('${dir.path}/${chunk.n}.audio');
         final srtFile = File('${dir.path}/${chunk.n}.srt');
-        await _downloadTo(
-          dio,
-          _api.resolveUri(chunk.audioUrl),
-          audioFile,
-          headers,
-        );
-        if (chunk.srtUrl.isNotEmpty) {
+        final audioDone = audioFile.existsSync() && audioFile.lengthSync() > 0;
+        final srtDone =
+            chunk.srtUrl.isEmpty ||
+            (srtFile.existsSync() && srtFile.lengthSync() > 0);
+
+        if (!audioDone) {
+          await _downloadTo(
+            dio,
+            _api.resolveUri(chunk.audioUrl),
+            audioFile,
+            headers,
+            cancelToken: cancelToken,
+          );
+        }
+        if (!srtDone && chunk.srtUrl.isNotEmpty) {
           await _downloadTo(
             dio,
             _api.resolveUri(chunk.srtUrl),
             srtFile,
             headers,
+            cancelToken: cancelToken,
           );
         }
         _set(
@@ -248,17 +381,29 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
           ),
         );
       }
+      if (cancelToken.isCancelled) {
+        _set(audio.id, const OfflineState(status: OfflineStatus.idle));
+        return '已取消下载';
+      }
       _set(
         audio.id,
         OfflineState(status: OfflineStatus.done, progress: 1, chunks: total),
       );
       return null;
     } catch (e) {
+      if (cancelToken.isCancelled) {
+        _set(audio.id, const OfflineState(status: OfflineStatus.idle));
+        return '已取消下载';
+      }
       final message = '下载失败：$e';
-      _set(audio.id, OfflineState(status: OfflineStatus.failed, error: message));
+      _set(
+        audio.id,
+        OfflineState(status: OfflineStatus.failed, error: message),
+      );
       return message;
     } finally {
       _running.remove(audio.id);
+      _cancelTokens.remove(audio.id);
     }
   }
 
@@ -266,10 +411,12 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
     Dio dio,
     Uri uri,
     File target,
-    Map<String, String> headers,
-  ) async {
+    Map<String, String> headers, {
+    CancelToken? cancelToken,
+  }) async {
     final response = await dio.get<List<int>>(
       uri.toString(),
+      cancelToken: cancelToken,
       options: Options(
         responseType: ResponseType.bytes,
         headers: headers,
@@ -284,9 +431,18 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
   }
 
   /// 删除离线文件。
-  Future<void> remove(AudiobookInfo audio) async {
-    await OfflineFiles.removeAudiobook(audio.id);
-    _set(audio.id, const OfflineState());
+  Future<void> remove(AudiobookInfo audio) => removeById(audio.id);
+
+  /// 按有声书 ID 删除离线文件。
+  Future<void> removeById(int audiobookId) async {
+    await OfflineFiles.removeAudiobook(audiobookId);
+    _set(audiobookId, const OfflineState());
+  }
+
+  /// 清空全部离线缓存。
+  Future<void> clearAll() async {
+    await OfflineFiles.clearAll();
+    state = const <int, OfflineState>{};
   }
 
   void _set(int id, OfflineState value) {
@@ -295,7 +451,7 @@ class OfflineStore extends StateNotifier<Map<int, OfflineState>> {
 }
 
 final StateNotifierProvider<OfflineStore, Map<int, OfflineState>>
-    offlineStoreProvider =
+offlineStoreProvider =
     StateNotifierProvider<OfflineStore, Map<int, OfflineState>>((ref) {
-  return OfflineStore(ref.watch(echoApiProvider));
-});
+      return OfflineStore(ref.watch(echoApiProvider));
+    });

@@ -7,8 +7,7 @@ import 'tokens_fixtures.dart';
 void main() {
   group('EchoTokens 解析', () {
     test('dark：解析 #RRGGBB 与 rgba()', () {
-      final tokens =
-          EchoTokens.fromColors(darkColors, Brightness.dark);
+      final tokens = EchoTokens.fromColors(darkColors, Brightness.dark);
       expect(tokens.primary, const Color(0xFF6366F1));
       expect(tokens.primaryHover, const Color(0xFF818CF8));
       expect(tokens.surfaceBase, const Color(0xFF020617));
@@ -32,8 +31,9 @@ void main() {
       expect(tokens.paperText, tokens.textPrimary);
     });
 
-    testWidgets('资产载入：assets/design-tokens.json 与解析器闭环',
-        (WidgetTester tester) async {
+    testWidgets('资产载入：assets/design-tokens.json 与解析器闭环', (
+      WidgetTester tester,
+    ) async {
       final tokens = await EchoTokens.load(Brightness.dark);
       expect(tokens.surfaceBase, const Color(0xFF020617));
       expect(tokens.primary, const Color(0xFF6366F1));

@@ -81,10 +81,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
           ),
           trailing: good
               ? null
-              : FilledButton.tonal(
-                  onPressed: onFix,
-                  child: Text(fixLabel),
-                ),
+              : FilledButton.tonal(onPressed: onFix, child: Text(fixLabel)),
         ),
       );
     }
@@ -134,8 +131,9 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                 children: [
                   Text(
                     '华为 / 荣耀机型额外设置',
-                    style: textTheme.titleSmall
-                        ?.copyWith(color: tokens.textPrimary),
+                    style: textTheme.titleSmall?.copyWith(
+                      color: tokens.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: EchoMetrics.space1),
                   Text(

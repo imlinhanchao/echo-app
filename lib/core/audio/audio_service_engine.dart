@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import 'chunked_player_controller.dart' show AudioEngine, LockScreenControls;
 
 /// audio_service 后台处理器：把 just_audio 会话桥接到系统媒体控制
-/// （锁屏/通知栏：书名 + 章节名 + 进度条 + 上一章/下一章）。
+/// （锁屏/通知栏：书名 + 章节名 + 进度条 + 上一章/-15s/播放/+15s/下一章）。
 class EchoAudioHandler extends BaseAudioHandler {
   EchoAudioHandler() {
     _player.playingStream.listen((_) => _broadcast());
@@ -20,10 +21,15 @@ class EchoAudioHandler extends BaseAudioHandler {
   final AudioPlayer _player = AudioPlayer();
   final StreamController<void> _skipNext = StreamController<void>.broadcast();
   final StreamController<void> _skipPrev = StreamController<void>.broadcast();
+  final StreamController<void> _fastForward =
+      StreamController<void>.broadcast();
+  final StreamController<void> _rewind = StreamController<void>.broadcast();
 
   AudioPlayer get player => _player;
   Stream<void> get skipNextRequests => _skipNext.stream;
   Stream<void> get skipPrevRequests => _skipPrev.stream;
+  Stream<void> get fastForwardRequests => _fastForward.stream;
+  Stream<void> get rewindRequests => _rewind.stream;
 
   /// 载入一个分块音源并广播媒体元数据（锁屏显示书名/章节/时长）。
   Future<void> setChunkSource(
@@ -65,6 +71,9 @@ class EchoAudioHandler extends BaseAudioHandler {
   @override
   Future<void> setSpeed(double speed) => _player.setSpeed(speed);
 
+  Future<void> setVolume(double volume) =>
+      _player.setVolume(volume.clamp(0.0, 1.0));
+
   @override
   Future<void> stop() async {
     await _player.stop();
@@ -72,12 +81,18 @@ class EchoAudioHandler extends BaseAudioHandler {
   }
 
   /// 锁屏"上一首/下一首"按设计映射为章节切换请求，
-  /// 由 [EchoAudioHandler] 持有的流交由 ChunkedPlayerController 消费。
+  /// "快退/快进"映射为 ±15s（由 ChunkedPlayerController 跨块处理）。
   @override
   Future<void> skipToNext() async => _skipNext.add(null);
 
   @override
   Future<void> skipToPrevious() async => _skipPrev.add(null);
+
+  @override
+  Future<void> fastForward() async => _fastForward.add(null);
+
+  @override
+  Future<void> rewind() async => _rewind.add(null);
 
   static const _processingStateMap = <ProcessingState, AudioProcessingState>{
     ProcessingState.idle: AudioProcessingState.idle,
@@ -92,13 +107,23 @@ class EchoAudioHandler extends BaseAudioHandler {
       PlaybackState(
         controls: <MediaControl>[
           MediaControl.skipToPrevious,
+          MediaControl.rewind,
           if (_player.playing) MediaControl.pause else MediaControl.play,
+          MediaControl.fastForward,
           MediaControl.skipToNext,
         ],
-        androidCompactActionIndices: const <int>[0, 1, 2],
+        systemActions: const <MediaAction>{
+          MediaAction.seek,
+          MediaAction.rewind,
+          MediaAction.fastForward,
+          MediaAction.skipToPrevious,
+          MediaAction.skipToNext,
+        },
+        // 紧凑通知栏优先展示：-15s / 播放暂停 / +15s（对齐设计 §4.1 锁屏播控卡）
+        androidCompactActionIndices: const <int>[1, 2, 3],
         processingState:
             _processingStateMap[_player.processingState] ??
-                AudioProcessingState.idle,
+            AudioProcessingState.idle,
         playing: _player.playing,
         updatePosition: _player.position,
         bufferedPosition: _player.bufferedPosition,
@@ -108,7 +133,7 @@ class EchoAudioHandler extends BaseAudioHandler {
   }
 }
 
-/// 经 audio_service 驱动的生产引擎（Android/iOS）。
+/// 经 audio_service 驱动的生产引擎（Android/iOS），集成 audio_session 音频焦点。
 /// 单例由 [tryInit] 在 main() 初始化；dispose 为空操作（会话与 App 同生命周期）。
 class AudioServiceEngine implements AudioEngine, LockScreenControls {
   AudioServiceEngine._(this._handler);
@@ -120,8 +145,9 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
   static AudioServiceEngine get instance => _instance!;
 
   final EchoAudioHandler _handler;
+  bool _pausedByInterruption = false;
 
-  /// 在 main() 中初始化后台媒体会话；
+  /// 在 main() 中初始化后台媒体会话与音频焦点（来电/耳机拔出自动暂停）；
   /// 非 Android/iOS 平台（桌面/测试）自动跳过并回退 just_audio。
   static Future<void> tryInit() async {
     if (kIsWeb) return;
@@ -136,12 +162,57 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
           // 通知可被划掉，因此 ongoing 必须为 false（audio_service 有断言）。
           androidNotificationOngoing: false,
           androidStopForegroundOnPause: false,
+          rewindInterval: Duration(seconds: 15),
+          fastForwardInterval: Duration(seconds: 15),
         ),
       );
-      _instance = AudioServiceEngine._(handler);
+      final engine = AudioServiceEngine._(handler);
+      await engine._initAudioSession();
+      _instance = engine;
       initialized = true;
     } catch (e) {
       debugPrint('AudioService 初始化失败，回退 just_audio：$e');
+    }
+  }
+
+  Future<void> _initAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.speech());
+      session.interruptionEventStream.listen((event) {
+        if (event.begin) {
+          switch (event.type) {
+            case AudioInterruptionType.duck:
+              _handler.setVolume(0.35);
+            case AudioInterruptionType.pause:
+            case AudioInterruptionType.unknown:
+              if (_handler.player.playing) {
+                _pausedByInterruption = true;
+                unawaited(_handler.pause());
+              }
+          }
+        } else {
+          switch (event.type) {
+            case AudioInterruptionType.duck:
+              _handler.setVolume(1.0);
+            case AudioInterruptionType.pause:
+              if (_pausedByInterruption) {
+                _pausedByInterruption = false;
+                unawaited(_handler.play());
+              }
+            case AudioInterruptionType.unknown:
+              _pausedByInterruption = false;
+          }
+        }
+      });
+      // 拔出耳机 / 蓝牙断开时自动暂停，防止公放尴尬
+      session.becomingNoisyEventStream.listen((_) {
+        if (_handler.player.playing) {
+          unawaited(_handler.pause());
+        }
+      });
+    } catch (e) {
+      debugPrint('AudioSession 焦点配置失败，忽略：$e');
     }
   }
 
@@ -165,19 +236,18 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     String? mediaArtist,
     Duration? mediaDuration,
     String? mediaArtUrl,
-  }) =>
-      _handler.setChunkSource(
-        uri,
-        headers: headers,
-        initialPosition: initialPosition,
-        duration: mediaDuration,
-        title: mediaTitle ?? '',
-        artist: mediaArtist ?? '',
-        // 本地缓存文件（file://）或远端地址都可；本地文件在 HarmonyOS/华为上更稳
-        artUri: (mediaArtUrl != null && mediaArtUrl.isNotEmpty)
-            ? Uri.tryParse(mediaArtUrl)
-            : null,
-      );
+  }) => _handler.setChunkSource(
+    uri,
+    headers: headers,
+    initialPosition: initialPosition,
+    duration: mediaDuration,
+    title: mediaTitle ?? '',
+    artist: mediaArtist ?? '',
+    // 本地缓存文件（file://）或远端地址都可；本地文件在 HarmonyOS/华为上更稳
+    artUri: (mediaArtUrl != null && mediaArtUrl.isNotEmpty)
+        ? Uri.tryParse(mediaArtUrl)
+        : null,
+  );
 
   @override
   Future<void> play() => _handler.play();
@@ -194,6 +264,9 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
   @override
   Future<void> setSpeed(double speed) => _handler.setSpeed(speed);
 
+  @override
+  Future<void> setVolume(double volume) => _handler.setVolume(volume);
+
   /// 空操作：后台媒体会话与 App 同生命周期，由系统管理释放。
   @override
   Future<void> dispose() async {}
@@ -203,4 +276,10 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
 
   @override
   Stream<void> get skipToPreviousRequests => _handler.skipPrevRequests;
+
+  @override
+  Stream<void> get fastForwardRequests => _handler.fastForwardRequests;
+
+  @override
+  Stream<void> get rewindRequests => _handler.rewindRequests;
 }

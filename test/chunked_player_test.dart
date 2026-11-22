@@ -104,11 +104,13 @@ void main() {
   );
 
   Future<
-      ({
-        ChunkedPlayerController controller,
-        FakeAudioEngine engine,
-        MemoryProgressStore progress,
-      })> createHarness({PlaybackProgress? initialProgress}) async {
+    ({
+      ChunkedPlayerController controller,
+      FakeAudioEngine engine,
+      MemoryProgressStore progress,
+    })
+  >
+  createHarness({PlaybackProgress? initialProgress}) async {
     final tokenStore = MemoryTokenStore();
     await tokenStore.write('echo_pat_media_token');
     final progressStore = MemoryProgressStore();
@@ -120,11 +122,7 @@ void main() {
     final api = EchoApi(dio: dio, tokenStore: tokenStore);
     final engine = FakeAudioEngine();
     final controller = ChunkedPlayerController(api, engine, progressStore);
-    return (
-      controller: controller,
-      engine: engine,
-      progress: progressStore,
-    );
+    return (controller: controller, engine: engine, progress: progressStore);
   }
 
   group('ChunkedPlayerController 分块播放引擎', () {
@@ -235,6 +233,39 @@ void main() {
 
       // 在第 1 块 5s 处后退 15s -> 应回到第 0 块 50s (50000ms)
       await h.controller.skipBy(const Duration(seconds: -15));
+      expect(h.controller.state.currentChunkIndex, 0);
+      expect(h.controller.state.positionMs, 50000);
+    });
+
+    test('音量控制：setVolume 限幅 [0, 1] 并同步到底层引擎', () async {
+      final h = await createHarness();
+      await h.controller.loadAudiobook(sampleBook);
+
+      await h.controller.setVolume(0.45);
+      expect(h.controller.state.volume, closeTo(0.45, 0.001));
+      expect(h.engine.volume, closeTo(0.45, 0.001));
+
+      await h.controller.setVolume(-0.2);
+      expect(h.controller.state.volume, 0.0);
+      expect(h.engine.volume, 0.0);
+
+      await h.controller.setVolume(1.5);
+      expect(h.controller.state.volume, 1.0);
+      expect(h.engine.volume, 1.0);
+    });
+
+    test('锁屏播控 ±15s：fastForward / rewind 触发跨块跳转', () async {
+      final h = await createHarness();
+      await h.controller.loadAudiobook(sampleBook);
+
+      await h.controller.seekToMs(50000);
+      h.engine.emitFastForward();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(h.controller.state.currentChunkIndex, 1);
+      expect(h.controller.state.positionMs, 5000);
+
+      h.engine.emitRewind();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(h.controller.state.currentChunkIndex, 0);
       expect(h.controller.state.positionMs, 50000);
     });

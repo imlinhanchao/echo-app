@@ -62,14 +62,16 @@ class EchoTokens extends ThemeExtension<EchoTokens> {
     final raw = await rootBundle.loadString(assetPath);
     final doc = jsonDecode(raw) as Map<String, dynamic>;
     final mode = brightness == Brightness.dark ? 'dark' : 'light';
-    final colors = (doc[mode]! as Map<String, dynamic>)['colors']!
-        as Map<String, dynamic>;
+    final colors =
+        (doc[mode]! as Map<String, dynamic>)['colors']! as Map<String, dynamic>;
     return EchoTokens.fromColors(colors, brightness);
   }
 
   /// 解析单个模式的 colors 节；测试亦经此入口验证解析逻辑。
   factory EchoTokens.fromColors(
-      Map<String, dynamic> colors, Brightness brightness) {
+    Map<String, dynamic> colors,
+    Brightness brightness,
+  ) {
     final primary = colors['primary']! as Map<String, dynamic>;
     final accent = colors['accent']! as Map<String, dynamic>;
     final surface = colors['surface']! as Map<String, dynamic>;
@@ -102,14 +104,8 @@ class EchoTokens extends ThemeExtension<EchoTokens> {
         reading?['highlight-sentence'],
         fallback: primaryBase.withValues(alpha: 0.24),
       ),
-      paperWarm: _parseColor(
-        reading?['paper-warm'],
-        fallback: surfaceBase,
-      ),
-      paperText: _parseColor(
-        reading?['paper-text'],
-        fallback: textPrimary,
-      ),
+      paperWarm: _parseColor(reading?['paper-warm'], fallback: surfaceBase),
+      paperText: _parseColor(reading?['paper-text'], fallback: textPrimary),
     );
   }
 
@@ -201,7 +197,11 @@ class EchoTokens extends ThemeExtension<EchoTokens> {
       error: Color.lerp(error, other.error, t)!,
       warning: Color.lerp(warning, other.warning, t)!,
       focusRing: Color.lerp(focusRing, other.focusRing, t)!,
-      readingHighlight: Color.lerp(readingHighlight, other.readingHighlight, t)!,
+      readingHighlight: Color.lerp(
+        readingHighlight,
+        other.readingHighlight,
+        t,
+      )!,
       paperWarm: Color.lerp(paperWarm, other.paperWarm, t)!,
       paperText: Color.lerp(paperText, other.paperText, t)!,
     );

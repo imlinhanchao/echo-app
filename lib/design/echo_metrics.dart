@@ -16,6 +16,7 @@ abstract final class EchoMetrics {
 
   static const double radiusCard = 12;
   static const double radiusControl = 8;
+  static const double radiusInput = 8;
   static const double radiusSheet = 16;
 
   static const Duration motionFast = Duration(milliseconds: 150);

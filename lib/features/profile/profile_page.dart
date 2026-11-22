@@ -2,15 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/offline/offline_store.dart';
 import '../../core/stats/stats_store.dart';
+import '../../core/settings/server_address_store.dart';
 import '../../core/settings/theme_mode_controller.dart';
+import '../../core/sync/progress_sync_service.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../providers/provider_account_page.dart';
+import '../settings/server_address_page.dart';
+import 'offline_manager_page.dart';
 import 'playback_settings_page.dart';
 
-/// 我的 Tab：账号信息、服务地址、书源账号入口、登出。
+/// 我的 Tab：账号信息、统计卡、离线内容管理、服务地址、书源账号入口、登出。
 class ProfilePage extends ConsumerWidget {
   const ProfilePage({super.key, required this.user});
 
@@ -45,8 +50,9 @@ class ProfilePage extends ConsumerWidget {
                           Text(
                             user.email,
                             key: const Key('echo_user_email'),
-                            style: textTheme.titleMedium
-                                ?.copyWith(color: tokens.textPrimary),
+                            style: textTheme.titleMedium?.copyWith(
+                              color: tokens.textPrimary,
+                            ),
                           ),
                           Text(
                             '用户 #${user.id}',
@@ -66,14 +72,25 @@ class ProfilePage extends ConsumerWidget {
         const SizedBox(height: EchoMetrics.space2),
         _StatsCard(),
         const SizedBox(height: EchoMetrics.space2),
+        const _OfflineOverviewCard(),
+        const SizedBox(height: EchoMetrics.space2),
         Card(
           child: Column(
             children: [
-              ListTile(
-                key: const Key('profile_server_address'),
-                leading: Icon(Icons.dns_outlined, color: tokens.accent),
-                title: const Text('服务地址'),
-                subtitle: Text(kEchoBaseUrl),
+              ValueListenableBuilder<String>(
+                valueListenable: ServerAddressStore.current,
+                builder: (context, address, _) => ListTile(
+                  key: const Key('profile_server_address'),
+                  leading: Icon(Icons.dns_outlined, color: tokens.accent),
+                  title: const Text('服务地址'),
+                  subtitle: Text(address),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ServerAddressPage(),
+                    ),
+                  ),
+                ),
               ),
               // 亮/暗模式（dark-first：默认深色）。
               ValueListenableBuilder<bool>(
@@ -105,10 +122,55 @@ class ProfilePage extends ConsumerWidget {
                   ),
                 ),
               ),
+              Consumer(
+                builder: (context, ref, _) {
+                  final syncState = ref.watch(progressSyncServiceProvider);
+                  final syncNotifier = ref.read(
+                    progressSyncServiceProvider.notifier,
+                  );
+                  String syncSubtitle;
+                  if (syncState.status == SyncStatus.syncing) {
+                    syncSubtitle = '正在同步中...';
+                  } else if (syncState.status == SyncStatus.error) {
+                    syncSubtitle = '同步失败，点击重试';
+                  } else if (syncState.lastSyncTime != null) {
+                    final t = syncState.lastSyncTime!;
+                    final timeStr =
+                        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+                    syncSubtitle = '已与云端同步 (最近 $timeStr)';
+                  } else {
+                    syncSubtitle = '已启用双向云同步，点击立即刷新';
+                  }
+
+                  return ListTile(
+                    key: const Key('profile_cloud_sync'),
+                    leading: Icon(
+                      Icons.cloud_sync_outlined,
+                      color: tokens.accent,
+                    ),
+                    title: const Text('进度云同步'),
+                    subtitle: Text(syncSubtitle),
+                    trailing: syncState.status == SyncStatus.syncing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : IconButton(
+                            key: const Key('profile_sync_button'),
+                            icon: const Icon(Icons.sync),
+                            tooltip: '立即同步',
+                            onPressed: syncNotifier.syncAll,
+                          ),
+                  );
+                },
+              ),
               ListTile(
                 key: const Key('profile_notification_settings'),
-                leading: Icon(Icons.notifications_active_outlined,
-                    color: tokens.accent),
+                leading: Icon(
+                  Icons.notifications_active_outlined,
+                  color: tokens.accent,
+                ),
                 title: const Text('通知与锁屏播控'),
                 subtitle: const Text('华为/小米等机型需开启通知与后台运行，才能在锁屏显示播放控件'),
                 trailing: const Icon(Icons.chevron_right),
@@ -122,7 +184,7 @@ class ProfilePage extends ConsumerWidget {
                 key: const Key('profile_about'),
                 leading: Icon(Icons.info_outline, color: tokens.accent),
                 title: const Text('关于'),
-                subtitle: const Text('回声 v0.3.0'),
+                subtitle: const Text('回声 v0.3.4'),
               ),
             ],
           ),
@@ -138,7 +200,6 @@ class ProfilePage extends ConsumerWidget {
     );
   }
 }
-
 
 /// 收听统计卡（设计图 ui-mobile-profile）：本周时长 / 连续天数 / 已听完本数。
 class _StatsCard extends StatefulWidget {
@@ -163,25 +224,24 @@ class _StatsCardState extends State<_StatsCard> {
     }
 
     Widget item(String value, String label, {Key? key}) => Expanded(
-          child: Column(
-            children: [
-              Text(
-                value,
-                key: key,
-                style: textTheme.titleLarge?.copyWith(
-                  color: tokens.primary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: textTheme.bodySmall
-                    ?.copyWith(color: tokens.textSecondary),
-              ),
-            ],
+      child: Column(
+        children: [
+          Text(
+            value,
+            key: key,
+            style: textTheme.titleLarge?.copyWith(
+              color: tokens.primary,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        );
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+          ),
+        ],
+      ),
+    );
 
     return Card(
       key: const Key('profile_stats_card'),
@@ -209,6 +269,54 @@ class _StatsCardState extends State<_StatsCard> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 离线内容管理概览卡（设计图 ui-mobile-profile）：已下载章节数 + 占用空间 + 跳转管理页。
+class _OfflineOverviewCard extends StatefulWidget {
+  const _OfflineOverviewCard();
+
+  @override
+  State<_OfflineOverviewCard> createState() => _OfflineOverviewCardState();
+}
+
+class _OfflineOverviewCardState extends State<_OfflineOverviewCard> {
+  OfflineSummary _summary = const OfflineSummary();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final summary = await OfflineFiles.scanAll();
+    if (!mounted) return;
+    setState(() => _summary = summary);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final subtitle = _summary.isEmpty
+        ? '暂无离线下载，无网也能随时收听'
+        : '已下载 ${_summary.entries.length} 本 · ${_summary.totalChunks} 章 · 占用 ${formatBytes(_summary.totalBytes)}';
+    return Card(
+      key: const Key('profile_offline_card'),
+      child: ListTile(
+        key: const Key('profile_offline_entry'),
+        leading: Icon(Icons.offline_pin_outlined, color: tokens.primary),
+        title: const Text('离线内容管理'),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const OfflineManagerPage()),
+          );
+          await _load();
+        },
       ),
     );
   }
