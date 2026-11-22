@@ -34,11 +34,16 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
     super.dispose();
   }
 
-  Future<void> _save(String providerId, String defaultDomain,
-      List<String> domains) async {
+  Future<void> _save(
+    String providerId,
+    String defaultDomain,
+    List<String> domains,
+  ) async {
     if (_saving) return;
     setState(() => _saving = true);
-    final error = await ref.read(providersControllerProvider.notifier).saveAccount(
+    final error = await ref
+        .read(providersControllerProvider.notifier)
+        .saveAccount(
           providerId: providerId,
           mode: _mode,
           domain: _selectedDomain ?? defaultDomain,
@@ -50,18 +55,18 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
     if (!mounted) return;
     setState(() => _saving = false);
     if (error != null) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(content: Text(error)),
-      );
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(error)));
     } else {
       setState(() {
         _passwordController.clear();
         _remixUserIdController.clear();
         _remixUserKeyController.clear();
       });
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('账号已保存并验证通过')),
-      );
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(const SnackBar(content: Text('账号已保存并验证通过')));
     }
   }
 
@@ -87,8 +92,9 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
                       padding: const EdgeInsets.all(EchoMetrics.space2),
                       child: Text(
                         state.error!,
-                        style:
-                            textTheme.bodySmall?.copyWith(color: tokens.error),
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.error,
+                        ),
                       ),
                     ),
                   ),
@@ -104,15 +110,17 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
                     mode: _mode,
                     onModeChanged: (m) => setState(() => _mode = m),
                     selectedDomain: _selectedDomain,
-                    onDomainChanged: (d) =>
-                        setState(() => _selectedDomain = d),
+                    onDomainChanged: (d) => setState(() => _selectedDomain = d),
                     emailController: _emailController,
                     passwordController: _passwordController,
                     remixUserIdController: _remixUserIdController,
                     remixUserKeyController: _remixUserKeyController,
                     saving: _saving,
                     onSave: () => _save(
-                        provider.id, provider.defaultDomain, provider.domains),
+                      provider.id,
+                      provider.defaultDomain,
+                      provider.domains,
+                    ),
                   ),
                 ],
               ],
@@ -122,7 +130,11 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
 }
 
 class _AccountStatusCard extends StatelessWidget {
-  const _AccountStatusCard({required this.provider, required this.onVerify, required this.onRemove});
+  const _AccountStatusCard({
+    required this.provider,
+    required this.onVerify,
+    required this.onRemove,
+  });
 
   final ProviderInfo provider;
   final Future<String?> Function(String providerId) onVerify;
@@ -148,16 +160,18 @@ class _AccountStatusCard extends StatelessWidget {
                 const SizedBox(width: EchoMetrics.space1),
                 Text(
                   provider.name,
-                  style:
-                      textTheme.titleMedium?.copyWith(color: tokens.textPrimary),
+                  style: textTheme.titleMedium?.copyWith(
+                    color: tokens.textPrimary,
+                  ),
                 ),
                 const Spacer(),
                 if (account == null)
                   Text(
                     '未配置',
                     key: Key('provider_${provider.id}_unconfigured'),
-                    style: textTheme.labelMedium
-                        ?.copyWith(color: tokens.textSecondary),
+                    style: textTheme.labelMedium?.copyWith(
+                      color: tokens.textSecondary,
+                    ),
                   )
                 else
                   Container(
@@ -166,10 +180,9 @@ class _AccountStatusCard extends StatelessWidget {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: (account.needsLogin
-                              ? tokens.error
-                              : tokens.success)
-                          .withValues(alpha: 0.15),
+                      color:
+                          (account.needsLogin ? tokens.error : tokens.success)
+                              .withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -190,21 +203,24 @@ class _AccountStatusCard extends StatelessWidget {
                 Text(
                   account.email,
                   key: Key('provider_${provider.id}_email'),
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: tokens.textSecondary),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
               if (account.quotaKnown)
                 Text(
                   '今日配额：已用 ${account.dailyUsed}/${account.dailyLimit} · 剩余 ${account.dailyRemaining}',
                   key: Key('provider_${provider.id}_quota'),
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: tokens.textSecondary),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
               if (account.lastVerifiedAt != null)
                 Text(
                   '上次验证：${account.lastVerifiedAt!.toLocal()}'.split('.').first,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: tokens.textDisabled),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: tokens.textDisabled,
+                  ),
                 ),
               const SizedBox(height: EchoMetrics.space1),
               Row(
@@ -214,9 +230,9 @@ class _AccountStatusCard extends StatelessWidget {
                     onPressed: () async {
                       final error = await onVerify(providerId);
                       if (error != null && context.mounted) {
-                        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                          SnackBar(content: Text(error)),
-                        );
+                        ScaffoldMessenger.maybeOf(
+                          context,
+                        )?.showSnackBar(SnackBar(content: Text(error)));
                       }
                     },
                     icon: const Icon(Icons.refresh, size: 18),
@@ -336,7 +352,8 @@ class _AccountFormCard extends StatelessWidget {
                   prefixIcon: Icon(Icons.dns_outlined),
                 ),
                 items: [
-                  for (final d in domains) DropdownMenuItem(value: d, child: Text(d)),
+                  for (final d in domains)
+                    DropdownMenuItem(value: d, child: Text(d)),
                 ],
                 onChanged: onDomainChanged,
               ),

@@ -1,7 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+final Provider<ProgressStore> progressStoreProvider = Provider<ProgressStore>(
+  (ref) => PersistentProgressStore(),
+);
 
 /// 统一播放进度模型：`{chapterIndex, chunkN, offsetMs}`（听看共享）。
 @immutable
@@ -30,12 +35,12 @@ class PlaybackProgress {
   final DateTime? updatedAt;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'audiobook_id': audiobookId,
-        'chapter_index': chapterIndex,
-        'chunk_n': chunkN,
-        'offset_ms': offsetMs,
-        'updated_at': (updatedAt ?? DateTime.now().toUtc()).toIso8601String(),
-      };
+    'audiobook_id': audiobookId,
+    'chapter_index': chapterIndex,
+    'chunk_n': chunkN,
+    'offset_ms': offsetMs,
+    'updated_at': (updatedAt ?? DateTime.now().toUtc()).toIso8601String(),
+  };
 }
 
 /// 断点续听进度存储抽象。
@@ -48,7 +53,7 @@ abstract class ProgressStore {
 /// 持久化进度存储（基于跨平台键值存储）。
 class PersistentProgressStore implements ProgressStore {
   PersistentProgressStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _storage;
 
@@ -70,9 +75,9 @@ class PersistentProgressStore implements ProgressStore {
 
   @override
   Future<void> write(PlaybackProgress progress) => _storage.write(
-        key: _key(progress.audiobookId),
-        value: jsonEncode(progress.toJson()),
-      );
+    key: _key(progress.audiobookId),
+    value: jsonEncode(progress.toJson()),
+  );
 
   @override
   Future<void> delete(int audiobookId) =>

@@ -10,7 +10,7 @@ abstract class TokenStore {
 /// echo_pat Bearer Token 的安全存储（FlutterSecureStorage）。
 class SecureTokenStore implements TokenStore {
   SecureTokenStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _storage;
   static const _key = 'echo_pat';

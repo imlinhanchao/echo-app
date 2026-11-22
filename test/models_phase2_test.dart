@@ -30,8 +30,7 @@ void main() {
     });
 
     test('ProviderAccountInfo：会话失效状态 needs_login', () {
-      final account =
-          ProviderAccountInfo.fromJson(<String, dynamic>{
+      final account = ProviderAccountInfo.fromJson(<String, dynamic>{
         'configured': true,
         'status': 'needs_login',
       });
@@ -92,8 +91,19 @@ void main() {
     test('JobsPageInfo：任务列表信封', () {
       final page = JobsPageInfo.fromJson(<String, dynamic>{
         'jobs': <Map<String, dynamic>>[
-          <String, dynamic>{'id': 9, 'kind': 'download', 'status': 'done', 'progress': 100},
-          <String, dynamic>{'id': 8, 'kind': 'audiobook', 'status': 'failed', 'progress': 30, 'error': 'TTS 不可用'},
+          <String, dynamic>{
+            'id': 9,
+            'kind': 'download',
+            'status': 'done',
+            'progress': 100,
+          },
+          <String, dynamic>{
+            'id': 8,
+            'kind': 'audiobook',
+            'status': 'failed',
+            'progress': 30,
+            'error': 'TTS 不可用',
+          },
         ],
         'total': 2,
       });

@@ -11,6 +11,7 @@ import 'core/audio/audio_service_engine.dart';
 import 'core/notes/note_store.dart';
 import 'core/offline/offline_store.dart';
 import 'core/stats/stats_store.dart';
+import 'core/settings/server_address_store.dart';
 import 'core/settings/theme_mode_controller.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
@@ -40,6 +41,8 @@ Future<void> main() async {
   await NoteStore.instance.load();
   // 恢复亮/暗偏好（dark-first，默认深色）。
   await ThemeModeController.init();
+  // 恢复用户设置的服务地址与历史（未设置时用构建期 ECHO_BASE_URL）。
+  await ServerAddressStore.init();
   // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。
   final darkTokens = await EchoTokens.load(Brightness.dark);
   final lightTokens = await EchoTokens.load(Brightness.light);
@@ -127,9 +130,9 @@ class _Splash extends StatelessWidget {
             Text(
               '回声',
               style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    color: tokens.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
+                color: tokens.primary,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 24),
             CircularProgressIndicator(color: tokens.primary),
@@ -147,5 +150,6 @@ class EchoHome extends StatelessWidget {
   final EchoUser user;
 
   @override
-  Widget build(BuildContext context) => EchoShell(key: EchoShell.shellKey, user: user);
+  Widget build(BuildContext context) =>
+      EchoShell(key: EchoShell.shellKey, user: user);
 }

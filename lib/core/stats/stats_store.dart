@@ -13,17 +13,19 @@ class DayStat {
   final int pagesRead;
 
   DayStat copyWith({int? listenMs, int? pagesRead}) => DayStat(
-        listenMs: listenMs ?? this.listenMs,
-        pagesRead: pagesRead ?? this.pagesRead,
-      );
+    listenMs: listenMs ?? this.listenMs,
+    pagesRead: pagesRead ?? this.pagesRead,
+  );
 
-  Map<String, dynamic> toJson() =>
-      <String, dynamic>{'listen_ms': listenMs, 'pages': pagesRead};
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'listen_ms': listenMs,
+    'pages': pagesRead,
+  };
 
   factory DayStat.fromJson(Map<String, dynamic> json) => DayStat(
-        listenMs: (json['listen_ms'] as num?)?.toInt() ?? 0,
-        pagesRead: (json['pages'] as num?)?.toInt() ?? 0,
-      );
+    listenMs: (json['listen_ms'] as num?)?.toInt() ?? 0,
+    pagesRead: (json['pages'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// 本地收听统计（设计图 ui-mobile-profile 的统计卡）：

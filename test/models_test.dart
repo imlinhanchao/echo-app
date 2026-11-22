@@ -91,7 +91,10 @@ void main() {
       expect(detail.book?.authors, <String>['刘慈欣']);
       expect(detail.audiobooks.single.id, 101);
       expect(detail.audiobooks.single.isReady, isTrue);
-      expect(detail.audiobooks.single.chaptersUrl, '/api/audiobooks/101/chapters');
+      expect(
+        detail.audiobooks.single.chaptersUrl,
+        '/api/audiobooks/101/chapters',
+      );
     });
 
     test('ChaptersManifestInfo.fromJson：分章清单与音频/SRT 地址', () {

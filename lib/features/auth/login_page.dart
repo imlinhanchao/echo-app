@@ -1,10 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/settings/server_address_store.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
+import '../settings/server_address_page.dart';
 import 'auth_controller.dart';
 import 'register_page.dart';
+
+/// 登录页展示用：去掉 scheme，让「服务器：host:port」保持一行。
+String _shortAddress(String address) {
+  final uri = Uri.tryParse(address);
+  if (uri == null || !uri.hasAuthority || uri.host.isEmpty) return address;
+  final port = uri.hasPort ? ':${uri.port}' : '';
+  return '${uri.host}$port${uri.path}';
+}
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key, this.initialError});
@@ -71,16 +81,48 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   '回声',
                   key: const Key('login_title'),
                   textAlign: TextAlign.center,
-                  style: textTheme.displaySmall
-                      ?.copyWith(color: tokens.primary, fontWeight: FontWeight.bold),
+                  style: textTheme.displaySmall?.copyWith(
+                    color: tokens.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: EchoMetrics.space1),
                 Text(
                   '听书 · 看书 · 转有声书',
                   textAlign: TextAlign.center,
-                  style: textTheme.bodyLarge?.copyWith(color: tokens.textSecondary),
+                  style: textTheme.bodyLarge?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
-                const SizedBox(height: EchoMetrics.space4),
+                const SizedBox(height: EchoMetrics.space1),
+                // 服务地址设置入口：登录前就能改，历史地址可直接点选。
+                ValueListenableBuilder<String>(
+                  valueListenable: ServerAddressStore.current,
+                  builder: (context, address, _) => Center(
+                    child: TextButton.icon(
+                      key: const Key('login_server_settings'),
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const ServerAddressPage(),
+                              ),
+                            ),
+                      icon: Icon(
+                        Icons.dns_outlined,
+                        size: 16,
+                        color: tokens.textSecondary,
+                      ),
+                      label: Text(
+                        '服务器：${_shortAddress(address)} · 设置',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: EchoMetrics.space3),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(EchoMetrics.space3),
@@ -126,7 +168,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           Text(
                             _error!,
                             key: const Key('login_error'),
-                            style: textTheme.bodySmall?.copyWith(color: tokens.error),
+                            style: textTheme.bodySmall?.copyWith(
+                              color: tokens.error,
+                            ),
                           ),
                         ],
                         const SizedBox(height: EchoMetrics.space3),
@@ -137,7 +181,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               ? const SizedBox(
                                   height: 20,
                                   width: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Text('登录'),
                         ),
@@ -147,10 +193,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           onPressed: _busy
                               ? null
                               : () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => const RegisterPage(),
-                                    ),
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => const RegisterPage(),
                                   ),
+                                ),
                           child: Text(
                             '还没有账号？创建账号',
                             style: TextStyle(color: tokens.textSecondary),

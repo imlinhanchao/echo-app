@@ -116,5 +116,52 @@ void main() {
       expect(controller.state.books, isEmpty);
       expect(controller.state.error, '请先配置该图书源账号');
     });
+
+    test('持久化：SearchHistoryStore 跨实例恢复与删除同步', () async {
+      final store = MemorySearchHistoryStore(<String>['历史1', '历史2']);
+      final adapter = buildAdapter();
+      final controller1 = SearchController(
+        EchoApi(dio: stubDio(adapter), tokenStore: MemoryTokenStore()),
+        historyStore: store,
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      expect(controller1.state.history, <String>['历史1', '历史2']);
+
+      await controller1.search('三体');
+      expect(controller1.state.history, <String>['三体', '历史1', '历史2']);
+      expect(await store.load(), <String>['三体', '历史1', '历史2']);
+
+      final controller2 = SearchController(
+        EchoApi(dio: stubDio(adapter), tokenStore: MemoryTokenStore()),
+        historyStore: store,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller2.state.history, <String>['三体', '历史1', '历史2']);
+
+      controller2.removeHistory('历史1');
+      expect(await store.load(), <String>['三体', '历史2']);
+    });
+
+    test('发起新搜索时保持原有 books 列表防闪烁，返回后原子替换', () async {
+      final adapter = buildAdapter();
+      final controller = SearchController(
+        EchoApi(dio: stubDio(adapter), tokenStore: MemoryTokenStore()),
+        historyStore: MemorySearchHistoryStore(),
+      );
+
+      await controller.search('三体');
+      expect(controller.state.books, hasLength(2));
+      final firstBookRef = controller.state.books.first.ref;
+
+      final future = controller.search('三体 2');
+      expect(controller.state.isLoading, isTrue);
+      expect(controller.state.books, hasLength(2), reason: '加载过程中应保持旧数据避免白屏闪烁');
+
+      await future;
+      expect(controller.state.isLoading, isFalse);
+      expect(controller.state.books, hasLength(2));
+      expect(controller.state.books.first.ref, isNot(firstBookRef));
+    });
   });
 }

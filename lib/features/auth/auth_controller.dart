@@ -3,26 +3,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/echo_api.dart';
 import '../../core/api/models.dart';
 import '../../core/auth/token_store.dart';
+import '../../core/settings/server_address_store.dart';
 
 /// Token 存储（生产：安全存储）。
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
-/// 服务地址可配置：模拟器访问宿主机服务需
-/// `--dart-define=ECHO_BASE_URL=http://10.0.2.2:8090`。
-const String kEchoBaseUrl = String.fromEnvironment(
-  'ECHO_BASE_URL',
-  defaultValue: 'http://127.0.0.1:8090',
-);
-
 /// echo-service API 客户端。
+/// 服务地址取用户设置（登录页 / 我的页可改，持久化在 [ServerAddressStore]），
+/// 未设置时回落到构建期 `--dart-define=ECHO_BASE_URL`。
 /// 会话过期回调延迟读取 authControllerProvider，避免构造期循环依赖；
 /// 显式标注顶层类型以断开相互引用的类型推断环。
-final Provider<EchoApi> echoApiProvider = Provider<EchoApi>((ref) => EchoApi(
-      baseUri: Uri.parse(kEchoBaseUrl),
-      tokenStore: ref.watch(tokenStoreProvider),
-      onSessionExpired: () =>
-          ref.read(authControllerProvider.notifier).handleSessionExpired(),
-    ));
+final Provider<EchoApi> echoApiProvider = Provider<EchoApi>(
+  (ref) => EchoApi(
+    baseUri: Uri.parse(ServerAddressStore.current.value),
+    tokenStore: ref.watch(tokenStoreProvider),
+    onSessionExpired: () =>
+        ref.read(authControllerProvider.notifier).handleSessionExpired(),
+  ),
+);
 
 /// 认证生命周期状态。
 sealed class AuthState {
@@ -109,15 +107,21 @@ class AuthController extends StateNotifier<AuthState> {
       state = const AuthLoggedOut(reason: '会话已过期，请重新登录');
     }
   }
+
+  /// 服务地址已切换：新服务端不认旧 Token，清掉本机凭据并回登录页。
+  Future<void> handleServerChanged() async {
+    await _store.clear();
+    state = const AuthLoggedOut(reason: '服务地址已切换，请重新登录');
+  }
 }
 
 final StateNotifierProvider<AuthController, AuthState> authControllerProvider =
     StateNotifierProvider<AuthController, AuthState>((ref) {
-  final controller = AuthController(
-    ref.read(echoApiProvider),
-    ref.read(tokenStoreProvider),
-  );
-  // 异步恢复会话；期间 UI 停留在 AuthLoading。
-  controller.bootstrap();
-  return controller;
-});
+      final controller = AuthController(
+        ref.read(echoApiProvider),
+        ref.read(tokenStoreProvider),
+      );
+      // 异步恢复会话；期间 UI 停留在 AuthLoading。
+      controller.bootstrap();
+      return controller;
+    });

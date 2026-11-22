@@ -100,9 +100,9 @@ class ProvidersController extends StateNotifier<ProvidersState> {
 }
 
 final StateNotifierProvider<ProvidersController, ProvidersState>
-    providersControllerProvider =
+providersControllerProvider =
     StateNotifierProvider<ProvidersController, ProvidersState>((ref) {
-  final controller = ProvidersController(ref.watch(echoApiProvider));
-  controller.refresh();
-  return controller;
-});
+      final controller = ProvidersController(ref.watch(echoApiProvider));
+      controller.refresh();
+      return controller;
+    });

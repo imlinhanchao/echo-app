@@ -12,10 +12,10 @@ class EchoUser {
   const EchoUser({required this.id, required this.email, this.name});
 
   factory EchoUser.fromJson(Map<String, dynamic> json) => EchoUser(
-        id: (json['id'] as num?)?.toInt() ?? 0,
-        email: json['email'] as String? ?? '',
-        name: json['name'] as String?,
-      );
+    id: (json['id'] as num?)?.toInt() ?? 0,
+    email: json['email'] as String? ?? '',
+    name: json['name'] as String?,
+  );
 
   final int id;
   final String email;
@@ -39,8 +39,9 @@ class AuthToken {
       token: json['token'] as String? ?? '',
       tokenType: json['token_type'] as String? ?? 'Bearer',
       expiresAt: DateTime.tryParse(json['expires_at'] as String? ?? ''),
-      user:
-          userJson is Map<String, dynamic> ? EchoUser.fromJson(userJson) : null,
+      user: userJson is Map<String, dynamic>
+          ? EchoUser.fromJson(userJson)
+          : null,
     );
   }
 
@@ -121,22 +122,22 @@ class LibraryBook {
 
   /// 对应 `GET /api/library` 的 `books[]`（views.go libraryBookView）。
   factory LibraryBook.fromJson(Map<String, dynamic> json) => LibraryBook(
-        id: (json['id'] as num?)?.toInt() ?? 0,
-        provider: json['provider'] as String? ?? '',
-        providerBookId: json['provider_book_id'] as String? ?? '',
-        title: json['title'] as String? ?? '',
-        authors: (json['authors'] as List<dynamic>? ?? const [])
-            .whereType<String>()
-            .toList(),
-        year: json['year'] as String? ?? '',
-        publisher: json['publisher'] as String? ?? '',
-        language: json['language'] as String? ?? '',
-        format: json['format'] as String? ?? '',
-        sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
-        coverUrl: json['cover_url'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-        status: json['status'] as String? ?? '',
-      );
+    id: (json['id'] as num?)?.toInt() ?? 0,
+    provider: json['provider'] as String? ?? '',
+    providerBookId: json['provider_book_id'] as String? ?? '',
+    title: json['title'] as String? ?? '',
+    authors: (json['authors'] as List<dynamic>? ?? const [])
+        .whereType<String>()
+        .toList(),
+    year: json['year'] as String? ?? '',
+    publisher: json['publisher'] as String? ?? '',
+    language: json['language'] as String? ?? '',
+    format: json['format'] as String? ?? '',
+    sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
+    coverUrl: json['cover_url'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+    status: json['status'] as String? ?? '',
+  );
 
   final int id;
   final String provider;
@@ -201,24 +202,24 @@ class AudiobookInfo {
 
   /// 对应 `GET /api/audiobooks` 的 `audiobooks[]`（views.go audiobookView）。
   factory AudiobookInfo.fromJson(Map<String, dynamic> json) => AudiobookInfo(
-        id: (json['id'] as num?)?.toInt() ?? 0,
-        bookId: (json['book_id'] as num?)?.toInt() ?? 0,
-        bookTitle: json['book_title'] as String? ?? '',
-        model: json['model'] as String? ?? '',
-        voice: json['voice'] as String? ?? '',
-        speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
-        status: json['status'] as String? ?? '',
-        progress: (json['progress'] as num?)?.toInt() ?? 0,
-        error: json['error'] as String? ?? '',
-        format: json['format'] as String? ?? '',
-        durationS: (json['duration_s'] as num?)?.toDouble() ?? 0,
-        sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
-        segments: (json['segments'] as num?)?.toInt() ?? 0,
-        chars: (json['chars'] as num?)?.toInt() ?? 0,
-        audioUrl: json['audio_url'] as String? ?? '',
-        srtUrl: json['srt_url'] as String? ?? '',
-        chaptersUrl: json['chapters_url'] as String? ?? '',
-      );
+    id: (json['id'] as num?)?.toInt() ?? 0,
+    bookId: (json['book_id'] as num?)?.toInt() ?? 0,
+    bookTitle: json['book_title'] as String? ?? '',
+    model: json['model'] as String? ?? '',
+    voice: json['voice'] as String? ?? '',
+    speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
+    status: json['status'] as String? ?? '',
+    progress: (json['progress'] as num?)?.toInt() ?? 0,
+    error: json['error'] as String? ?? '',
+    format: json['format'] as String? ?? '',
+    durationS: (json['duration_s'] as num?)?.toDouble() ?? 0,
+    sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
+    segments: (json['segments'] as num?)?.toInt() ?? 0,
+    chars: (json['chars'] as num?)?.toInt() ?? 0,
+    audioUrl: json['audio_url'] as String? ?? '',
+    srtUrl: json['srt_url'] as String? ?? '',
+    chaptersUrl: json['chapters_url'] as String? ?? '',
+  );
 
   final int id;
   final int bookId;
@@ -271,18 +272,18 @@ class ChapterChunk {
 
   /// 对应 `GET /api/audiobooks/{id}/chapters` 的 `chunks[]`。
   factory ChapterChunk.fromJson(Map<String, dynamic> json) => ChapterChunk(
-        n: (json['n'] as num?)?.toInt() ?? 0,
-        chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
-        title: json['title'] as String? ?? '',
-        startS: (json['start_s'] as num?)?.toDouble() ?? 0,
-        endS: (json['end_s'] as num?)?.toDouble() ?? 0,
-        durationS: (json['duration_s'] as num?)?.toDouble() ?? 0,
-        sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
-        audioFile: json['audio_file'] as String? ?? '',
-        srtFile: json['srt_file'] as String? ?? '',
-        audioUrl: json['audio_url'] as String? ?? '',
-        srtUrl: json['srt_url'] as String? ?? '',
-      );
+    n: (json['n'] as num?)?.toInt() ?? 0,
+    chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
+    title: json['title'] as String? ?? '',
+    startS: (json['start_s'] as num?)?.toDouble() ?? 0,
+    endS: (json['end_s'] as num?)?.toDouble() ?? 0,
+    durationS: (json['duration_s'] as num?)?.toDouble() ?? 0,
+    sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
+    audioFile: json['audio_file'] as String? ?? '',
+    srtFile: json['srt_file'] as String? ?? '',
+    audioUrl: json['audio_url'] as String? ?? '',
+    srtUrl: json['srt_url'] as String? ?? '',
+  );
 
   final int n;
   final int chapterIndex;
@@ -295,6 +296,8 @@ class ChapterChunk {
   final String srtFile;
   final String audioUrl;
   final String srtUrl;
+
+  int get durationMs => (durationS * 1000).round();
 }
 
 /// 对应 `GET /api/audiobooks/{id}/chapters` 完整信封。
@@ -357,8 +360,9 @@ class ProviderAccountInfo {
         dailyLimit: (json['daily_limit'] as num?)?.toInt() ?? 0,
         dailyRemaining: (json['daily_remaining'] as num?)?.toInt() ?? 0,
         quotaKnown: json['quota_known'] as bool? ?? false,
-        lastVerifiedAt:
-            DateTime.tryParse(json['last_verified_at'] as String? ?? ''),
+        lastVerifiedAt: DateTime.tryParse(
+          json['last_verified_at'] as String? ?? '',
+        ),
       );
 
   final bool configured;
@@ -437,24 +441,25 @@ class SearchBook {
   });
 
   factory SearchBook.fromJson(Map<String, dynamic> json) => SearchBook(
-        provider: json['provider'] as String? ?? '',
-        ref: json['ref'] as String? ?? '',
-        title: json['title'] as String? ?? '',
-        authors: (json['authors'] as List<dynamic>? ?? const [])
-            .whereType<String>()
-            .toList(),
-        year: json['year'] as String? ?? '',
-        publisher: json['publisher'] as String? ?? '',
-        language: json['language'] as String? ?? '',
-        format: json['format'] as String? ?? '',
-        size: json['size'] as String? ?? '',
-        isbn: json['isbn'] as String? ?? '',
-        coverUrl: json['cover_url'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-        sourceUrl: json['source_url'] as String? ?? '',
-      );
+    provider: json['provider'] as String? ?? '',
+    ref: json['ref'] as String? ?? '',
+    title: json['title'] as String? ?? '',
+    authors: (json['authors'] as List<dynamic>? ?? const [])
+        .whereType<String>()
+        .toList(),
+    year: json['year'] as String? ?? '',
+    publisher: json['publisher'] as String? ?? '',
+    language: json['language'] as String? ?? '',
+    format: json['format'] as String? ?? '',
+    size: json['size'] as String? ?? '',
+    isbn: json['isbn'] as String? ?? '',
+    coverUrl: json['cover_url'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+    sourceUrl: json['source_url'] as String? ?? '',
+  );
 
   final String provider;
+
   /// 书源引用（`id:hash`，下载与详情的定位符）。
   final String ref;
   final String title;
@@ -480,14 +485,14 @@ class SearchPageInfo {
   });
 
   factory SearchPageInfo.fromJson(Map<String, dynamic> json) => SearchPageInfo(
-        books: (json['books'] as List<dynamic>? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(SearchBook.fromJson)
-            .toList(),
-        page: (json['page'] as num?)?.toInt() ?? 1,
-        totalPages: (json['total_pages'] as num?)?.toInt() ?? 1,
-        provider: json['provider'] as String? ?? '',
-      );
+    books: (json['books'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(SearchBook.fromJson)
+        .toList(),
+    page: (json['page'] as num?)?.toInt() ?? 1,
+    totalPages: (json['total_pages'] as num?)?.toInt() ?? 1,
+    provider: json['provider'] as String? ?? '',
+  );
 
   final List<SearchBook> books;
   final int page;
@@ -519,31 +524,31 @@ class JobInfo {
   });
 
   factory JobInfo.fromJson(Map<String, dynamic> json) => JobInfo(
-        id: (json['id'] as num?)?.toInt() ?? 0,
-        kind: switch (json['kind']) {
-          'download' => JobKind.download,
-          'audiobook' => JobKind.audiobook,
-          _ => JobKind.unknown,
-        },
-        status: switch (json['status']) {
-          'queued' => JobStatus.queued,
-          'running' => JobStatus.running,
-          'cancelling' => JobStatus.cancelling,
-          'done' => JobStatus.done,
-          'failed' => JobStatus.failed,
-          'cancelled' => JobStatus.cancelled,
-          _ => JobStatus.unknown,
-        },
-        progress: (json['progress'] as num?)?.toInt() ?? 0,
-        refId: (json['ref_id'] as num?)?.toInt(),
-        error: json['error'] as String? ?? '',
-        createdAt: DateTime.tryParse(json['created_at'] as String? ?? ''),
-        startedAt: DateTime.tryParse(json['started_at'] as String? ?? ''),
-        finishedAt: DateTime.tryParse(json['finished_at'] as String? ?? ''),
-        result: json['result'] is Map<String, dynamic>
-            ? json['result']! as Map<String, dynamic>
-            : null,
-      );
+    id: (json['id'] as num?)?.toInt() ?? 0,
+    kind: switch (json['kind']) {
+      'download' => JobKind.download,
+      'audiobook' => JobKind.audiobook,
+      _ => JobKind.unknown,
+    },
+    status: switch (json['status']) {
+      'queued' => JobStatus.queued,
+      'running' => JobStatus.running,
+      'cancelling' => JobStatus.cancelling,
+      'done' => JobStatus.done,
+      'failed' => JobStatus.failed,
+      'cancelled' => JobStatus.cancelled,
+      _ => JobStatus.unknown,
+    },
+    progress: (json['progress'] as num?)?.toInt() ?? 0,
+    refId: (json['ref_id'] as num?)?.toInt(),
+    error: json['error'] as String? ?? '',
+    createdAt: DateTime.tryParse(json['created_at'] as String? ?? ''),
+    startedAt: DateTime.tryParse(json['started_at'] as String? ?? ''),
+    finishedAt: DateTime.tryParse(json['finished_at'] as String? ?? ''),
+    result: json['result'] is Map<String, dynamic>
+        ? json['result']! as Map<String, dynamic>
+        : null,
+  );
 
   final int id;
   final JobKind kind;
@@ -562,10 +567,10 @@ class JobInfo {
       status == JobStatus.cancelling;
 
   String get kindLabel => switch (kind) {
-        JobKind.download => '下载',
-        JobKind.audiobook => '转有声书',
-        JobKind.unknown => '任务',
-      };
+    JobKind.download => '下载',
+    JobKind.audiobook => '转有声书',
+    JobKind.unknown => '任务',
+  };
 }
 
 @immutable
@@ -573,12 +578,12 @@ class JobsPageInfo {
   const JobsPageInfo({required this.jobs, required this.total});
 
   factory JobsPageInfo.fromJson(Map<String, dynamic> json) => JobsPageInfo(
-        jobs: (json['jobs'] as List<dynamic>? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(JobInfo.fromJson)
-            .toList(),
-        total: (json['total'] as num?)?.toInt() ?? 0,
-      );
+    jobs: (json['jobs'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(JobInfo.fromJson)
+        .toList(),
+    total: (json['total'] as num?)?.toInt() ?? 0,
+  );
 
   final List<JobInfo> jobs;
   final int total;
@@ -595,14 +600,13 @@ class ChapterPreview {
     this.text = '',
   });
 
-  factory ChapterPreview.fromJson(Map<String, dynamic> json) =>
-      ChapterPreview(
-        index: (json['index'] as num?)?.toInt() ?? 0,
-        title: json['title'] as String? ?? '',
-        chars: (json['chars'] as num?)?.toInt() ?? 0,
-        preview: json['preview'] as String? ?? '',
-        text: json['text'] as String? ?? '',
-      );
+  factory ChapterPreview.fromJson(Map<String, dynamic> json) => ChapterPreview(
+    index: (json['index'] as num?)?.toInt() ?? 0,
+    title: json['title'] as String? ?? '',
+    chars: (json['chars'] as num?)?.toInt() ?? 0,
+    preview: json['preview'] as String? ?? '',
+    text: json['text'] as String? ?? '',
+  );
 
   final int index;
   final String title;
@@ -624,18 +628,19 @@ class TtsModelInfo {
   });
 
   factory TtsModelInfo.fromJson(Map<String, dynamic> json) => TtsModelInfo(
-        id: json['id'] as String? ?? '',
-        repo: json['repo'] as String? ?? '',
-        isDefault: json['default'] as bool? ?? false,
-        provider: json['provider'] as String? ?? '',
-        voices: (json['voices'] as List<dynamic>? ?? const [])
-            .whereType<String>()
-            .toList(),
-      );
+    id: json['id'] as String? ?? '',
+    repo: json['repo'] as String? ?? '',
+    isDefault: json['default'] as bool? ?? false,
+    provider: json['provider'] as String? ?? '',
+    voices: (json['voices'] as List<dynamic>? ?? const [])
+        .whereType<String>()
+        .toList(),
+  );
 
   final String id;
   final String repo;
   final bool isDefault;
+
   /// `local`（Qwen/Kokoro）或 `edge`（在线）。
   final String provider;
   final List<String> voices;
@@ -643,17 +648,13 @@ class TtsModelInfo {
 
 @immutable
 class TtsVoiceInfo {
-  const TtsVoiceInfo({
-    required this.id,
-    this.name = '',
-    this.description = '',
-  });
+  const TtsVoiceInfo({required this.id, this.name = '', this.description = ''});
 
   factory TtsVoiceInfo.fromJson(Map<String, dynamic> json) => TtsVoiceInfo(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+  );
 
   final String id;
   final String name;
@@ -675,11 +676,103 @@ class TtsModelsResponse {
             .map(TtsModelInfo.fromJson)
             .toList(),
         maxJobChars: (json['max_job_chars'] as num?)?.toInt() ?? 0,
-        ttsHealthy: (json['health'] is Map &&
+        ttsHealthy:
+            (json['health'] is Map &&
             (json['health']! as Map)['status'] == 'ok'),
       );
 
   final List<TtsModelInfo> models;
   final int maxJobChars;
   final bool ttsHealthy;
+}
+
+// ---- 云端同步 ----
+
+@immutable
+class SyncProgressItem {
+  const SyncProgressItem({
+    required this.itemType,
+    required this.itemId,
+    this.chapterIndex = 0,
+    this.chunkN = 0,
+    this.offsetMs = 0,
+    this.charOffset = 0,
+    required this.updatedAt,
+  });
+
+  factory SyncProgressItem.fromJson(Map<String, dynamic> json) =>
+      SyncProgressItem(
+        itemType: json['item_type'] as String? ?? 'audiobook',
+        itemId: (json['item_id'] as num?)?.toInt() ?? 0,
+        chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
+        chunkN: (json['chunk_n'] as num?)?.toInt() ?? 0,
+        offsetMs: (json['offset_ms'] as num?)?.toInt() ?? 0,
+        charOffset: (json['char_offset'] as num?)?.toInt() ?? 0,
+        updatedAt:
+            DateTime.tryParse(json['updated_at'] as String? ?? '')?.toUtc() ??
+            DateTime.now().toUtc(),
+      );
+
+  final String itemType; // 'audiobook' | 'book'
+  final int itemId;
+  final int chapterIndex;
+  final int chunkN;
+  final int offsetMs;
+  final int charOffset;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'item_type': itemType,
+    'item_id': itemId,
+    'chapter_index': chapterIndex,
+    'chunk_n': chunkN,
+    'offset_ms': offsetMs,
+    'char_offset': charOffset,
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+  };
+}
+
+@immutable
+class SyncNoteItem {
+  const SyncNoteItem({
+    required this.id,
+    required this.audiobookId,
+    required this.positionMs,
+    required this.text,
+    this.chapter = '',
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory SyncNoteItem.fromJson(Map<String, dynamic> json) => SyncNoteItem(
+    id: json['id'] as String? ?? '',
+    audiobookId: (json['audiobook_id'] as num?)?.toInt() ?? 0,
+    positionMs: (json['position_ms'] as num?)?.toInt() ?? 0,
+    text: json['text'] as String? ?? '',
+    chapter: json['chapter'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(json['created_at'] as String? ?? '')?.toUtc() ??
+        DateTime.now().toUtc(),
+    updatedAt:
+        DateTime.tryParse(json['updated_at'] as String? ?? '')?.toUtc() ??
+        DateTime.now().toUtc(),
+  );
+
+  final String id;
+  final int audiobookId;
+  final int positionMs;
+  final String text;
+  final String chapter;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'audiobook_id': audiobookId,
+    'position_ms': positionMs,
+    'text': text,
+    'chapter': chapter,
+    'created_at': createdAt.toUtc().toIso8601String(),
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+  };
 }

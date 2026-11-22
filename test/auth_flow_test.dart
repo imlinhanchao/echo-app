@@ -13,11 +13,11 @@ typedef Responder = ({int status, Map<String, dynamic> body});
 Responder _ok(Map<String, dynamic> body) => (status: 200, body: body);
 
 Responder _error(int status, String code, String message) => (
-      status: status,
-      body: {
-        'error': {'code': code, 'message': message},
-      },
-    );
+  status: status,
+  body: {
+    'error': {'code': code, 'message': message},
+  },
+);
 
 /// 记录所有请求并按路由返回预设响应的传输层 Stub。
 class StubAdapter implements HttpClientAdapter {
@@ -33,8 +33,8 @@ class StubAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ]) async {
     requests.add(options);
-    final respond = routes[options.uri.path] ??
-        () => _error(404, 'not_found', '路由未配置');
+    final respond =
+        routes[options.uri.path] ?? () => _error(404, 'not_found', '路由未配置');
     final response = respond();
     return ResponseBody.fromString(
       jsonEncode(response.body),
@@ -49,9 +49,9 @@ class StubAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-Dio _stubDio(StubAdapter adapter) => Dio(
-      BaseOptions(baseUrl: 'http://127.0.0.1:8090'),
-    )..httpClientAdapter = adapter;
+Dio _stubDio(StubAdapter adapter) =>
+    Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+      ..httpClientAdapter = adapter;
 
 void main() {
   group('认证状态机（Stub 传输层）', () {
@@ -59,14 +59,14 @@ void main() {
       final store = MemoryTokenStore();
       final adapter = StubAdapter({
         '/api/auth/token': () => _ok(<String, dynamic>{
-              'token': 'echo_pat_t1',
-              'token_type': 'Bearer',
-              'user': {'id': 7, 'email': 'hancel@example.com'},
-            }),
+          'token': 'echo_pat_t1',
+          'token_type': 'Bearer',
+          'user': {'id': 7, 'email': 'hancel@example.com'},
+        }),
         '/api/auth/me': () => _ok(<String, dynamic>{
-              'user': {'id': 7, 'email': 'hancel@example.com', 'name': 'Echo'},
-              'registration_open': true,
-            }),
+          'user': {'id': 7, 'email': 'hancel@example.com', 'name': 'Echo'},
+          'registration_open': true,
+        }),
       });
       final api = EchoApi(dio: _stubDio(adapter), tokenStore: store);
       final controller = AuthController(api, store);
@@ -80,16 +80,16 @@ void main() {
       expect(await store.read(), 'echo_pat_t1');
 
       // 登录后的 me() 请求自动携带 Bearer 头。
-      final meRequests =
-          adapter.requests.where((r) => r.uri.path == '/api/auth/me').toList();
+      final meRequests = adapter.requests
+          .where((r) => r.uri.path == '/api/auth/me')
+          .toList();
       expect(meRequests.single.headers['Authorization'], 'Bearer echo_pat_t1');
     });
 
     test('登录失败：直显服务端错误文案', () async {
       final store = MemoryTokenStore();
       final adapter = StubAdapter({
-        '/api/auth/token': () =>
-            _error(401, 'invalid_credentials', '邮箱或密码错误'),
+        '/api/auth/token': () => _error(401, 'invalid_credentials', '邮箱或密码错误'),
       });
       final api = EchoApi(dio: _stubDio(adapter), tokenStore: store);
       final controller = AuthController(api, store);
@@ -116,20 +116,24 @@ void main() {
                 });
         },
         '/api/auth/token/refresh': () => _ok(<String, dynamic>{
-              'token': 'echo_pat_t2',
-              'token_type': 'Bearer',
-            }),
+          'token': 'echo_pat_t2',
+          'token_type': 'Bearer',
+        }),
       });
       final api = EchoApi(dio: _stubDio(adapter), tokenStore: store);
       final controller = AuthController(api, store);
 
       await controller.bootstrap();
-      expect(controller.state, isA<AuthLoggedIn>(),
-          reason: '401 后应刷新 Token 并恢复会话');
+      expect(
+        controller.state,
+        isA<AuthLoggedIn>(),
+        reason: '401 后应刷新 Token 并恢复会话',
+      );
       expect(await store.read(), 'echo_pat_t2');
 
-      final meRequests =
-          adapter.requests.where((r) => r.uri.path == '/api/auth/me').toList();
+      final meRequests = adapter.requests
+          .where((r) => r.uri.path == '/api/auth/me')
+          .toList();
       expect(meRequests.last.headers['Authorization'], 'Bearer echo_pat_t2');
     });
 
@@ -161,8 +165,8 @@ void main() {
       var revoked = false;
       final adapter = StubAdapter({
         '/api/auth/me': () => _ok(<String, dynamic>{
-              'user': {'id': 7, 'email': 'hancel@example.com'},
-            }),
+          'user': {'id': 7, 'email': 'hancel@example.com'},
+        }),
         '/api/auth/token/revoke': () {
           revoked = true;
           return _ok(<String, dynamic>{});
@@ -178,6 +182,47 @@ void main() {
       expect(revoked, isTrue);
       expect(await store.read(), isNull);
       expect(controller.state, isA<AuthLoggedOut>());
+    });
+
+    test('并发 401 请求：共享同一次 refresh 且均成功重放', () async {
+      final store = MemoryTokenStore();
+      await store.write('echo_pat_old');
+      var refreshCount = 0;
+      late final StubAdapter adapter;
+      adapter = StubAdapter({
+        '/api/library': () {
+          final lastReq = adapter.requests.last;
+          if (lastReq.headers['Authorization'] == 'Bearer echo_pat_new') {
+            return _ok(<String, dynamic>{'books': <dynamic>[]});
+          }
+          return _error(401, 'unauthorized', 'Token 已失效');
+        },
+        '/api/audiobooks': () {
+          final lastReq = adapter.requests.last;
+          if (lastReq.headers['Authorization'] == 'Bearer echo_pat_new') {
+            return _ok(<String, dynamic>{'audiobooks': <dynamic>[]});
+          }
+          return _error(401, 'unauthorized', 'Token 已失效');
+        },
+        '/api/auth/token/refresh': () {
+          refreshCount++;
+          return _ok(<String, dynamic>{
+            'token': 'echo_pat_new',
+            'token_type': 'Bearer',
+          });
+        },
+      });
+      final api = EchoApi(dio: _stubDio(adapter), tokenStore: store);
+
+      final results = await Future.wait([
+        api.listBooks(),
+        api.listAudiobooks(),
+      ]);
+
+      expect(results[0], isEmpty);
+      expect(results[1], isEmpty);
+      expect(refreshCount, 1, reason: '并发 401 应被互斥锁折叠为 1 次刷新');
+      expect(await store.read(), 'echo_pat_new');
     });
   });
 }

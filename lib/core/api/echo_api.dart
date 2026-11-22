@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -16,9 +17,10 @@ class EchoApi {
     TokenStore? tokenStore,
     Dio? dio,
     VoidCallback? onSessionExpired,
-  })  : _tokenStore = tokenStore ?? SecureTokenStore(),
-        _onSessionExpired = onSessionExpired {
-    _dio = dio ??
+  }) : _tokenStore = tokenStore ?? SecureTokenStore(),
+       _onSessionExpired = onSessionExpired {
+    _dio =
+        dio ??
         Dio(
           BaseOptions(
             baseUrl: (baseUri ?? Uri.parse('http://127.0.0.1:8090')).toString(),
@@ -44,6 +46,11 @@ class EchoApi {
 
   String get baseUrl => _dio.options.baseUrl;
 
+  /// 运行时切换服务地址（设置页保存后调用，无需重建 Api 实例）。
+  void updateBaseUrl(Uri uri) {
+    _dio.options.baseUrl = uri.toString();
+  }
+
   /// 将服务端返回的相对媒体地址（如 `/api/files/audiobooks/1?variant=chapter&n=0`）
   /// 解析为完整 URI。
   Uri resolveUri(String pathOrUrl) {
@@ -66,11 +73,13 @@ class EchoApi {
     required String email,
     required String password,
     String device = 'Echo',
-  }) async =>
-      AuthToken.fromJson(await _postJson(
-        '/api/auth/token',
-        {'email': email, 'password': password, 'name': device},
-      ));
+  }) async => AuthToken.fromJson(
+    await _postJson('/api/auth/token', {
+      'email': email,
+      'password': password,
+      'name': device,
+    }),
+  );
 
   /// 轮换 Token（旧 Token 立即失效）。
   Future<AuthToken> refreshToken() async =>
@@ -188,17 +197,15 @@ class EchoApi {
     String remixUserId = '',
     String remixUserKey = '',
   }) async {
-    final json = await _putJson(
-      '/api/providers/$providerId/account',
-      <String, dynamic>{
-        'mode': mode,
-        'domain': domain,
-        'email': email,
-        'password': password,
-        'remix_userid': remixUserId,
-        'remix_userkey': remixUserKey,
-      },
-    );
+    final json =
+        await _putJson('/api/providers/$providerId/account', <String, dynamic>{
+          'mode': mode,
+          'domain': domain,
+          'email': email,
+          'password': password,
+          'remix_userid': remixUserId,
+          'remix_userkey': remixUserKey,
+        });
     final raw = json['account'];
     return raw is Map<String, dynamic>
         ? ProviderAccountInfo.fromJson(raw)
@@ -207,7 +214,10 @@ class EchoApi {
 
   /// 重新验证账号并刷新配额：`POST /api/providers/{id}/account/verify`
   Future<ProviderAccountInfo> verifyProviderAccount(String providerId) async {
-    final json = await _postJson('/api/providers/$providerId/account/verify', null);
+    final json = await _postJson(
+      '/api/providers/$providerId/account/verify',
+      null,
+    );
     final raw = json['account'];
     return raw is Map<String, dynamic>
         ? ProviderAccountInfo.fromJson(raw)
@@ -252,10 +262,13 @@ class EchoApi {
     required String providerId,
     required String ref,
   }) async {
-    final json =
-        await _getJson('/api/providers/$providerId/books/${Uri.encodeComponent(ref)}');
+    final json = await _getJson(
+      '/api/providers/$providerId/books/${Uri.encodeComponent(ref)}',
+    );
     final raw = json['book'];
-    return raw is Map<String, dynamic> ? SearchBook.fromJson(raw) : SearchBook.fromJson(json);
+    return raw is Map<String, dynamic>
+        ? SearchBook.fromJson(raw)
+        : SearchBook.fromJson(json);
   }
 
   // ---- 下载与转换任务（library.go / jobs.go）----
@@ -265,10 +278,10 @@ class EchoApi {
     required String provider,
     required String ref,
   }) async {
-    final json = await _postJson(
-      '/api/library/download',
-      <String, dynamic>{'provider': provider, 'ref': ref},
-    );
+    final json = await _postJson('/api/library/download', <String, dynamic>{
+      'provider': provider,
+      'ref': ref,
+    });
     return _jobFromEnvelope(json);
   }
 
@@ -282,26 +295,24 @@ class EchoApi {
     String fallbackModel = '',
     List<int> chapters = const <int>[],
   }) async {
-    final json = await _postJson(
-      '/api/library/$bookId/audiobooks',
-      <String, dynamic>{
-        'model': model,
-        'voice': voice,
-        'speed': speed,
-        'instruct': instruct,
-        'fallback_model': fallbackModel,
-        'chapters': chapters,
-      },
-    );
+    final json =
+        await _postJson('/api/library/$bookId/audiobooks', <String, dynamic>{
+          'model': model,
+          'voice': voice,
+          'speed': speed,
+          'instruct': instruct,
+          'fallback_model': fallbackModel,
+          'chapters': chapters,
+        });
     return _jobFromEnvelope(json);
   }
 
   /// 任务列表：`GET /api/jobs?limit=&offset=`
   Future<JobsPageInfo> listJobs({int limit = 20, int offset = 0}) async {
-    final uri = Uri(path: '/api/jobs', queryParameters: <String, String>{
-      'limit': '$limit',
-      'offset': '$offset',
-    });
+    final uri = Uri(
+      path: '/api/jobs',
+      queryParameters: <String, String>{'limit': '$limit', 'offset': '$offset'},
+    );
     return JobsPageInfo.fromJson(await _getJson(uri.toString()));
   }
 
@@ -317,7 +328,9 @@ class EchoApi {
     bool full = false,
   }) async {
     final json = await _getJson(
-      full ? '/api/library/$bookId/chapters?full=1' : '/api/library/$bookId/chapters',
+      full
+          ? '/api/library/$bookId/chapters?full=1'
+          : '/api/library/$bookId/chapters',
     );
     return (json['chapters'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
@@ -346,15 +359,20 @@ class EchoApi {
 
   /// 音色试听地址（WAV，需携带 Bearer 头）。
   Uri ttsSampleUrl(String model, String voice) => resolveUri(
-        Uri(path: '/api/tts/sample', queryParameters: <String, String>{
-          'model': model,
-          if (voice.isNotEmpty) 'voice': voice,
-        }).toString(),
-      );
+    Uri(
+      path: '/api/tts/sample',
+      queryParameters: <String, String>{
+        'model': model,
+        if (voice.isNotEmpty) 'voice': voice,
+      },
+    ).toString(),
+  );
 
   static JobInfo _jobFromEnvelope(Map<String, dynamic> json) {
     final raw = json['job'];
-    return raw is Map<String, dynamic> ? JobInfo.fromJson(raw) : JobInfo.fromJson(json);
+    return raw is Map<String, dynamic>
+        ? JobInfo.fromJson(raw)
+        : JobInfo.fromJson(json);
   }
 
   // ---- 拦截器 ----
@@ -370,6 +388,8 @@ class EchoApi {
     handler.next(options);
   }
 
+  Completer<AuthToken>? _refreshCompleter;
+
   Future<void> _handleUnauthorized(
     DioException err,
     ErrorInterceptorHandler handler,
@@ -381,8 +401,23 @@ class EchoApi {
       return;
     }
     try {
-      final refreshed = await refreshToken();
-      await _tokenStore.write(refreshed.token);
+      if (_refreshCompleter == null) {
+        final completer = Completer<AuthToken>();
+        _refreshCompleter = completer;
+        refreshToken()
+            .then((refreshed) async {
+              await _tokenStore.write(refreshed.token);
+              completer.complete(refreshed);
+            })
+            .catchError((Object error, StackTrace stack) {
+              completer.completeError(error, stack);
+            })
+            .whenComplete(() {
+              _refreshCompleter = null;
+            });
+      }
+
+      final refreshed = await _refreshCompleter!.future;
       final options = err.requestOptions
         ..headers['Authorization'] = 'Bearer ${refreshed.token}';
       final response = await _dio.fetch(options);
@@ -391,6 +426,8 @@ class EchoApi {
       // refresh 也失败：清理凭据并通知会话过期。
       await _tokenStore.clear();
       _onSessionExpired?.call();
+      handler.next(err);
+    } catch (_) {
       handler.next(err);
     }
   }
@@ -404,6 +441,50 @@ class EchoApi {
     } on DioException catch (e) {
       throw ApiException.fromResponse(e.response);
     }
+  }
+
+  // ---- 进度与笔记云端同步 ----
+
+  /// 获取云端所有播放与阅读进度
+  Future<List<SyncProgressItem>> getCloudProgress() async {
+    final json = await _getJson('/api/sync/progress');
+    final raw = json['progresses'] as List<dynamic>? ?? const [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(SyncProgressItem.fromJson)
+        .toList();
+  }
+
+  /// 批量上报本地进度至云端（服务端按时间戳 LWW 判定）
+  Future<void> pushCloudProgress(List<SyncProgressItem> items) async {
+    if (items.isEmpty) return;
+    await _postJson('/api/sync/progress', <String, dynamic>{
+      'progresses': items.map((e) => e.toJson()).toList(),
+    });
+  }
+
+  /// 获取云端所有时间戳笔记
+  Future<List<SyncNoteItem>> getCloudNotes({int? audiobookId}) async {
+    final query = audiobookId != null ? '?audiobook_id=$audiobookId' : '';
+    final json = await _getJson('/api/sync/notes$query');
+    final raw = json['notes'] as List<dynamic>? ?? const [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(SyncNoteItem.fromJson)
+        .toList();
+  }
+
+  /// 批量上报本地笔记至云端
+  Future<void> pushCloudNotes(List<SyncNoteItem> notes) async {
+    if (notes.isEmpty) return;
+    await _postJson('/api/sync/notes', <String, dynamic>{
+      'notes': notes.map((e) => e.toJson()).toList(),
+    });
+  }
+
+  /// 删除云端时间戳笔记
+  Future<void> deleteCloudNote(String noteId) async {
+    await _deleteJson('/api/sync/notes/$noteId');
   }
 
   Future<Map<String, dynamic>> _postJson(

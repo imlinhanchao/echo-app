@@ -122,8 +122,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                           Text(
                             _error!,
                             key: const Key('register_error'),
-                            style: textTheme.bodySmall
-                                ?.copyWith(color: tokens.error),
+                            style: textTheme.bodySmall?.copyWith(
+                              color: tokens.error,
+                            ),
                           ),
                         ],
                         const SizedBox(height: EchoMetrics.space3),
@@ -134,7 +135,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                               ? const SizedBox(
                                   height: 20,
                                   width: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Text('注册并登录'),
                         ),

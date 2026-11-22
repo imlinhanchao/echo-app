@@ -17,15 +17,15 @@ class TimestampNote {
   });
 
   factory TimestampNote.fromJson(Map<String, dynamic> json) => TimestampNote(
-        id: json['id'] as String? ?? '',
-        audiobookId: (json['audiobook_id'] as num?)?.toInt() ?? 0,
-        positionMs: (json['position_ms'] as num?)?.toInt() ?? 0,
-        text: json['text'] as String? ?? '',
-        chapterTitle: json['chapter'] as String? ?? '',
-        createdAt:
-            DateTime.tryParse(json['created_at'] as String? ?? '') ??
-                DateTime.now(),
-      );
+    id: json['id'] as String? ?? '',
+    audiobookId: (json['audiobook_id'] as num?)?.toInt() ?? 0,
+    positionMs: (json['position_ms'] as num?)?.toInt() ?? 0,
+    text: json['text'] as String? ?? '',
+    chapterTitle: json['chapter'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(json['created_at'] as String? ?? '') ??
+        DateTime.now(),
+  );
 
   final String id;
   final int audiobookId;
@@ -44,13 +44,13 @@ class TimestampNote {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'audiobook_id': audiobookId,
-        'position_ms': positionMs,
-        'text': text,
-        'chapter': chapterTitle,
-        'created_at': createdAt.toIso8601String(),
-      };
+    'id': id,
+    'audiobook_id': audiobookId,
+    'position_ms': positionMs,
+    'text': text,
+    'chapter': chapterTitle,
+    'created_at': createdAt.toIso8601String(),
+  };
 }
 
 /// 时间戳笔记存储（本地）。
@@ -76,9 +76,9 @@ class NoteStore {
           _notes
             ..clear()
             ..addAll(
-              list
-                  .whereType<Map<String, dynamic>>()
-                  .map(TimestampNote.fromJson),
+              list.whereType<Map<String, dynamic>>().map(
+                TimestampNote.fromJson,
+              ),
             );
         }
       }
@@ -87,6 +87,8 @@ class NoteStore {
     }
     _loaded = true;
   }
+
+  List<TimestampNote> get allNotes => List.unmodifiable(_notes);
 
   List<TimestampNote> notesFor(int audiobookId) {
     final list = _notes.where((n) => n.audiobookId == audiobookId).toList()
@@ -121,7 +123,8 @@ class NoteStore {
   void _scheduleSave() {
     final now = DateTime.now();
     final last = _lastSaveAt;
-    if (last != null && now.difference(last) < const Duration(milliseconds: 500)) {
+    if (last != null &&
+        now.difference(last) < const Duration(milliseconds: 500)) {
       return;
     }
     _lastSaveAt = now;

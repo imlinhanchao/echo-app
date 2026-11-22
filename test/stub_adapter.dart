@@ -9,11 +9,11 @@ typedef Responder = ({int status, Map<String, dynamic> body});
 Responder okResponse(Map<String, dynamic> body) => (status: 200, body: body);
 
 Responder errorResponse(int status, String code, String message) => (
-      status: status,
-      body: {
-        'error': {'code': code, 'message': message},
-      },
-    );
+  status: status,
+  body: {
+    'error': {'code': code, 'message': message},
+  },
+);
 
 /// 记录所有请求（含 [RequestOptions.data] 请求体）并按路由返回预设响应。
 class StubAdapter implements HttpClientAdapter {
@@ -30,7 +30,8 @@ class StubAdapter implements HttpClientAdapter {
   ]) async {
     requests.add(options);
     final respond =
-        routes[options.uri.path] ?? () => errorResponse(404, 'not_found', '路由未配置');
+        routes[options.uri.path] ??
+        () => errorResponse(404, 'not_found', '路由未配置');
     final response = respond();
     return ResponseBody.fromString(
       jsonEncode(response.body),
@@ -42,8 +43,9 @@ class StubAdapter implements HttpClientAdapter {
   }
 
   Map<String, dynamic>? requestBodyAt(String path, [int index = 0]) {
-    final matches =
-        requests.where((r) => r.uri.path == path && r.data != null).toList();
+    final matches = requests
+        .where((r) => r.uri.path == path && r.data != null)
+        .toList();
     if (index >= matches.length) return null;
     final data = matches[index].data;
     return data is Map<String, dynamic> ? data : null;
@@ -56,5 +58,6 @@ class StubAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-Dio stubDio(StubAdapter adapter) => Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
-  ..httpClientAdapter = adapter;
+Dio stubDio(StubAdapter adapter) =>
+    Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+      ..httpClientAdapter = adapter;

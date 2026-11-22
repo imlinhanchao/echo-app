@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../api/echo_api.dart';
 import '../api/models.dart';
+import '../notes/note_store.dart';
 
 /// EPUB 导出：把服务端书库里的书籍文件下载到本地，并调起系统分享
 /// （用户可保存到文件、发送到微信/邮箱，或用其他阅读器打开）。
@@ -35,5 +36,25 @@ abstract final class BookExporter {
     } catch (_) {
       // 分享失败时文件已保存在本地
     }
+  }
+
+  /// 导出书籍时间戳笔记为 Markdown 文件。
+  static Future<String?> exportNotes({
+    required String bookTitle,
+    required List<TimestampNote> notes,
+  }) async {
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docs.path}/echo_exports');
+    if (!dir.existsSync()) await dir.create(recursive: true);
+
+    final safeTitle = bookTitle.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final file = File('${dir.path}/${safeTitle}_notes.md');
+    final buffer = StringBuffer('# $bookTitle - 读书笔记\n\n');
+    for (final n in notes) {
+      buffer.writeln('### [${n.positionLabel}] ${n.chapterTitle}');
+      buffer.writeln('${n.text}\n');
+    }
+    await file.writeAsString(buffer.toString(), flush: true);
+    return file.path;
   }
 }

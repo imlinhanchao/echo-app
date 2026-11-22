@@ -2,7 +2,12 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+final readingStoreProvider = Provider<ReadingStore>(
+  (ref) => PersistentReadingStore(),
+);
 
 /// 阅读进度：章号 + 章内字符偏移。
 ///
@@ -31,11 +36,11 @@ class ReadingPosition {
   final DateTime? updatedAt;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'book_id': bookId,
-        'chapter_index': chapterIndex,
-        'char_offset': charOffset,
-        'updated_at': (updatedAt ?? DateTime.now().toUtc()).toIso8601String(),
-      };
+    'book_id': bookId,
+    'chapter_index': chapterIndex,
+    'char_offset': charOffset,
+    'updated_at': (updatedAt ?? DateTime.now().toUtc()).toIso8601String(),
+  };
 }
 
 /// 阅读位置存储抽象（书比音频更需要"上次看到哪"）。
@@ -48,7 +53,7 @@ abstract class ReadingStore {
 /// 持久化实现。
 class PersistentReadingStore implements ReadingStore {
   PersistentReadingStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _storage;
 
@@ -60,9 +65,7 @@ class PersistentReadingStore implements ReadingStore {
     if (raw == null || raw.isEmpty) return null;
     try {
       final map = jsonDecode(raw);
-      return map is Map<String, dynamic>
-          ? ReadingPosition.fromJson(map)
-          : null;
+      return map is Map<String, dynamic> ? ReadingPosition.fromJson(map) : null;
     } catch (_) {
       return null;
     }
@@ -70,9 +73,9 @@ class PersistentReadingStore implements ReadingStore {
 
   @override
   Future<void> write(ReadingPosition position) => _storage.write(
-        key: _key(position.bookId),
-        value: jsonEncode(position.toJson()),
-      );
+    key: _key(position.bookId),
+    value: jsonEncode(position.toJson()),
+  );
 
   @override
   Future<void> delete(int bookId) => _storage.delete(key: _key(bookId));
@@ -181,8 +184,7 @@ List<ReaderPage> paginateChapterBySize({
   int adjustBreak(int offset, int length) {
     if (offset + length >= trimmed.length) return trimmed.length - offset;
     const lookback = 60;
-    final windowStart =
-        offset + math.max(1, length - lookback);
+    final windowStart = offset + math.max(1, length - lookback);
     for (var i = offset + length - 1; i >= windowStart; i--) {
       final ch = trimmed[i];
       if (ch == '\n' || ch == '。' || ch == '！' || ch == '？' || ch == '；') {
