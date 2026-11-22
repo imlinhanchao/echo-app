@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/api/echo_api.dart';
 import '../../core/api/models.dart';
@@ -49,14 +53,13 @@ class SearchFilters {
     int? yearFrom,
     int? yearTo,
     String? order,
-  }) =>
-      SearchFilters(
-        extensions: extensions ?? this.extensions,
-        languages: languages ?? this.languages,
-        yearFrom: yearFrom ?? this.yearFrom,
-        yearTo: yearTo ?? this.yearTo,
-        order: order ?? this.order,
-      );
+  }) => SearchFilters(
+    extensions: extensions ?? this.extensions,
+    languages: languages ?? this.languages,
+    yearFrom: yearFrom ?? this.yearFrom,
+    yearTo: yearTo ?? this.yearTo,
+    order: order ?? this.order,
+  );
 }
 
 @immutable
@@ -105,36 +108,112 @@ class SearchState {
   }
 }
 
+/// 搜索历史存储抽象。
+abstract class SearchHistoryStore {
+  Future<List<String>> load();
+  Future<void> save(List<String> history);
+}
+
+/// 基于 FlutterSecureStorage 的搜索历史安全存储。
+class SecureSearchHistoryStore implements SearchHistoryStore {
+  SecureSearchHistoryStore({FlutterSecureStorage? storage})
+    : _storage = storage ?? const FlutterSecureStorage();
+
+  final FlutterSecureStorage _storage;
+  static const _key = 'echo_search_history_v1';
+
+  @override
+  Future<List<String>> load() async {
+    try {
+      final raw = await _storage.read(key: _key);
+      if (raw == null || raw.isEmpty) return const [];
+      final list = jsonDecode(raw) as List<dynamic>?;
+      if (list == null) return const [];
+      return list.map((e) => e.toString()).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> save(List<String> history) async {
+    try {
+      await _storage.write(key: _key, value: jsonEncode(history));
+    } catch (_) {}
+  }
+}
+
+/// 内存版搜索历史存储（供测试使用）。
+class MemorySearchHistoryStore implements SearchHistoryStore {
+  MemorySearchHistoryStore([List<String>? initial])
+    : _history = List.of(initial ?? const []);
+
+  List<String> _history;
+
+  @override
+  Future<List<String>> load() async => List.unmodifiable(_history);
+
+  @override
+  Future<void> save(List<String> history) async {
+    _history = List.of(history);
+  }
+}
+
 /// 搜索控制器：发起查询、分页加载更多、筛选切换。
 class SearchController extends StateNotifier<SearchState> {
-  SearchController(this._api, {SearchFilters filters = const SearchFilters()})
-      : _filters = filters,
-        super(const SearchState());
+  SearchController(
+    this._api, {
+    SearchFilters filters = const SearchFilters(),
+    SearchHistoryStore? historyStore,
+  }) : _filters = filters,
+       _historyStore = historyStore ?? SecureSearchHistoryStore(),
+       super(const SearchState()) {
+    _initHistory();
+  }
 
   final EchoApi _api;
+  final SearchHistoryStore _historyStore;
   SearchFilters _filters;
 
   SearchFilters get filters => _filters;
 
+  Future<void> _initHistory() async {
+    final list = await _historyStore.load();
+    if (list.isNotEmpty && mounted) {
+      state = state.copyWith(history: list);
+    }
+  }
+
   Future<void> search(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
-    final history = [trimmed, ...state.history.where((e) => e != trimmed)]
-        .take(8)
-        .toList();
-    state = SearchState(
+    final history = [
+      trimmed,
+      ...state.history.where((e) => e != trimmed),
+    ].take(8).toList();
+    // 保持既有 books 避免列表突兀白屏闪烁，通过 isLoading: true 呈现局部加载态；
+    // 结果返回后在 _fetch 内原子替换。
+    state = state.copyWith(
       isLoading: true,
       lastQuery: trimmed,
       history: history,
+      clearError: true,
     );
+    unawaited(_historyStore.save(history));
     await _fetch(page: 1, query: trimmed, append: false);
   }
 
   /// 删除一条搜索历史。
   void removeHistory(String query) {
-    state = state.copyWith(
-      history: state.history.where((e) => e != query).toList(),
-    );
+    final history = state.history.where((e) => e != query).toList();
+    state = state.copyWith(history: history);
+    unawaited(_historyStore.save(history));
+  }
+
+  /// 清空全部搜索历史。
+  void clearHistory() {
+    state = state.copyWith(history: const <String>[]);
+    unawaited(_historyStore.save(const <String>[]));
   }
 
   Future<void> loadMore() async {
@@ -172,16 +251,27 @@ class SearchController extends StateNotifier<SearchState> {
         isLoading: false,
       );
     } on ApiException catch (e) {
-      state = state.copyWith(isLoading: false, error: e.message);
+      state = state.copyWith(
+        isLoading: false,
+        error: e.message,
+        books: append ? null : const <SearchBook>[],
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: '搜索失败: $e',
+        books: append ? null : const <SearchBook>[],
+      );
     }
   }
 }
 
 final StateNotifierProvider<SearchController, SearchState>
-    searchControllerProvider =
-    StateNotifierProvider<SearchController, SearchState>((ref) {
-  return SearchController(ref.watch(echoApiProvider));
-});
+searchControllerProvider = StateNotifierProvider<SearchController, SearchState>(
+  (ref) {
+    return SearchController(ref.watch(echoApiProvider));
+  },
+);
 
 /// 与 flutter/material 的同名类区分。
 typedef SearchControllerImpl = SearchController;

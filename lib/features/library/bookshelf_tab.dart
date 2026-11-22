@@ -57,8 +57,9 @@ class BookshelfTab extends ConsumerWidget {
     final libController = ref.read(libraryControllerProvider.notifier);
     final playerState = ref.watch(chunkedPlayerProvider);
     // 只看真正有意义的条目：完成 / 转换中；失败与取消的不占首页
-    final shelfAudios =
-        libState.audiobooks.where((a) => a.showOnShelf).toList();
+    final shelfAudios = libState.audiobooks
+        .where((a) => a.showOnShelf)
+        .toList();
 
     final hour = DateTime.now().hour;
     final greeting = hour < 6
@@ -164,8 +165,35 @@ class BookshelfTab extends ConsumerWidget {
               ),
             )
           else
-            for (final item in shelfAudios)
-              _AudiobookRow(item: item, books: libState.books),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 600;
+                if (!isWide) {
+                  return Column(
+                    children: [
+                      for (final item in shelfAudios)
+                        _AudiobookRow(item: item, books: libState.books),
+                    ],
+                  );
+                }
+                return GridView.builder(
+                  key: const Key('bookshelf_audiobooks_grid'),
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: shelfAudios.length,
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 196,
+                    mainAxisSpacing: EchoMetrics.space2,
+                    crossAxisSpacing: EchoMetrics.space2,
+                    childAspectRatio: 0.66,
+                  ),
+                  itemBuilder: (_, index) => _AudiobookGridCard(
+                    item: shelfAudios[index],
+                    books: libState.books,
+                  ),
+                );
+              },
+            ),
 
           if (libState.books.isNotEmpty) ...[
             const SizedBox(height: EchoMetrics.space3),
@@ -176,7 +204,32 @@ class BookshelfTab extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: EchoMetrics.space1),
-            for (final book in libState.books) _BookRow(book: book),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 600;
+                if (!isWide) {
+                  return Column(
+                    children: [
+                      for (final book in libState.books) _BookRow(book: book),
+                    ],
+                  );
+                }
+                return GridView.builder(
+                  key: const Key('bookshelf_books_grid'),
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: libState.books.length,
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 196,
+                    mainAxisSpacing: EchoMetrics.space2,
+                    crossAxisSpacing: EchoMetrics.space2,
+                    childAspectRatio: 0.66,
+                  ),
+                  itemBuilder: (_, index) =>
+                      _BookGridCard(book: libState.books[index]),
+                );
+              },
+            ),
           ],
         ],
       ),
@@ -193,29 +246,33 @@ class _SearchEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    return InkWell(
-      key: const Key('bookshelf_search_entry'),
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
-      child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space2),
-        decoration: BoxDecoration(
-          color: tokens.surfaceElevated,
-          borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
-          border: Border.all(color: tokens.primary.withValues(alpha: 0.5)),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search, color: tokens.primary, size: 20),
-            const SizedBox(width: EchoMetrics.space1),
-            Text(
-              '搜索有声书…',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
-            ),
-          ],
+    return Semantics(
+      button: true,
+      label: '搜索有声书',
+      child: InkWell(
+        key: const Key('bookshelf_search_entry'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
+        child: Container(
+          height: 50,
+          padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space2),
+          decoration: BoxDecoration(
+            color: tokens.surfaceElevated,
+            borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
+            border: Border.all(color: tokens.primary.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.search, color: tokens.primary, size: 20),
+              const SizedBox(width: EchoMetrics.space1),
+              Text(
+                '搜索有声书…',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -250,6 +307,10 @@ class _NowPlayingHeroCard extends ConsumerWidget {
         : remainingSec > 0
         ? '剩余 $remainingSec 秒'
         : '已听完';
+
+    final progressValue = totalMs > 0
+        ? (state.globalPositionMs / totalMs).clamp(0.0, 1.0)
+        : 0.0;
 
     return GestureDetector(
       key: const Key('now_playing_hero_card'),
@@ -291,6 +352,20 @@ class _NowPlayingHeroCard extends ConsumerWidget {
                     alignment: Alignment.center,
                     children: [
                       BookCover(url: cover, width: 104, height: 104),
+                      // 圆形进度环 + 播放按钮（对齐设计 §4.1）
+                      SizedBox(
+                        width: 58,
+                        height: 58,
+                        child: CircularProgressIndicator(
+                          key: const Key('now_playing_progress_ring'),
+                          value: progressValue,
+                          strokeWidth: 3.5,
+                          backgroundColor: tokens.surfaceBase.withValues(
+                            alpha: 0.55,
+                          ),
+                          color: tokens.primary,
+                        ),
+                      ),
                       Material(
                         color: Colors.transparent,
                         child: InkWell(
@@ -344,19 +419,11 @@ class _NowPlayingHeroCard extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: EchoMetrics.space1),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: LinearProgressIndicator(
-                          key: const Key('now_playing_progress_ring'),
-                          value: totalMs > 0
-                              ? (state.globalPositionMs / totalMs).clamp(
-                                  0.0,
-                                  1.0,
-                                )
-                              : 0,
-                          minHeight: 4,
-                          backgroundColor: tokens.surfaceSubtle,
+                      Text(
+                        '${(progressValue * 100).round()}% 已听',
+                        style: textTheme.labelSmall?.copyWith(
                           color: tokens.primary,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -382,6 +449,10 @@ class _AudiobookRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
+    final playerState = ref.watch(chunkedPlayerProvider);
+    final savedProgress = ref.watch(
+      libraryControllerProvider.select((s) => s.progressMap[item.id]),
+    );
     final cover = books
         .where((b) => b.id == item.bookId)
         .map((b) => b.coverUrl)
@@ -390,6 +461,24 @@ class _AudiobookRow extends ConsumerWidget {
         ? item.bookTitle
         : '有声书 #${item.id}';
     final duration = formatDurationMs((item.durationS * 1000).round());
+
+    String readySubtitle() {
+      if (playerState.audiobook?.id == item.id &&
+          playerState.totalDurationMs > 0) {
+        final remSec =
+            ((playerState.totalDurationMs - playerState.globalPositionMs) /
+                    1000)
+                .floor();
+        if (remSec > 60) {
+          return '剩余 ${(remSec / 60).floor()} 分钟 · ${item.model}';
+        }
+        return remSec > 0 ? '剩余 $remSec 秒 · ${item.model}' : '已听完 · ${item.model}';
+      }
+      if (savedProgress != null && savedProgress.offsetMs > 0) {
+        return '第 ${savedProgress.chapterIndex + 1} 章 · 时长 $duration';
+      }
+      return '时长 $duration · ${item.model}';
+    }
 
     return InkWell(
       key: Key('audiobook_card_${item.id}'),
@@ -425,7 +514,7 @@ class _AudiobookRow extends ConsumerWidget {
                   const SizedBox(height: 2),
                   Text(
                     item.isReady
-                        ? '时长 $duration · ${item.model}'
+                        ? readySubtitle()
                         : '状态：${item.status} (${item.progress}%)',
                     style: textTheme.bodySmall?.copyWith(
                       color: tokens.textSecondary,
@@ -530,7 +619,9 @@ class _BookRow extends ConsumerWidget {
               key: Key('book_read_${book.id}'),
               tooltip: '阅读',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => ReaderPageView(book: book)),
+                MaterialPageRoute<void>(
+                  builder: (_) => ReaderPageView(book: book),
+                ),
               ),
               icon: Icon(Icons.menu_book_outlined, color: tokens.textPrimary),
             ),
@@ -575,6 +666,332 @@ class _BookRow extends ConsumerWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 平板/桌面端有声书封面网格卡片（对齐设计图 ui-tablet-main / ui-desktop-main）：
+/// hover 浮现半透明蒙层 + 播放按钮 + 圆形进度环。
+class _AudiobookGridCard extends ConsumerStatefulWidget {
+  const _AudiobookGridCard({required this.item, required this.books});
+
+  final AudiobookInfo item;
+  final List<LibraryBook> books;
+
+  @override
+  ConsumerState<_AudiobookGridCard> createState() => _AudiobookGridCardState();
+}
+
+class _AudiobookGridCardState extends ConsumerState<_AudiobookGridCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+    final playerState = ref.watch(chunkedPlayerProvider);
+    final item = widget.item;
+    final book = widget.books.where((b) => b.id == item.bookId).firstOrNull;
+    final cover = book?.coverUrl;
+    final title = item.bookTitle.isNotEmpty
+        ? item.bookTitle
+        : '有声书 #${item.id}';
+    final duration = formatDurationMs((item.durationS * 1000).round());
+    final isCurrent = playerState.audiobook?.id == item.id;
+    final progressValue = isCurrent && playerState.totalDurationMs > 0
+        ? (playerState.globalPositionMs / playerState.totalDurationMs).clamp(
+            0.0,
+            1.0,
+          )
+        : (item.isReady ? 0.0 : (item.progress / 100).clamp(0.0, 1.0));
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Card(
+        key: Key('audiobook_card_${item.id}'),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            if (book == null) return;
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => BookDetailPage(book: book, audiobook: item),
+              ),
+            );
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    BookCover(
+                      url: cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                    ),
+                    // 左上角资产角标
+                    Positioned(
+                      left: EchoMetrics.space1,
+                      top: EchoMetrics.space1,
+                      child: _AssetBadge(
+                        label: item.isReady ? '可听' : '${item.progress}%',
+                        color: tokens.primary,
+                      ),
+                    ),
+                    // hover 或当前播放态浮现播放按钮 + 圆形进度环
+                    if (item.isReady)
+                      AnimatedOpacity(
+                        duration: EchoMetrics.motionFast,
+                        opacity: (_hovered || isCurrent) ? 1.0 : 0.0,
+                        child: Container(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          alignment: Alignment.center,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              SizedBox(
+                                width: 54,
+                                height: 54,
+                                child: CircularProgressIndicator(
+                                  value: progressValue,
+                                  strokeWidth: 3,
+                                  backgroundColor: Colors.white24,
+                                  color: tokens.primary,
+                                ),
+                              ),
+                              Material(
+                                color: Colors.transparent,
+                                child: IconButton(
+                                  key: Key('audiobook_play_${item.id}'),
+                                  tooltip: '播放',
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: tokens.primary,
+                                    foregroundColor: tokens.textOnPrimary,
+                                  ),
+                                  onPressed: () {
+                                    if (isCurrent) {
+                                      ref
+                                          .read(chunkedPlayerProvider.notifier)
+                                          .togglePlayPause();
+                                    } else {
+                                      ref
+                                          .read(chunkedPlayerProvider.notifier)
+                                          .loadAudiobook(item, coverUrl: cover);
+                                    }
+                                  },
+                                  icon: Icon(
+                                    (isCurrent && playerState.isPlaying)
+                                        ? Icons.pause
+                                        : Icons.play_arrow,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(EchoMetrics.space1),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: tokens.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.isReady
+                          ? '$duration · ${item.model}'
+                          : '转换中 ${item.progress}%',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 平板/桌面端电子书封面网格卡片。
+class _BookGridCard extends ConsumerStatefulWidget {
+  const _BookGridCard({required this.book});
+
+  final LibraryBook book;
+
+  @override
+  ConsumerState<_BookGridCard> createState() => _BookGridCardState();
+}
+
+class _BookGridCardState extends ConsumerState<_BookGridCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+    final book = widget.book;
+    final isEpub = book.format.toLowerCase() == 'epub';
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Card(
+        key: Key('book_card_${book.id}'),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => BookDetailPage(book: book)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    BookCover(
+                      url: book.coverUrl,
+                      width: double.infinity,
+                      height: double.infinity,
+                    ),
+                    Positioned(
+                      left: EchoMetrics.space1,
+                      top: EchoMetrics.space1,
+                      child: _AssetBadge(
+                        label: isEpub ? '可看' : book.format.toUpperCase(),
+                        color: tokens.surfaceElevated,
+                        textColor: tokens.textPrimary,
+                      ),
+                    ),
+                    AnimatedOpacity(
+                      duration: EchoMetrics.motionFast,
+                      opacity: _hovered ? 1.0 : 0.0,
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        alignment: Alignment.center,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              key: Key('book_read_${book.id}'),
+                              tooltip: '阅读',
+                              style: IconButton.styleFrom(
+                                backgroundColor: tokens.surfaceElevated,
+                                foregroundColor: tokens.textPrimary,
+                              ),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ReaderPageView(book: book),
+                                ),
+                              ),
+                              icon: const Icon(Icons.menu_book_outlined),
+                            ),
+                            if (isEpub) ...[
+                              const SizedBox(width: EchoMetrics.space1),
+                              IconButton(
+                                key: Key('book_convert_${book.id}'),
+                                tooltip: '转有声书',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: tokens.primary,
+                                  foregroundColor: tokens.textOnPrimary,
+                                ),
+                                onPressed: () => showModalBottomSheet<void>(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  useSafeArea: true,
+                                  builder: (_) => ConvertSheet(book: book),
+                                ),
+                                icon: const Icon(Icons.graphic_eq),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(EchoMetrics.space1),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      book.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: tokens.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      book.authors.isNotEmpty
+                          ? book.authors.join(', ')
+                          : '未知作者',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AssetBadge extends StatelessWidget {
+  const _AssetBadge({
+    required this.label,
+    required this.color,
+    this.textColor,
+  });
+
+  final String label;
+  final Color color;
+  final Color? textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: textColor ?? tokens.textOnPrimary,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );

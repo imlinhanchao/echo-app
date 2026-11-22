@@ -104,8 +104,9 @@ void main() {
   final darkTokens = EchoTokens.fromColors(darkColors, Brightness.dark);
   const user = EchoUser(id: 7, email: 'hancel@example.com');
 
-  testWidgets('书架加载有声书 → 点击播放浮现迷你播放条 → 展开 v3 跟读播放器',
-      (WidgetTester tester) async {
+  testWidgets('书架加载有声书 → 点击播放浮现迷你播放条 → 展开 v3 跟读播放器', (
+    WidgetTester tester,
+  ) async {
     final tokenStore = MemoryTokenStore();
     await tokenStore.write('echo_pat_test');
     final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))

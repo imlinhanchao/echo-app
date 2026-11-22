@@ -1,18 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/sync/progress_sync_service.dart';
+import '../../design/echo_breakpoints.dart';
 import '../../design/echo_tokens.dart';
 import '../jobs/jobs_page.dart';
 import '../library/bookshelf_tab.dart';
-import '../player/player_sheet.dart' show MiniPlayerBar;
+import '../notes/desktop_notes_drawer.dart';
+import '../player/desktop_player_bar.dart';
+import '../player/player_sheet.dart'
+    show MiniPlayerBar, TabletCapsulePlayerBar;
 import '../profile/profile_page.dart';
 import '../search/search_page.dart';
+import 'desktop_shortcuts.dart';
+import 'desktop_sidebar.dart';
 
-/// 已登录主壳（对齐设计图 ui-mobile-library）：
-/// 底部纯图标导航（书架 / 发现 / 任务 / 我的）+ 悬浮胶囊迷你播放条。
-///
-/// Tab 懒构建：首次访问才实例化——任务页轮询因此只在可见时开启。
-class EchoShell extends StatefulWidget {
+/// 已登录主壳（对齐设计规划 §2.1 三断点响应式与 §4 界面规范）：
+/// - Compact (< 600dp): 底部纯图标导航 + 悬浮胶囊迷你播放条；
+/// - Medium (600–1024dp): 左侧 NavigationRail + 胶囊播放条（含快捷打点）；
+/// - Expanded (> 1024dp): 左侧完整 DesktopSidebar + 右侧笔记抽屉 + 底部全宽专业播控台。
+class EchoShell extends ConsumerStatefulWidget {
   const EchoShell({super.key, required this.user});
 
   final EchoUser user;
@@ -25,12 +33,21 @@ class EchoShell extends StatefulWidget {
   }
 
   @override
-  State<EchoShell> createState() => EchoShellState();
+  ConsumerState<EchoShell> createState() => EchoShellState();
 }
 
-class EchoShellState extends State<EchoShell> {
+class EchoShellState extends ConsumerState<EchoShell> {
   int _currentIndex = 0;
   final Set<int> _visitedTabs = <int>{0};
+  bool _isNotesOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(progressSyncServiceProvider.notifier).syncAll();
+    });
+  }
 
   void select(int index) {
     if (index == _currentIndex) return;
@@ -40,72 +57,189 @@ class EchoShellState extends State<EchoShell> {
     });
   }
 
+  void toggleNotes() {
+    setState(() {
+      _isNotesOpen = !_isNotesOpen;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    return Scaffold(
-      key: const Key('echo_home'),
-      body: Column(
-        children: [
-          Expanded(
-            child: IndexedStack(
-              index: _currentIndex,
+
+    return DesktopShortcutsWrapper(
+      onAddNotePrompt: () {
+        setState(() => _isNotesOpen = true);
+      },
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final screenType = screenTypeForWidth(constraints.maxWidth);
+
+          Widget contentStack() => IndexedStack(
+            index: _currentIndex,
+            children: [
+              for (var i = 0; i < 4; i++)
+                if (_visitedTabs.contains(i) || i == _currentIndex)
+                  _buildTab(i, i == _currentIndex)
+                else
+                  const SizedBox.shrink(key: Key('echo_tab_placeholder')),
+            ],
+          );
+
+          // 1. 桌面宽屏模式 (> 1024dp)
+          if (screenType == EchoScreenType.expanded) {
+            return Scaffold(
+              key: const Key('echo_home'),
+              body: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        DesktopSidebar(
+                          user: widget.user,
+                          selectedIndex: _currentIndex,
+                          onSelect: select,
+                        ),
+                        Expanded(
+                          child: SafeArea(
+                            top: true,
+                            bottom: false,
+                            child: contentStack(),
+                          ),
+                        ),
+                        if (_isNotesOpen)
+                          DesktopNotesDrawer(
+                            onClose: () => setState(() => _isNotesOpen = false),
+                          ),
+                      ],
+                    ),
+                  ),
+                  DesktopPlayerBar(
+                    onToggleNotes: toggleNotes,
+                    isNotesOpen: _isNotesOpen,
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // 2. 平板中屏模式 (600–1024dp)
+          if (screenType == EchoScreenType.medium) {
+            return Scaffold(
+              key: const Key('echo_home'),
+              body: Row(
+                children: [
+                  NavigationRail(
+                    key: const Key('echo_nav_rail'),
+                    selectedIndex: _currentIndex,
+                    onDestinationSelected: select,
+                    labelType: NavigationRailLabelType.all,
+                    backgroundColor: tokens.surfaceBase,
+                    indicatorColor: tokens.primary.withValues(alpha: 0.18),
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.home_outlined),
+                        selectedIcon: Icon(Icons.home),
+                        label: Text('书架'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.search),
+                        selectedIcon: Icon(Icons.manage_search),
+                        label: Text('发现'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.grid_view_outlined),
+                        selectedIcon: Icon(Icons.grid_view),
+                        label: Text('任务'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.person_outline),
+                        selectedIcon: Icon(Icons.person),
+                        label: Text('我的'),
+                      ),
+                    ],
+                  ),
+                  const VerticalDivider(width: 1, thickness: 1),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: SafeArea(
+                            top: true,
+                            bottom: false,
+                            child: contentStack(),
+                          ),
+                        ),
+                        const TabletCapsulePlayerBar(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // 3. 手机紧凑模式 (< 600dp)
+          return Scaffold(
+            key: const Key('echo_home'),
+            body: Column(
               children: [
-                for (var i = 0; i < 4; i++)
-                  if (_visitedTabs.contains(i) || i == _currentIndex)
-                    _buildTab(i)
-                  else
-                    const SizedBox.shrink(key: Key('echo_tab_placeholder')),
+                Expanded(
+                  child: SafeArea(
+                    top: true,
+                    bottom: false,
+                    child: contentStack(),
+                  ),
+                ),
+                const MiniPlayerBar(),
               ],
             ),
-          ),
-          // 悬浮胶囊迷你播放条（设计图底部）
-          const MiniPlayerBar(),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        key: const Key('echo_nav_bar'),
-        selectedIndex: _currentIndex,
-        height: 64,
-        backgroundColor: tokens.surfaceBase,
-        surfaceTintColor: Colors.transparent,
-        indicatorColor: tokens.primary.withValues(alpha: 0.18),
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-        onDestinationSelected: select,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: '书架',
-            tooltip: '书架',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search),
-            selectedIcon: Icon(Icons.manage_search),
-            label: '发现',
-            tooltip: '发现',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.grid_view_outlined),
-            selectedIcon: Icon(Icons.grid_view),
-            label: '任务',
-            tooltip: '任务',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: '我的',
-            tooltip: '我的',
-          ),
-        ],
+            bottomNavigationBar: NavigationBar(
+              key: const Key('echo_nav_bar'),
+              selectedIndex: _currentIndex,
+              height: 64,
+              backgroundColor: tokens.surfaceBase,
+              surfaceTintColor: Colors.transparent,
+              indicatorColor: tokens.primary.withValues(alpha: 0.18),
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+              onDestinationSelected: select,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: '书架',
+                  tooltip: '书架',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search),
+                  selectedIcon: Icon(Icons.manage_search),
+                  label: '发现',
+                  tooltip: '发现',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.grid_view_outlined),
+                  selectedIcon: Icon(Icons.grid_view),
+                  label: '任务',
+                  tooltip: '任务',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.person_outline),
+                  selectedIcon: Icon(Icons.person),
+                  label: '我的',
+                  tooltip: '我的',
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 
-  Widget _buildTab(int index) => switch (index) {
+  Widget _buildTab(int index, bool isActive) => switch (index) {
     0 => const BookshelfTab(),
     1 => const SearchPage(),
-    2 => const JobsPage(),
+    2 => JobsPage(isActive: isActive),
     _ => ProfilePage(user: widget.user),
   };
 }

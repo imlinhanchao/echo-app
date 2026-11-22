@@ -14,17 +14,17 @@ void main() {
 
       final adapter = StubAdapter(<String, Responder Function()>{
         '/api/jobs': () => okResponse(<String, dynamic>{
-              'jobs': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'id': 5,
-                  'kind': 'audiobook',
-                  'status': jobStatus,
-                  'progress': 42,
-                  'created_at': '2026-11-20T07:00:00Z',
-                },
-              ],
-              'total': 1,
-            }),
+          'jobs': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 5,
+              'kind': 'audiobook',
+              'status': jobStatus,
+              'progress': 42,
+              'created_at': '2026-11-20T07:00:00Z',
+            },
+          ],
+          'total': 1,
+        }),
       });
       final api = EchoApi(
         dio: stubDio(adapter),
@@ -55,16 +55,16 @@ void main() {
       var cancelCalled = false;
       final adapter = StubAdapter(<String, Responder Function()>{
         '/api/jobs': () => okResponse(<String, dynamic>{
-              'jobs': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'id': 5,
-                  'kind': 'download',
-                  'status': 'running',
-                  'progress': 10,
-                },
-              ],
-              'total': 1,
-            }),
+          'jobs': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 5,
+              'kind': 'download',
+              'status': 'running',
+              'progress': 10,
+            },
+          ],
+          'total': 1,
+        }),
         '/api/jobs/5/cancel': () {
           cancelCalled = true;
           return okResponse(<String, dynamic>{
@@ -93,8 +93,7 @@ void main() {
 
     test('任务列表请求失败：错误态直显服务端文案', () async {
       final adapter = StubAdapter(<String, Responder Function()>{
-        '/api/jobs': () =>
-            errorResponse(502, 'INTERNAL', '读取任务失败'),
+        '/api/jobs': () => errorResponse(502, 'INTERNAL', '读取任务失败'),
       });
       final api = EchoApi(
         dio: stubDio(adapter),
@@ -110,9 +109,9 @@ void main() {
     test('取消不存在的任务：错误文案返回给 UI', () async {
       final adapter = StubAdapter(<String, Responder Function()>{
         '/api/jobs': () => okResponse(<String, dynamic>{
-              'jobs': <Map<String, dynamic>>[],
-              'total': 0,
-            }),
+          'jobs': <Map<String, dynamic>>[],
+          'total': 0,
+        }),
         '/api/jobs/99/cancel': () =>
             errorResponse(404, 'JOB_NOT_FOUND', '任务不存在或无法取消'),
       });

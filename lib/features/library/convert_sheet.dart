@@ -60,8 +60,10 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
     try {
       final models = await api.ttsModels();
       if (!mounted) return;
-      final defaultModel = models.models
-          .firstWhere((m) => m.isDefault, orElse: () => models.models.first);
+      final defaultModel = models.models.firstWhere(
+        (m) => m.isDefault,
+        orElse: () => models.models.first,
+      );
       final selected = _selectedModel ?? defaultModel.id;
       final voices = await api.ttsVoices(selected);
       if (!mounted) return;
@@ -137,9 +139,9 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
     } catch (_) {
       if (mounted) {
         setState(() => _samplePlaying = false);
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          const SnackBar(content: Text('试听失败，请稍后再试')),
-        );
+        ScaffoldMessenger.maybeOf(
+          context,
+        )?.showSnackBar(const SnackBar(content: Text('试听失败，请稍后再试')));
       }
     }
   }
@@ -218,7 +220,9 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
     if (model == null) return;
     setState(() => _submitting = true);
     try {
-      await ref.read(echoApiProvider).createAudiobook(
+      await ref
+          .read(echoApiProvider)
+          .createAudiobook(
             bookId: widget.book.id,
             model: model,
             voice: _selectedVoice ?? '',
@@ -230,9 +234,9 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
       ref.read(libraryControllerProvider.notifier).refresh();
       if (mounted) {
         Navigator.of(context).pop();
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          const SnackBar(content: Text('已提交转换任务，可在「任务」页查看进度')),
-        );
+        ScaffoldMessenger.maybeOf(
+          context,
+        )?.showSnackBar(const SnackBar(content: Text('已提交转换任务，可在「任务」页查看进度')));
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -279,13 +283,14 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
             Text(
               '转有声书',
               key: const Key('convert_sheet_title'),
-              style:
-                  textTheme.titleLarge?.copyWith(color: tokens.textPrimary),
+              style: textTheme.titleLarge?.copyWith(color: tokens.textPrimary),
             ),
             const SizedBox(height: EchoMetrics.spaceHalf),
             Text(
               widget.book.title,
-              style: textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
+              style: textTheme.bodyMedium?.copyWith(
+                color: tokens.textSecondary,
+              ),
             ),
             const SizedBox(height: EchoMetrics.space2),
 
@@ -303,10 +308,7 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                   style: textTheme.bodyMedium?.copyWith(color: tokens.error),
                 ),
                 const SizedBox(height: EchoMetrics.space2),
-                FilledButton(
-                  onPressed: _load,
-                  child: const Text('重试'),
-                ),
+                FilledButton(onPressed: _load, child: const Text('重试')),
               ] else ...[
                 Text(
                   _error!,
@@ -359,9 +361,7 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                 child: TextButton.icon(
                   key: const Key('convert_sample_button'),
                   onPressed: _toggleSample,
-                  icon: Icon(
-                    _samplePlaying ? Icons.stop : Icons.play_arrow,
-                  ),
+                  icon: Icon(_samplePlaying ? Icons.stop : Icons.play_arrow),
                   label: Text(_samplePlaying ? '停止试听' : '试听当前音色'),
                 ),
               ),
@@ -391,17 +391,14 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.format_list_numbered),
                 title: Text(chapterLabel),
-                subtitle: _chapters.isEmpty
-                    ? const Text('整本转换')
-                    : null,
+                subtitle: _chapters.isEmpty ? const Text('整本转换') : null,
                 trailing: _chapters.isEmpty
                     ? null
                     : const Icon(Icons.chevron_right),
                 onTap: _chapters.isEmpty ? null : _pickChapters,
               ),
 
-              if (_selectedModel != null &&
-                  _selectedModel!.contains('qwen'))
+              if (_selectedModel != null && _selectedModel!.contains('qwen'))
                 Padding(
                   padding: const EdgeInsets.only(bottom: EchoMetrics.space2),
                   child: TextFormField(

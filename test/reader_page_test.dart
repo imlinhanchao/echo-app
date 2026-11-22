@@ -17,7 +17,6 @@ import 'package:echo/features/reader/reader_page.dart';
 import 'tokens_fixtures.dart';
 
 class _ReaderStubAdapter implements HttpClientAdapter {
-
   @override
   Future<ResponseBody> fetch(
     RequestOptions options, [
@@ -95,12 +94,17 @@ void main() {
           textDirection: TextDirection.ltr,
           textScaler: TextScaler.noScaling,
         )..layout(maxWidth: width);
-        expect(painter.height, lessThanOrEqualTo(height + 0.5),
-            reason: '第 ${page.pageInChapter} 页溢出');
+        expect(
+          painter.height,
+          lessThanOrEqualTo(height + 0.5),
+          reason: '第 ${page.pageInChapter} 页溢出',
+        );
       }
       // 内容不丢字
-      expect(pages.map((p) => p.text).join().replaceAll('\n', '').length,
-          greaterThan(text.replaceAll('\n', '').length * 0.97));
+      expect(
+        pages.map((p) => p.text).join().replaceAll('\n', '').length,
+        greaterThan(text.replaceAll('\n', '').length * 0.97),
+      );
     });
 
     test('页面记录章内字符区间，可用于重排后定位', () {
@@ -120,8 +124,7 @@ void main() {
     });
   });
 
-  testWidgets('阅读器：左右滑翻页 + 记住位置 + 从当前位置听书入口',
-      (WidgetTester tester) async {
+  testWidgets('阅读器：左右滑翻页 + 记住位置 + 从当前位置听书入口', (WidgetTester tester) async {
     final tokenStore = MemoryTokenStore();
     await tokenStore.write('echo_pat_reader');
     final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
@@ -148,15 +151,22 @@ void main() {
     expect(find.byKey(const Key('reader_page_text_0')), findsOneWidget);
 
     // 衬线正文
-    final text = tester.widget<Text>(find.byKey(const Key('reader_page_text_0')));
+    final text = tester.widget<Text>(
+      find.byKey(const Key('reader_page_text_0')),
+    );
     expect(text.style?.fontFamily, 'serif');
     expect(
-      tester.widget<Scaffold>(find.byKey(const Key('reader_page'))).backgroundColor,
+      tester
+          .widget<Scaffold>(find.byKey(const Key('reader_page')))
+          .backgroundColor,
       darkTokens.paperWarm,
     );
 
     // 左右滑动翻页（PageView 手势）
-    await tester.drag(find.byKey(const Key('reader_pageview')), const Offset(-600, 0));
+    await tester.drag(
+      find.byKey(const Key('reader_pageview')),
+      const Offset(-600, 0),
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('reader_page_text_1')), findsOneWidget);
 
@@ -231,5 +241,54 @@ void main() {
 
     expect(find.byKey(const Key('reader_page_text_2')), findsOneWidget);
     expect(find.byKey(const Key('reader_page_text_0')), findsNothing);
+  });
+
+  group('边听边看：当前句定位与 initialChapterIndex', () {
+    test('findCueSpanInPage 支持直接匹配与跨换行容错匹配', () {
+      const pageText = '红岸基地的清晨。\n\n叶文洁望向\n雷达峰顶的太阳。';
+      final direct = findCueSpanInPage(pageText, '红岸基地的清晨。');
+      expect(direct, isNotNull);
+      expect(pageText.substring(direct!.start, direct.end), '红岸基地的清晨。');
+
+      final crossLine = findCueSpanInPage(pageText, '叶文洁望向雷达峰顶的太阳。');
+      expect(crossLine, isNotNull);
+      expect(
+        pageText.substring(crossLine!.start, crossLine.end),
+        '叶文洁望向\n雷达峰顶的太阳。',
+      );
+
+      expect(findCueSpanInPage(pageText, '不存在的句子'), isNull);
+    });
+
+    testWidgets('initialChapterIndex 优先定位到播放器传入章节', (
+      WidgetTester tester,
+    ) async {
+      final tokenStore = MemoryTokenStore();
+      await tokenStore.write('echo_pat_reader');
+      final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+        ..httpClientAdapter = _ReaderStubAdapter();
+      final api = EchoApi(dio: dio, tokenStore: tokenStore);
+      final readingStore = MemoryReadingStore();
+      // 本地记录在第 0 章，但从播放器切入第 2 章
+      await readingStore.write(
+        const ReadingPosition(bookId: 42, chapterIndex: 0, charOffset: 0),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            echoApiProvider.overrideWithValue(api),
+            readingStoreProvider.overrideWithValue(readingStore),
+          ],
+          child: MaterialApp(
+            theme: buildEchoTheme(Brightness.dark, darkTokens),
+            home: const ReaderPageView(book: book, initialChapterIndex: 2),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('第 3 章'), findsWidgets);
+    });
   });
 }

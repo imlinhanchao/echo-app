@@ -4,9 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/notes/note_store.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_glass.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../library/library_controller.dart';
+import '../reader/reader_page.dart';
+
+const String _kPlayerCoverHeroTag = 'echo_player_cover';
 
 String formatDurationMs(int ms) {
   final totalSeconds = (ms / 1000).floor().clamp(0, 86400 * 10);
@@ -18,27 +22,35 @@ String formatDurationMs(int ms) {
   return hours > 0 ? '$hours:$mm:$ss' : '$mm:$ss';
 }
 
-/// 全屏打开播放器（上滑过渡）：设计图为整屏页，不用 bottom sheet，
-/// 避免书架内容从顶部露出。
+/// 全屏打开播放器（上滑 + 封面 Hero 过渡；遵循 prefers-reduced-motion）：
+/// 设计图为整屏页，不用 bottom sheet，避免书架内容从顶部露出。
 Future<void> openPlayer(BuildContext context) {
+  final reduceMotion = MediaQuery.disableAnimationsOf(context);
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
       opaque: true,
-      transitionDuration: const Duration(milliseconds: 280),
-      reverseTransitionDuration: const Duration(milliseconds: 220),
+      transitionDuration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 280),
+      reverseTransitionDuration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 220),
       pageBuilder: (_, _, _) => const PlayerSheet(),
-      transitionsBuilder: (_, animation, _, child) => SlideTransition(
-        position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-            .animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-            ),
-        child: child,
-      ),
+      transitionsBuilder: (_, animation, _, child) {
+        if (reduceMotion) return child;
+        return SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+              .animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              ),
+          child: child,
+        );
+      },
     ),
   );
 }
 
-/// 悬浮胶囊迷你播放条（设计图 ui-mobile-library 底部）。
+/// 悬浮玻璃拟态迷你播放条（设计图 ui-mobile-library 底部）。
 /// 点击展开 v3 全屏播放器。
 class MiniPlayerBar extends ConsumerWidget {
   const MiniPlayerBar({super.key});
@@ -66,6 +78,7 @@ class MiniPlayerBar extends ConsumerWidget {
         (chunk?.title.isNotEmpty == true
             ? chunk!.title
             : '第 ${state.currentChunkIndex + 1} 章');
+    final radius = BorderRadius.circular(EchoMetrics.radiusSheet);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -77,29 +90,30 @@ class MiniPlayerBar extends ConsumerWidget {
       child: Material(
         key: const Key('mini_player_bar'),
         color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(EchoMetrics.radiusSheet),
-          onTap: () => openPlayer(context),
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: EchoMetrics.space1,
-              vertical: EchoMetrics.space1,
+        child: EchoGlassSurface(
+          borderRadius: radius,
+          border: Border.all(color: tokens.surfaceSubtle),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
             ),
-            decoration: BoxDecoration(
-              color: tokens.surfaceElevated.withValues(alpha: 0.96),
-              borderRadius: BorderRadius.circular(EchoMetrics.radiusSheet),
-              border: Border.all(color: tokens.surfaceSubtle),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.35),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                BookCover(url: cover, width: 40, height: 40),
+          ],
+          child: InkWell(
+            borderRadius: radius,
+            onTap: () => openPlayer(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: EchoMetrics.space1,
+                vertical: EchoMetrics.space1,
+              ),
+              child: Row(
+                children: [
+                  Hero(
+                    tag: _kPlayerCoverHeroTag,
+                    child: BookCover(url: cover, width: 40, height: 40),
+                  ),
                 const SizedBox(width: EchoMetrics.space1),
                 Expanded(
                   child: Column(
@@ -155,6 +169,7 @@ class MiniPlayerBar extends ConsumerWidget {
               ],
             ),
           ),
+        ),
         ),
       ),
     );
@@ -220,8 +235,10 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
     if (attempt >= 3 || !_textScroll.hasClients || totalCues <= 1) return;
     final position = _textScroll.position;
     final fraction = (active / (totalCues - 1)).clamp(0.0, 1.0);
-    final target =
-        (position.maxScrollExtent * fraction).clamp(0.0, position.maxScrollExtent);
+    final target = (position.maxScrollExtent * fraction).clamp(
+      0.0,
+      position.maxScrollExtent,
+    );
     // 第一跳直达估计位置，之后逐帧微调靠近目标
     final next = attempt == 0
         ? target
@@ -297,7 +314,43 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                       ),
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
-                    BookCover(url: cover, width: 52, height: 52),
+                    Tooltip(
+                      message: '切换到阅读器',
+                      child: InkWell(
+                        key: const Key('player_open_reader'),
+                        borderRadius: BorderRadius.circular(
+                          EchoMetrics.radiusControl,
+                        ),
+                        onTap: () {
+                          final bookId = state.audiobook?.bookId ?? 0;
+                          final book = libState.books
+                              .where((b) => b.id == bookId)
+                              .firstOrNull;
+                          if (book == null ||
+                              book.format.toLowerCase() != 'epub') {
+                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              const SnackBar(
+                                content: Text('该书暂无可阅读电子书（仅支持 EPUB）'),
+                              ),
+                            );
+                            return;
+                          }
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => ReaderPageView(
+                                book: book,
+                                initialChapterIndex:
+                                    state.currentChunk?.chapterIndex,
+                              ),
+                            ),
+                          );
+                        },
+                        child: Hero(
+                          tag: _kPlayerCoverHeroTag,
+                          child: BookCover(url: cover, width: 52, height: 52),
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: EchoMetrics.space2),
                     Expanded(
                       child: Column(
@@ -327,12 +380,15 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                       key: const Key('player_notes_button'),
                       tooltip: '时间戳笔记',
                       onPressed: () => _showNotes(context, state),
-                      icon: Icon(Icons.sticky_note_2_outlined,
-                          color: tokens.textPrimary),
+                      icon: Icon(
+                        Icons.sticky_note_2_outlined,
+                        color: tokens.textPrimary,
+                      ),
                     ),
                     _CircleAction(
                       key: const Key('player_top_prev_chapter'),
                       icon: Icons.chevron_left,
+                      tooltip: '上一章',
                       onPressed: state.hasPreviousChunk
                           ? controller.previousChunk
                           : null,
@@ -341,6 +397,7 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                     _CircleAction(
                       key: const Key('player_top_next_chapter'),
                       icon: Icons.chevron_right,
+                      tooltip: '下一章',
                       onPressed: state.hasNextChunk
                           ? controller.nextChunk
                           : null,
@@ -363,55 +420,73 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                         }
                       },
                       child: state.cues.isNotEmpty
-                          ? ListView.builder(
-                              controller: _textScroll,
-                              key: const Key('player_srt_list'),
-                              padding: const EdgeInsets.fromLTRB(
-                                EchoMetrics.space3,
-                                0,
-                                EchoMetrics.space3,
-                                EchoMetrics.space3,
-                              ),
-                              itemCount: state.cues.length,
-                              itemBuilder: (context, index) {
-                                final cue = state.cues[index];
-                                final isActive = index == state.activeCueIndex;
-                                final isPast =
-                                    state.activeCueIndex >= 0 &&
-                                    index < state.activeCueIndex;
-                                return GestureDetector(
-                                  key: _cueKeys.putIfAbsent(
-                                    index,
-                                    () => GlobalKey(),
-                                  ),
-                                  onTap: () => controller.seekToCue(cue),
-                                  behavior: HitTestBehavior.opaque,
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(
-                                      bottom: EchoMetrics.space2,
+                          ? RepaintBoundary(
+                              child: ListView.builder(
+                                controller: _textScroll,
+                                key: const Key('player_srt_list'),
+                                padding: const EdgeInsets.fromLTRB(
+                                  EchoMetrics.space3,
+                                  0,
+                                  EchoMetrics.space3,
+                                  EchoMetrics.space3,
+                                ),
+                                itemCount: state.cues.length,
+                                itemBuilder: (context, index) {
+                                  final cue = state.cues[index];
+                                  final isActive =
+                                      index == state.activeCueIndex;
+                                  final isPast =
+                                      state.activeCueIndex >= 0 &&
+                                      index < state.activeCueIndex;
+                                  return GestureDetector(
+                                    key: _cueKeys.putIfAbsent(
+                                      index,
+                                      () => GlobalKey(),
                                     ),
-                                    child: Text(
-                                      cue.text,
-                                      style: TextStyle(
-                                        fontSize: isActive ? 19 : 17.5,
-                                        height: 1.62,
-                                        fontWeight: isActive
-                                            ? FontWeight.w600
-                                            : FontWeight.w400,
-                                        color: isActive
-                                            ? tokens.primary
-                                            : (isPast
-                                                  ? tokens.textPrimary
-                                                        .withValues(alpha: 0.92)
-                                                  : tokens.textSecondary
-                                                        .withValues(
-                                                          alpha: 0.75,
-                                                        )),
+                                    onTap: () => controller.seekToCue(cue),
+                                    onLongPress: () {
+                                      final baseMs =
+                                          ((state.currentChunk?.startS ?? 0) *
+                                                  1000)
+                                              .round();
+                                      _showNotes(
+                                        context,
+                                        state,
+                                        prefillText: cue.text,
+                                        overridePositionMs:
+                                            baseMs + cue.startMs,
+                                      );
+                                    },
+                                    behavior: HitTestBehavior.opaque,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: EchoMetrics.space2,
+                                      ),
+                                      child: Text(
+                                        cue.text,
+                                        style: TextStyle(
+                                          fontSize: isActive ? 19 : 17.5,
+                                          height: 1.62,
+                                          fontWeight: isActive
+                                              ? FontWeight.w600
+                                              : FontWeight.w400,
+                                          color: isActive
+                                              ? tokens.primary
+                                              : (isPast
+                                                    ? tokens.textPrimary
+                                                          .withValues(
+                                                            alpha: 0.92,
+                                                          )
+                                                    : tokens.textSecondary
+                                                          .withValues(
+                                                            alpha: 0.75,
+                                                          )),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  );
+                                },
+                              ),
                             )
                           : _CoverFallbackView(
                               bookTitle: bookTitle,
@@ -631,156 +706,18 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
     );
   }
 
-  /// 时间戳笔记：在当前播放位置打点，点击笔记可跳转。
-  Future<void> _showNotes(BuildContext context, ChunkedPlayerState state) async {
-    final tokens = Theme.of(context).extension<EchoTokens>()!;
-    final audiobookId = state.audiobook?.id ?? 0;
-    final positionMs = state.globalPositionMs;
-    final chapterTitle = state.currentChunk?.title ?? '';
-    final controller = TextEditingController(
-      text: state.activeCue?.text ?? '',
-    );
-    final player = ref.read(chunkedPlayerProvider.notifier);
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetCtx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom,
-        ),
-        child: StatefulBuilder(
-          builder: (sheetCtx, setSheetState) {
-            final notes = NoteStore.instance.notesFor(audiobookId);
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(EchoMetrics.space3),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '笔记 · 当前位置 ${formatDurationMs(positionMs)}',
-                      key: const Key('notes_sheet_title'),
-                      style: Theme.of(sheetCtx).textTheme.titleSmall?.copyWith(
-                            color: tokens.textPrimary,
-                          ),
-                    ),
-                    const SizedBox(height: EchoMetrics.space2),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            key: const Key('note_input'),
-                            controller: controller,
-                            decoration: const InputDecoration(
-                              hintText: '记点什么…',
-                              isDense: true,
-                            ),
-                            maxLines: 2,
-                          ),
-                        ),
-                        const SizedBox(width: EchoMetrics.space1),
-                        FilledButton(
-                          key: const Key('note_add'),
-                          onPressed: () async {
-                            final text = controller.text.trim();
-                            if (text.isEmpty) return;
-                            await NoteStore.instance.add(
-                              audiobookId: audiobookId,
-                              positionMs: positionMs,
-                              text: text,
-                              chapterTitle: chapterTitle,
-                            );
-                            controller.clear();
-                            setSheetState(() {});
-                          },
-                          child: const Text('添加'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: EchoMetrics.space2),
-                    if (notes.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: EchoMetrics.space3,
-                        ),
-                        child: Text(
-                          '还没有笔记。听到有感触的地方，点「添加」记下来。',
-                          style: Theme.of(sheetCtx)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: tokens.textSecondary),
-                        ),
-                      )
-                    else
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 280),
-                        child: ListView.builder(
-                          key: const Key('notes_list'),
-                          shrinkWrap: true,
-                          itemCount: notes.length,
-                          itemBuilder: (_, i) {
-                            final note = notes[i];
-                            return ListTile(
-                              key: Key('note_item_${note.id}'),
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              leading: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: tokens.primary.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  note.positionLabel,
-                                  style: Theme.of(sheetCtx)
-                                      .textTheme
-                                      .labelSmall
-                                      ?.copyWith(color: tokens.primary),
-                                ),
-                              ),
-                              title: Text(
-                                note.text,
-                                style: TextStyle(color: tokens.textPrimary),
-                              ),
-                              subtitle: note.chapterTitle.isEmpty
-                                  ? null
-                                  : Text(
-                                      note.chapterTitle,
-                                      style: TextStyle(
-                                        color: tokens.textSecondary,
-                                      ),
-                                    ),
-                              onTap: () {
-                                Navigator.of(sheetCtx).pop();
-                                player.seekToMs(note.positionMs);
-                              },
-                              trailing: IconButton(
-                                key: Key('note_delete_${note.id}'),
-                                icon: Icon(Icons.close, size: 18),
-                                onPressed: () {
-                                  NoteStore.instance.remove(note.id);
-                                  setSheetState(() {});
-                                },
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-    controller.dispose();
-  }
+  /// 时间戳笔记：在当前播放位置（或长按句子位置）打点，点击笔记可跳转。
+  Future<void> _showNotes(
+    BuildContext context,
+    ChunkedPlayerState state, {
+    String? prefillText,
+    int? overridePositionMs,
+  }) => showPlayerNotesSheet(
+    context,
+    ref,
+    prefillText: prefillText,
+    overridePositionMs: overridePositionMs,
+  );
 
   void _showSleepDialog(BuildContext context, WidgetRef ref) {
     final controller = ref.read(chunkedPlayerProvider.notifier);
@@ -819,43 +756,524 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
   }
 
   void _showChaptersDrawer(BuildContext context, WidgetRef ref) {
-    final state = ref.read(chunkedPlayerProvider);
-    final controller = ref.read(chunkedPlayerProvider.notifier);
-    final tokens = Theme.of(context).extension<EchoTokens>()!;
-
     showModalBottomSheet<void>(
       context: context,
-      builder: (sheetCtx) => ListView.builder(
-        key: const Key('chapters_drawer_list'),
-        padding: const EdgeInsets.all(EchoMetrics.space2),
-        itemCount: state.chunks.length,
-        itemBuilder: (_, index) {
-          final c = state.chunks[index];
-          final selected = index == state.currentChunkIndex;
-          return ListTile(
-            key: Key('chapter_item_$index'),
-            selected: selected,
-            selectedTileColor: tokens.primary.withValues(alpha: 0.12),
-            leading: Icon(
-              selected ? Icons.volume_up : Icons.menu_book_outlined,
-              color: selected ? tokens.primary : tokens.textSecondary,
-            ),
-            title: Text(
-              c.title.isNotEmpty ? c.title : '第 ${index + 1} 章',
-              style: TextStyle(
-                color: selected ? tokens.primary : tokens.textPrimary,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _ChaptersDrawerSheet(),
+    );
+  }
+}
+
+/// 公共时间戳笔记弹层（供全屏播放器顶栏、长按跟读句、以及平板胶囊播放条快捷打点复用）。
+Future<void> showPlayerNotesSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  String? prefillText,
+  int? overridePositionMs,
+}) async {
+  final state = ref.read(chunkedPlayerProvider);
+  final tokens = Theme.of(context).extension<EchoTokens>()!;
+  final audiobookId = state.audiobook?.id ?? 0;
+  final positionMs = overridePositionMs ?? state.globalPositionMs;
+  final chapterTitle = state.currentChunk?.title ?? '';
+  final controller = TextEditingController(
+    text: prefillText ?? state.activeCue?.text ?? '',
+  );
+  final player = ref.read(chunkedPlayerProvider.notifier);
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (sheetCtx) => Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom,
+      ),
+      child: StatefulBuilder(
+        builder: (sheetCtx, setSheetState) {
+          final notes = NoteStore.instance.notesFor(audiobookId);
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(EchoMetrics.space3),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '笔记 · 当前位置 ${formatDurationMs(positionMs)}',
+                    key: const Key('notes_sheet_title'),
+                    style: Theme.of(sheetCtx).textTheme.titleSmall?.copyWith(
+                      color: tokens.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: EchoMetrics.space2),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const Key('note_input'),
+                          controller: controller,
+                          decoration: const InputDecoration(
+                            hintText: '记点什么…',
+                            isDense: true,
+                          ),
+                          maxLines: 2,
+                        ),
+                      ),
+                      const SizedBox(width: EchoMetrics.space1),
+                      FilledButton(
+                        key: const Key('note_add'),
+                        onPressed: () async {
+                          final text = controller.text.trim();
+                          if (text.isEmpty) return;
+                          await NoteStore.instance.add(
+                            audiobookId: audiobookId,
+                            positionMs: positionMs,
+                            text: text,
+                            chapterTitle: chapterTitle,
+                          );
+                          controller.clear();
+                          setSheetState(() {});
+                        },
+                        child: const Text('添加'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: EchoMetrics.space2),
+                  if (notes.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: EchoMetrics.space3,
+                      ),
+                      child: Text(
+                        '还没有笔记。听到有感触的地方，点「添加」记下来。',
+                        style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 280),
+                      child: ListView.builder(
+                        key: const Key('notes_list'),
+                        shrinkWrap: true,
+                        itemCount: notes.length,
+                        itemBuilder: (_, i) {
+                          final note = notes[i];
+                          return ListTile(
+                            key: Key('note_item_${note.id}'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: tokens.primary.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                note.positionLabel,
+                                style: Theme.of(sheetCtx).textTheme.labelSmall
+                                    ?.copyWith(color: tokens.primary),
+                              ),
+                            ),
+                            title: Text(
+                              note.text,
+                              style: TextStyle(color: tokens.textPrimary),
+                            ),
+                            subtitle: note.chapterTitle.isEmpty
+                                ? null
+                                : Text(
+                                    note.chapterTitle,
+                                    style: TextStyle(
+                                      color: tokens.textSecondary,
+                                    ),
+                                  ),
+                            onTap: () {
+                              Navigator.of(sheetCtx).pop();
+                              player.seekToMs(note.positionMs);
+                            },
+                            trailing: IconButton(
+                              key: Key('note_delete_${note.id}'),
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                NoteStore.instance.remove(note.id);
+                                setSheetState(() {});
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
               ),
             ),
-            trailing: Text(
-              formatDurationMs((c.durationS * 1000).round()),
-              style: TextStyle(color: tokens.textSecondary),
-            ),
-            onTap: () {
-              Navigator.of(sheetCtx).pop();
-              controller.selectChunk(index);
-            },
           );
         },
+      ),
+    ),
+  );
+  controller.dispose();
+}
+
+/// 章节列表抽屉（对齐设计 §4.1：占下 2/3 屏、拖动把手、章节搜索、三态视觉）。
+class _ChaptersDrawerSheet extends ConsumerStatefulWidget {
+  const _ChaptersDrawerSheet();
+
+  @override
+  ConsumerState<_ChaptersDrawerSheet> createState() =>
+      _ChaptersDrawerSheetState();
+}
+
+class _ChaptersDrawerSheetState extends ConsumerState<_ChaptersDrawerSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(chunkedPlayerProvider);
+    final controller = ref.read(chunkedPlayerProvider.notifier);
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+
+    final indexed = <(int, dynamic)>[
+      for (var i = 0; i < state.chunks.length; i++) (i, state.chunks[i]),
+    ];
+    final q = _query.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? indexed
+        : indexed.where((pair) {
+            final idx = pair.$1;
+            final title = (pair.$2.title as String).isNotEmpty
+                ? pair.$2.title as String
+                : '第 ${idx + 1} 章';
+            return title.toLowerCase().contains(q) || '${idx + 1}'.contains(q);
+          }).toList();
+
+    final currentChunkProgress = state.currentChunkDurationMs > 0
+        ? (state.positionMs / state.currentChunkDurationMs).clamp(0.0, 1.0)
+        : 0.0;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.67,
+      minChildSize: 0.45,
+      maxChildSize: 0.92,
+      builder: (sheetCtx, scrollController) => Column(
+        children: [
+          const SizedBox(height: EchoMetrics.space1),
+          // 拖动把手
+          Container(
+            key: const Key('chapters_drag_handle'),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: tokens.surfaceSubtle,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              EchoMetrics.space2,
+              EchoMetrics.space2,
+              EchoMetrics.space2,
+              EchoMetrics.space1,
+            ),
+            child: Row(
+              children: [
+                Text(
+                  '章节列表（共 ${state.chunks.length} 章）',
+                  style: textTheme.titleMedium?.copyWith(
+                    color: tokens.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space2),
+            child: TextField(
+              key: const Key('chapters_search_field'),
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索章节名称或序号…',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                isDense: true,
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        tooltip: '清除搜索',
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                      )
+                    : null,
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          const SizedBox(height: EchoMetrics.space1),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Text(
+                      '未找到匹配章节',
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    key: const Key('chapters_drawer_list'),
+                    controller: scrollController,
+                    padding: const EdgeInsets.all(EchoMetrics.space2),
+                    itemCount: filtered.length,
+                    itemBuilder: (_, pos) {
+                      final index = filtered[pos].$1;
+                      final c = filtered[pos].$2;
+                      final isCurrent = index == state.currentChunkIndex;
+                      final isCompleted = index < state.currentChunkIndex;
+                      final title = (c.title as String).isNotEmpty
+                          ? c.title as String
+                          : '第 ${index + 1} 章';
+
+                      return ListTile(
+                        key: Key('chapter_item_$index'),
+                        selected: isCurrent,
+                        selectedTileColor: tokens.primary.withValues(
+                          alpha: 0.14,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            EchoMetrics.radiusControl,
+                          ),
+                        ),
+                        leading: Icon(
+                          isCurrent
+                              ? Icons.graphic_eq
+                              : (isCompleted
+                                    ? Icons.check_circle_outline
+                                    : Icons.menu_book_outlined),
+                          color: isCurrent
+                              ? tokens.primary
+                              : (isCompleted
+                                    ? tokens.textDisabled
+                                    : tokens.textSecondary),
+                        ),
+                        title: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isCurrent
+                                ? tokens.primary
+                                : (isCompleted
+                                      ? tokens.textDisabled
+                                      : tokens.textPrimary),
+                            fontWeight: isCurrent
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: isCurrent
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: LinearProgressIndicator(
+                                    value: currentChunkProgress,
+                                    minHeight: 3,
+                                    backgroundColor: tokens.surfaceSubtle,
+                                    color: tokens.primary,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        trailing: Text(
+                          formatDurationMs(((c.durationS as double) * 1000).round()),
+                          style: textTheme.labelSmall?.copyWith(
+                            color: isCompleted
+                                ? tokens.textDisabled
+                                : tokens.textSecondary,
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.of(sheetCtx).pop();
+                          controller.selectChunk(index);
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 平板端（Medium 600–1024dp）底部悬浮胶囊播放条（对齐设计 §2.1 & §4.2）：
+/// 居中胶囊 + 封面 Hero + 播放/下一章 + 快捷打点笔记 + 底部细进度条。
+class TabletCapsulePlayerBar extends ConsumerWidget {
+  const TabletCapsulePlayerBar({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(chunkedPlayerProvider);
+    if (!state.hasBook) return const SizedBox.shrink();
+
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+    final libState = ref.watch(libraryControllerProvider);
+    final bookId = state.audiobook?.bookId ?? 0;
+    final cover = libState.books
+        .where((b) => b.id == bookId)
+        .map((b) => b.coverUrl)
+        .firstOrNull;
+    final title = (state.audiobook?.bookTitle.isNotEmpty ?? false)
+        ? state.audiobook!.bookTitle
+        : '有声书 #${state.audiobook?.id ?? 0}';
+    final chunk = state.currentChunk;
+    final subtitle =
+        state.activeCue?.text ??
+        (chunk?.title.isNotEmpty == true
+            ? chunk!.title
+            : '第 ${state.currentChunkIndex + 1} 章');
+    final progress = state.totalDurationMs > 0
+        ? (state.globalPositionMs / state.totalDurationMs).clamp(0.0, 1.0)
+        : 0.0;
+    final radius = BorderRadius.circular(999);
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            EchoMetrics.space3,
+            EchoMetrics.space1,
+            EchoMetrics.space3,
+            EchoMetrics.space2,
+          ),
+          child: Material(
+            key: const Key('tablet_capsule_player_bar'),
+            color: Colors.transparent,
+            child: EchoGlassSurface(
+              borderRadius: radius,
+              border: Border.all(color: tokens.surfaceSubtle),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+              child: InkWell(
+                borderRadius: radius,
+                onTap: () => openPlayer(context),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: EchoMetrics.space2,
+                        vertical: EchoMetrics.space1,
+                      ),
+                      child: Row(
+                        children: [
+                          Hero(
+                            tag: _kPlayerCoverHeroTag,
+                            child: ClipOval(
+                              child: BookCover(url: cover, width: 42, height: 42),
+                            ),
+                          ),
+                          const SizedBox(width: EchoMetrics.space2),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textTheme.labelLarge?.copyWith(
+                                    color: tokens.textPrimary,
+                                  ),
+                                ),
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: tokens.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            key: const Key('tablet_quick_note'),
+                            tooltip: '快捷打点笔记',
+                            onPressed: () =>
+                                showPlayerNotesSheet(context, ref),
+                            icon: Icon(
+                              Icons.bookmark_add_outlined,
+                              color: tokens.textPrimary,
+                            ),
+                          ),
+                          IconButton(
+                            key: const Key('mini_player_toggle'),
+                            tooltip: state.isPlaying ? '暂停' : '播放',
+                            onPressed: () => ref
+                                .read(chunkedPlayerProvider.notifier)
+                                .togglePlayPause(),
+                            icon: Icon(
+                              state.isPlaying ? Icons.pause : Icons.play_arrow,
+                              color: tokens.primary,
+                              size: 30,
+                            ),
+                          ),
+                          IconButton(
+                            key: const Key('mini_player_forward_15'),
+                            tooltip: '下一章',
+                            onPressed: () => ref
+                                .read(chunkedPlayerProvider.notifier)
+                                .nextChunk(),
+                            icon: Icon(Icons.skip_next, color: tokens.primary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // 底部细进度条
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: EchoMetrics.space3,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 2,
+                          backgroundColor: tokens.surfaceSubtle,
+                          color: tokens.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -876,27 +1294,38 @@ class _CircleTextAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final enabled = onPressed != null;
-    return SizedBox(
-      width: 60,
-      height: 60,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          shape: const CircleBorder(),
-          padding: EdgeInsets.zero,
-          side: BorderSide(
-            color: enabled
-                ? tokens.surfaceSubtle
-                : tokens.surfaceSubtle.withValues(alpha: 0.4),
+    final spokenLabel = switch (label) {
+      '-15s' => '快退 15 秒',
+      '+15s' => '快进 15 秒',
+      '上一章' => '上一章',
+      '下一章' => '下一章',
+      _ => label,
+    };
+    return Semantics(
+      button: true,
+      label: spokenLabel,
+      child: SizedBox(
+        width: 60,
+        height: 60,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            shape: const CircleBorder(),
+            padding: EdgeInsets.zero,
+            side: BorderSide(
+              color: enabled
+                  ? tokens.surfaceSubtle
+                  : tokens.surfaceSubtle.withValues(alpha: 0.4),
+            ),
+            foregroundColor: tokens.textPrimary,
           ),
-          foregroundColor: tokens.textPrimary,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: enabled ? tokens.textPrimary : tokens.textDisabled,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: enabled ? tokens.textPrimary : tokens.textDisabled,
+            ),
           ),
         ),
       ),
@@ -904,30 +1333,43 @@ class _CircleTextAction extends StatelessWidget {
   }
 }
 
-/// 顶栏圆形描边图标按钮。
+/// 顶栏圆形描边图标按钮（≥48dp 交互热区 + 读屏语义）。
 class _CircleAction extends StatelessWidget {
-  const _CircleAction({super.key, required this.icon, required this.onPressed});
+  const _CircleAction({
+    super.key,
+    required this.icon,
+    required this.onPressed,
+    this.tooltip,
+  });
 
   final IconData icon;
   final VoidCallback? onPressed;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    return SizedBox(
-      width: 38,
-      height: 38,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          shape: const CircleBorder(),
-          padding: EdgeInsets.zero,
-          side: BorderSide(color: tokens.surfaceSubtle),
-          foregroundColor: tokens.textPrimary,
+    final button = SizedBox(
+      width: 48,
+      height: 48,
+      child: Center(
+        child: SizedBox(
+          width: 38,
+          height: 38,
+          child: OutlinedButton(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              shape: const CircleBorder(),
+              padding: EdgeInsets.zero,
+              side: BorderSide(color: tokens.surfaceSubtle),
+              foregroundColor: tokens.textPrimary,
+            ),
+            child: Icon(icon, size: 20),
+          ),
         ),
-        child: Icon(icon, size: 20),
       ),
     );
+    return tooltip != null ? Tooltip(message: tooltip!, child: button) : button;
   }
 }
 
@@ -1000,57 +1442,71 @@ class _ChapterTickProgress extends StatelessWidget {
           onSeekFraction(f);
         }
 
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (d) => seek(d.localPosition),
-          onHorizontalDragUpdate: (d) => seek(d.localPosition),
-          child: SizedBox(
-            height: 26,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 轨道
-                Container(
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: tokens.surfaceSubtle,
-                    borderRadius: BorderRadius.circular(999),
+        final pct = (progress * 100).round();
+        return Semantics(
+          slider: true,
+          label: '播放进度',
+          value: '$pct%',
+          increasedValue: '${(pct + 5).clamp(0, 100)}%',
+          decreasedValue: '${(pct - 5).clamp(0, 100)}%',
+          onIncrease: () => onSeekFraction((progress + 0.05).clamp(0.0, 1.0)),
+          onDecrease: () => onSeekFraction((progress - 0.05).clamp(0.0, 1.0)),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (d) => seek(d.localPosition),
+            onHorizontalDragUpdate: (d) => seek(d.localPosition),
+            child: SizedBox(
+              height: 26,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // 轨道
+                  Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: tokens.surfaceSubtle,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
-                ),
-                // 已播进度
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FractionallySizedBox(
-                    widthFactor: progress.clamp(0.0, 1.0),
-                    child: Container(
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: tokens.primary,
-                        borderRadius: BorderRadius.circular(999),
+                  // 已播进度
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FractionallySizedBox(
+                      widthFactor: progress.clamp(0.0, 1.0),
+                      child: Container(
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: tokens.primary,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                // 章节刻度点
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List<Widget>.generate(dots, (i) {
-                    final passed = (i / dots) <= progress;
-                    return Container(
-                      width: i == currentChunk ? 6 : 4,
-                      height: i == currentChunk ? 6 : 4,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: i == currentChunk
-                            ? tokens.textOnPrimary
-                            : (passed
-                                  ? tokens.textOnPrimary.withValues(alpha: 0.9)
-                                  : tokens.textDisabled.withValues(alpha: 0.7)),
-                      ),
-                    );
-                  }),
-                ),
-              ],
+                  // 章节刻度点
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List<Widget>.generate(dots, (i) {
+                      final passed = (i / dots) <= progress;
+                      return Container(
+                        width: i == currentChunk ? 6 : 4,
+                        height: i == currentChunk ? 6 : 4,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: i == currentChunk
+                              ? tokens.textOnPrimary
+                              : (passed
+                                    ? tokens.textOnPrimary.withValues(
+                                        alpha: 0.9,
+                                      )
+                                    : tokens.textDisabled.withValues(
+                                        alpha: 0.7,
+                                      )),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              ),
             ),
           ),
         );

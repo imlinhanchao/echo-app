@@ -66,19 +66,16 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
   }
 
   Future<void> _play(AudiobookInfo audio) async {
-    await ref.read(chunkedPlayerProvider.notifier).loadAudiobook(
-          audio,
-          coverUrl: widget.book.coverUrl,
-        );
+    await ref
+        .read(chunkedPlayerProvider.notifier)
+        .loadAudiobook(audio, coverUrl: widget.book.coverUrl);
     if (!mounted) return;
     await openPlayer(context);
   }
 
   Future<void> _exportEpub() async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      const SnackBar(content: Text('正在导出…')),
-    );
+    messenger?.showSnackBar(const SnackBar(content: Text('正在导出…')));
     try {
       final path = await BookExporter.export(
         ref.read(echoApiProvider),
@@ -86,14 +83,10 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
       );
       if (!mounted) return;
       if (path == null) {
-        messenger?.showSnackBar(
-          const SnackBar(content: Text('导出失败：文件为空')),
-        );
+        messenger?.showSnackBar(const SnackBar(content: Text('导出失败：文件为空')));
         return;
       }
-      messenger?.showSnackBar(
-        SnackBar(content: Text('已导出到：$path')),
-      );
+      messenger?.showSnackBar(SnackBar(content: Text('已导出到：$path')));
       await BookExporter.share(path, title: widget.book.title);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -101,10 +94,13 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     }
   }
 
-  Future<void> _openReader() async {
+  Future<void> _openReader({int? chapterIndex}) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ReaderPageView(book: widget.book),
+        builder: (_) => ReaderPageView(
+          book: widget.book,
+          initialChapterIndex: chapterIndex,
+        ),
       ),
     );
   }
@@ -118,12 +114,14 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
       (b) => b.id == widget.book.id,
       orElse: () => widget.book,
     );
-    final audiobooks =
-        lib.audiobooks.where((a) => a.bookId == book.id).toList();
+    final audiobooks = lib.audiobooks
+        .where((a) => a.bookId == book.id)
+        .toList();
     final readyAudio = audiobooks.where((a) => a.isReady).toList();
     final isEpub = book.format.toLowerCase() == 'epub';
-    final authorText =
-        book.authors.isNotEmpty ? book.authors.join(', ') : '未知作者';
+    final authorText = book.authors.isNotEmpty
+        ? book.authors.join(', ')
+        : '未知作者';
 
     return Scaffold(
       key: const Key('book_detail_page'),
@@ -179,15 +177,17 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                     const SizedBox(height: EchoMetrics.spaceHalf),
                     Text(
                       authorText,
-                      style: textTheme.bodyMedium
-                          ?.copyWith(color: tokens.textSecondary),
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: EchoMetrics.space1),
                     Wrap(
                       spacing: EchoMetrics.spaceHalf,
                       runSpacing: EchoMetrics.spaceHalf,
                       children: [
-                        if (book.format.isNotEmpty) _pill(book.format.toUpperCase()),
+                        if (book.format.isNotEmpty)
+                          _pill(book.format.toUpperCase()),
                         if (book.year.isNotEmpty) _pill(book.year),
                         if (book.language.isNotEmpty) _pill(book.language),
                         if (readyAudio.isNotEmpty)
@@ -201,59 +201,6 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
               ),
             ],
           ),
-          const SizedBox(height: EchoMetrics.space3),
-
-          // 主操作
-          Row(
-            children: [
-              if (readyAudio.isNotEmpty)
-                Expanded(
-                  child: FilledButton.icon(
-                    key: const Key('detail_play'),
-                    onPressed: () => _play(widget.audiobook ?? readyAudio.first),
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('继续收听'),
-                  ),
-                )
-              else if (isEpub)
-                Expanded(
-                  child: FilledButton.icon(
-                    key: const Key('detail_read'),
-                    onPressed: _openReader,
-                    icon: const Icon(Icons.menu_book),
-                    label: const Text('开始阅读'),
-                  ),
-                ),
-              if (isEpub) ...[
-                const SizedBox(width: EchoMetrics.space2),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    key: const Key('detail_convert'),
-                    onPressed: () => showModalBottomSheet<void>(
-                      context: context,
-                      isScrollControlled: true,
-                      useSafeArea: true,
-                      builder: (_) => ConvertSheet(book: book),
-                    ),
-                    icon: const Icon(Icons.graphic_eq),
-                    label: Text(readyAudio.isEmpty ? '转有声书' : '再转一版'),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          if (readyAudio.isNotEmpty && isEpub) ...[
-            const SizedBox(height: EchoMetrics.space1),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                key: const Key('detail_read'),
-                onPressed: _openReader,
-                icon: const Icon(Icons.menu_book),
-                label: const Text('阅读原文'),
-              ),
-            ),
-          ],
 
           // 简介
           if (book.description.isNotEmpty) ...[
@@ -282,20 +229,21 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
               ),
           ],
 
-          // 章节预览
+          // 章节预览（点击直达对应章节）
           const SizedBox(height: EchoMetrics.space4),
           Row(
             children: [
               Text(
                 '章节',
-                style:
-                    textTheme.titleSmall?.copyWith(color: tokens.textPrimary),
+                style: textTheme.titleSmall?.copyWith(
+                  color: tokens.textPrimary,
+                ),
               ),
               const Spacer(),
               if (_chapters.isNotEmpty)
                 TextButton(
                   key: const Key('detail_all_chapters'),
-                  onPressed: _openReader,
+                  onPressed: () => _openReader(),
                   child: const Text('开始阅读'),
                 ),
             ],
@@ -310,40 +258,115 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
               padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space2),
               child: Text(
                 '暂无章节信息（仅 EPUB 支持章节解析）',
-                style:
-                    textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+                style: textTheme.bodySmall?.copyWith(
+                  color: tokens.textSecondary,
+                ),
               ),
             )
           else
             for (final chapter in _chapters.take(6))
               ListTile(
+                key: Key('detail_chapter_${chapter.index}'),
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: Text(
                   chapter.title.isNotEmpty
                       ? chapter.title
                       : '第 ${chapter.index + 1} 章',
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: tokens.textPrimary),
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: tokens.textPrimary,
+                  ),
                 ),
                 subtitle: Text(
                   '${chapter.chars} 字',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: tokens.textSecondary),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
-                onTap: _openReader,
+                trailing: Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: tokens.textDisabled,
+                ),
+                onTap: () => _openReader(chapterIndex: chapter.index),
               ),
           if (_chapters.length > 6)
             Padding(
               padding: const EdgeInsets.only(top: EchoMetrics.space1),
               child: Text(
                 '共 ${_chapters.length} 章，进入阅读器可查看完整目录',
-                style:
-                    textTheme.bodySmall?.copyWith(color: tokens.textDisabled),
+                style: textTheme.bodySmall?.copyWith(
+                  color: tokens.textDisabled,
+                ),
               ),
             ),
         ],
       ),
+      // 底部固定操作栏（对齐设计 §4.1：靛蓝渐变主按钮 + 次级圆角操作）
+      bottomNavigationBar: (readyAudio.isNotEmpty || isEpub)
+          ? SafeArea(
+              top: false,
+              child: Container(
+                key: const Key('detail_bottom_bar'),
+                padding: const EdgeInsets.fromLTRB(
+                  EchoMetrics.space3,
+                  EchoMetrics.space1,
+                  EchoMetrics.space3,
+                  EchoMetrics.space2,
+                ),
+                decoration: BoxDecoration(
+                  color: tokens.surfaceElevated,
+                  border: Border(top: BorderSide(color: tokens.surfaceSubtle)),
+                ),
+                child: Row(
+                  children: [
+                    if (readyAudio.isNotEmpty)
+                      Expanded(
+                        child: _GradientPrimaryButton(
+                          key: const Key('detail_play'),
+                          icon: Icons.play_arrow,
+                          label: '继续收听',
+                          onPressed: () =>
+                              _play(widget.audiobook ?? readyAudio.first),
+                        ),
+                      )
+                    else if (isEpub)
+                      Expanded(
+                        child: _GradientPrimaryButton(
+                          key: const Key('detail_read'),
+                          icon: Icons.menu_book,
+                          label: '开始阅读',
+                          onPressed: () => _openReader(),
+                        ),
+                      ),
+                    if (readyAudio.isNotEmpty && isEpub) ...[
+                      const SizedBox(width: EchoMetrics.space1),
+                      IconButton.outlined(
+                        key: const Key('detail_read'),
+                        tooltip: '阅读原文',
+                        onPressed: () => _openReader(),
+                        icon: const Icon(Icons.menu_book_outlined),
+                      ),
+                    ],
+                    if (isEpub) ...[
+                      const SizedBox(width: EchoMetrics.space1),
+                      FilledButton.tonalIcon(
+                        key: const Key('detail_convert'),
+                        onPressed: () => showModalBottomSheet<void>(
+                          context: context,
+                          isScrollControlled: true,
+                          useSafeArea: true,
+                          builder: (_) => ConvertSheet(book: book),
+                        ),
+                        icon: const Icon(Icons.graphic_eq, size: 18),
+                        label: Text(readyAudio.isEmpty ? '转有声书' : '再转一版'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 
@@ -357,10 +380,9 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
       ),
       child: Text(
         label,
-        style: Theme.of(context)
-            .textTheme
-            .labelSmall
-            ?.copyWith(color: tokens.textSecondary),
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(color: tokens.textSecondary),
       ),
     );
   }
@@ -382,10 +404,9 @@ class _ExpandableTextState extends State<_ExpandableText> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: tokens.textPrimary,
-          height: 1.7,
-        );
+    final style = Theme.of(
+      context,
+    ).textTheme.bodyMedium?.copyWith(color: tokens.textPrimary, height: 1.7);
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
       child: Column(
@@ -401,10 +422,9 @@ class _ExpandableTextState extends State<_ExpandableText> {
           const SizedBox(height: 4),
           Text(
             _expanded ? '收起' : '展开',
-            style: Theme.of(context)
-                .textTheme
-                .labelMedium
-                ?.copyWith(color: tokens.primary),
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: tokens.primary),
           ),
         ],
       ),
@@ -450,8 +470,7 @@ class _AudiobookTile extends ConsumerWidget {
           children: [
             Text(
               label,
-              style:
-                  textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+              style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
             ),
             if (state.status == OfflineStatus.downloading)
               Padding(
@@ -464,38 +483,41 @@ class _AudiobookTile extends ConsumerWidget {
             if (state.status == OfflineStatus.done)
               Text(
                 '已下载 · 离线可听',
-                style: textTheme.labelSmall
-                    ?.copyWith(color: tokens.success),
+                style: textTheme.labelSmall?.copyWith(color: tokens.success),
               ),
           ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (audio.isReady)
-              IconButton(
-                key: Key('detail_download_${audio.id}'),
-                tooltip: state.status == OfflineStatus.done ? '已下载' : '下载离线',
-                onPressed: state.status == OfflineStatus.downloading
-                    ? null
-                    : () async {
-                        final controller =
-                            ref.read(offlineStoreProvider.notifier);
-                        if (state.status == OfflineStatus.done) {
-                          await controller.remove(audio);
-                        } else {
-                          await controller.download(audio);
-                        }
-                      },
-                icon: Icon(
-                  state.status == OfflineStatus.done
-                      ? Icons.download_done
-                      : Icons.download_outlined,
-                  color: state.status == OfflineStatus.done
-                      ? tokens.success
-                      : tokens.textSecondary,
-                ),
+            IconButton(
+              key: Key('detail_download_${audio.id}'),
+              tooltip: state.status == OfflineStatus.done
+                  ? '已下载（点击删除）'
+                  : (state.status == OfflineStatus.downloading
+                        ? '取消下载'
+                        : '下载离线'),
+              onPressed: () async {
+                final controller = ref.read(offlineStoreProvider.notifier);
+                if (state.status == OfflineStatus.downloading) {
+                  controller.cancelDownload(audio.id);
+                } else if (state.status == OfflineStatus.done) {
+                  await controller.remove(audio);
+                } else {
+                  await controller.download(audio);
+                }
+              },
+              icon: Icon(
+                state.status == OfflineStatus.done
+                    ? Icons.download_done
+                    : (state.status == OfflineStatus.downloading
+                          ? Icons.close
+                          : Icons.download_outlined),
+                color: state.status == OfflineStatus.done
+                    ? tokens.success
+                    : tokens.textSecondary,
               ),
+            ),
             if (audio.isReady)
               IconButton(
                 key: Key('detail_audio_play_${audio.id}'),
@@ -504,6 +526,58 @@ class _AudiobookTile extends ConsumerWidget {
                 icon: Icon(Icons.play_arrow, color: tokens.primary),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 靛蓝渐变主按钮（对齐设计图 ui-mobile-book-detail 底部固定 CTA）。
+class _GradientPrimaryButton extends StatelessWidget {
+  const _GradientPrimaryButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final radius = BorderRadius.circular(EchoMetrics.radiusCard);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[tokens.primary, tokens.primaryHover],
+        ),
+        borderRadius: radius,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: radius,
+          onTap: onPressed,
+          child: SizedBox(
+            height: 48,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: tokens.textOnPrimary, size: 20),
+                const SizedBox(width: EchoMetrics.space1),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: tokens.textOnPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
