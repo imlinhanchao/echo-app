@@ -31,6 +31,7 @@ class LiveTtsState {
     this.speed = 1.0,
     this.speakerId = 0,
     this.modelId = '',
+    this.modelVariantTag = '',
     this.error,
   });
 
@@ -44,6 +45,7 @@ class LiveTtsState {
   final double speed;
   final int speakerId;
   final String modelId;
+  final String modelVariantTag;
   final String? error;
 
   bool get hasBook => book != null;
@@ -79,6 +81,7 @@ class LiveTtsState {
     double? speed,
     int? speakerId,
     String? modelId,
+    String? modelVariantTag,
     String? error,
     bool clearError = false,
   }) {
@@ -93,6 +96,7 @@ class LiveTtsState {
       speed: speed ?? this.speed,
       speakerId: speakerId ?? this.speakerId,
       modelId: modelId ?? this.modelId,
+      modelVariantTag: modelVariantTag ?? this.modelVariantTag,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -283,6 +287,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       speed: cfg.defaultTtsSpeed,
       speakerId: speakerId,
       modelId: resolvedModel.spec.id,
+      modelVariantTag: _fnv1aHex(resolvedModel.cacheKey),
     );
 
     try {
@@ -372,8 +377,11 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     final sentence = state.sentences[index];
     final bookId = state.book?.id ?? 0;
     final cacheDir = await _ensureCacheDir();
+    final variant = state.modelVariantTag.isNotEmpty
+        ? '_${state.modelVariantTag}'
+        : '';
     final key =
-        'b${bookId}_c${state.chapterIndex}_s${index}_${state.modelId}_sp${state.speakerId}_v${(state.speed * 100).round()}.wav';
+        'b${bookId}_c${state.chapterIndex}_s${index}_${state.modelId}${variant}_sp${state.speakerId}_v${(state.speed * 100).round()}.wav';
     final outFile = File(p.join(cacheDir.path, key));
     if (await outFile.exists() && await outFile.length() > 44) {
       // 刷新 mtime 用于 LRU
@@ -535,6 +543,15 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     _ffSub?.cancel();
     _rwSub?.cancel();
     super.dispose();
+  }
+
+  static String _fnv1aHex(String input) {
+    var hash = 0x811c9dc5;
+    for (final unit in input.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
   }
 }
 

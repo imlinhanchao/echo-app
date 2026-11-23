@@ -129,15 +129,17 @@ class ProfilePage extends ConsumerWidget {
                   final subtitle = activeSpec != null &&
                           (modelsState.entryOf(activeSpec.id)?.isInstalled ??
                               false)
-                      ? '当前：${activeSpec.name}（已装 $installedCount 款）'
-                      : '尚未安装模型，点击下载（Kokoro / Matcha / Piper）';
+                      ? (activeSpec.isSystemTts
+                            ? '当前：${activeSpec.name}'
+                            : '当前：${activeSpec.name}（已装 $installedCount 款）')
+                      : '点击配置（系统语音 / ZipVoice / MeloTTS / Matcha）';
                   return ListTile(
                     key: const Key('profile_tts_models'),
                     leading: Icon(
                       Icons.record_voice_over_outlined,
                       color: tokens.textPrimary,
                     ),
-                    title: const Text('离线语音模型管理'),
+                    title: const Text('语音模型与引擎管理'),
                     subtitle: Text(subtitle),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.of(context).push(

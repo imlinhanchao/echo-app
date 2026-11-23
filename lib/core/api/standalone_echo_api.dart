@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../books/local_library_store.dart';
 import '../settings/standalone_config_store.dart';
 import '../tts/local_convert_service.dart';
+import '../tts/system_tts_engine.dart';
 import '../tts/tts_model_catalog.dart';
 import '../tts/tts_model_manager.dart';
 import 'ebook_api_client.dart';
@@ -390,12 +391,29 @@ class StandaloneEchoApi extends EchoApi {
       );
     }
 
-    final speakerId =
-        int.tryParse(voice) ?? resolvedPaths.spec.speakers.first.id;
-    final speakerPreset = resolvedPaths.spec.speakers
-        .cast<TtsSpeakerPreset?>()
-        .firstWhere((s) => s?.id == speakerId, orElse: () => null);
-    final voiceLabel = speakerPreset?.name ?? '音色 #$speakerId';
+    final int speakerId;
+    final String voiceLabel;
+    final ResolvedTtsModelPaths effectivePaths;
+    if (resolvedPaths.spec.isSystemTts) {
+      speakerId = 0;
+      final chosenVoice = voice.trim().isNotEmpty
+          ? voice.trim()
+          : resolvedPaths.systemVoiceName;
+      effectivePaths = resolvedPaths.copyWith(systemVoiceName: chosenVoice);
+      final matched = _ttsModelManager.currentState.systemVoices
+          .cast<SystemTtsVoiceInfo?>()
+          .firstWhere((v) => v?.name == chosenVoice, orElse: () => null);
+      voiceLabel =
+          matched?.label ??
+          (chosenVoice.isNotEmpty ? chosenVoice : '系统默认音色');
+    } else {
+      speakerId = int.tryParse(voice) ?? resolvedPaths.spec.speakers.first.id;
+      final speakerPreset = resolvedPaths.spec.speakers
+          .cast<TtsSpeakerPreset?>()
+          .firstWhere((s) => s?.id == speakerId, orElse: () => null);
+      voiceLabel = speakerPreset?.name ?? '音色 #$speakerId';
+      effectivePaths = resolvedPaths;
+    }
 
     final jobId = _nextJobId++;
     final now = DateTime.now().toUtc();
@@ -409,7 +427,7 @@ class StandaloneEchoApi extends EchoApi {
       startedAt: now,
       result: <String, dynamic>{
         'title': book.title,
-        'model': resolvedPaths.spec.name,
+        'model': effectivePaths.spec.name,
       },
     );
     _upsertJob(job);
@@ -418,7 +436,7 @@ class StandaloneEchoApi extends EchoApi {
       _runConvertJob(
         jobId: jobId,
         book: book,
-        modelPaths: resolvedPaths,
+        modelPaths: effectivePaths,
         speakerId: speakerId,
         voiceLabel: voiceLabel,
         speed: speed,
@@ -506,14 +524,34 @@ class StandaloneEchoApi extends EchoApi {
     if (!_ttsModelManager.currentState.initialized) {
       await _ttsModelManager.refresh();
     }
-    final installed = _ttsModelManager.currentState.installedEntries;
-    final activeId = _readConfig().activeTtsModelId;
+    final modelsState = _ttsModelManager.currentState;
+    final installed = modelsState.installedEntries;
+    final cfg = _readConfig();
+    final activeId = cfg.activeTtsModelId;
     final models = installed.map((entry) {
       final spec = entry.spec;
+      final isDef = activeId.isNotEmpty
+          ? spec.id == activeId
+          : installed.first.spec.id == spec.id;
+      if (spec.isSystemTts) {
+        final sysVoices = modelsState.systemVoices;
+        final voiceIds = sysVoices.isNotEmpty
+            ? sysVoices.map((v) => v.name).toList()
+            : <String>[
+                cfg.systemTtsVoice.isNotEmpty ? cfg.systemTtsVoice : '',
+              ];
+        return TtsModelInfo(
+          id: spec.id,
+          repo: spec.name,
+          isDefault: isDef,
+          provider: 'android_system',
+          voices: voiceIds,
+        );
+      }
       return TtsModelInfo(
         id: spec.id,
         repo: spec.name,
-        isDefault: spec.id == activeId || installed.first.spec.id == spec.id,
+        isDefault: isDef,
         provider: 'local',
         voices: spec.speakers.map((s) => '${s.id}').toList(),
       );
@@ -528,6 +566,30 @@ class StandaloneEchoApi extends EchoApi {
 
   @override
   Future<List<TtsVoiceInfo>> ttsVoices(String model) async {
+    if (model == TtsModelCatalog.androidSystemTts.id) {
+      final cfg = _readConfig();
+      final voices = _ttsModelManager.currentState.systemVoices;
+      if (voices.isNotEmpty) {
+        return voices
+            .map(
+              (v) => TtsVoiceInfo(
+                id: v.name,
+                name: v.label.isNotEmpty ? v.label : v.name,
+                description: v.locale,
+              ),
+            )
+            .toList();
+      }
+      return <TtsVoiceInfo>[
+        TtsVoiceInfo(
+          id: cfg.systemTtsVoice,
+          name: cfg.systemTtsVoice.isNotEmpty ? cfg.systemTtsVoice : '系统引擎默认音色',
+          description: cfg.systemTtsEngine.isNotEmpty
+              ? cfg.systemTtsEngine
+              : '本机默认引擎',
+        ),
+      ];
+    }
     final spec = TtsModelCatalog.byId(model);
     if (spec == null) return const <TtsVoiceInfo>[];
     return spec.speakers

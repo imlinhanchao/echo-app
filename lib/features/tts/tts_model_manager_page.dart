@@ -17,7 +17,10 @@ import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 
-/// 端侧语音模型管理页：支持国内镜像/官方源下载、本地压缩包导入、切换默认模型/音色与一键试听。
+/// 端侧语音管理页：
+/// - 严格单镜像下拉选择（支持自定义加速前缀）与旧 Kokoro/Piper 残留清理；
+/// - Android 系统语音（含 MultiTTS 等已安装引擎）与离线 ZipVoice / MeloTTS / Matcha 管理；
+/// - ZipVoice 自定义参考音频克隆、本地压缩包导入与一键试听。
 class TtsModelManagerPage extends ConsumerStatefulWidget {
   const TtsModelManagerPage({super.key});
 
@@ -28,10 +31,21 @@ class TtsModelManagerPage extends ConsumerStatefulWidget {
 
 class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
   final AudioPlayer _previewPlayer = AudioPlayer();
+  late final TextEditingController _customMirrorCtrl;
   String? _auditioningModelId;
+  String? _customMirrorError;
+
+  @override
+  void initState() {
+    super.initState();
+    _customMirrorCtrl = TextEditingController(
+      text: ref.read(standaloneConfigProvider).customTtsMirrorPrefix,
+    );
+  }
 
   @override
   void dispose() {
+    _customMirrorCtrl.dispose();
     _previewPlayer.dispose();
     super.dispose();
   }
@@ -76,11 +90,82 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
         .read(ttsModelManagerProvider.notifier)
         .importLocalArchive(spec.id, File(filePath));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(err ?? '已成功导入 ${spec.name}'),
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(err ?? '已成功导入 ${spec.name}')));
+  }
+
+  Future<void> _importZipVoiceReference() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const <String>['wav'],
+    );
+    final filePath = picked?.files.single.path;
+    if (filePath == null || filePath.isEmpty || !mounted) return;
+
+    final refTextCtrl = TextEditingController(
+      text: ref.read(standaloneConfigProvider).zipvoiceRefText,
+    );
+    final refText = await showDialog<String>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('填写参考音频对应文字'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('已选择：${p.basename(filePath)}'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: refTextCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: '参考音频里说的内容',
+                hintText: '请准确输入该 3-10 秒 WAV 文件里的人声文字，克隆效果更自然',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogCtx).pop(refTextCtrl.text.trim()),
+            child: const Text('应用参考音色'),
+          ),
+        ],
       ),
     );
+    refTextCtrl.dispose();
+    if (refText == null || !mounted) return;
+
+    final err = await ref
+        .read(ttsModelManagerProvider.notifier)
+        .importZipVoiceReferenceAudio(File(filePath), refText);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(err ?? '已切换为自定义参考音色（${p.basename(filePath)}）')),
+    );
+  }
+
+  Future<void> _saveCustomMirror() async {
+    final raw = _customMirrorCtrl.text.trim();
+    final err = TtsModelCatalog.validateCustomMirrorPrefix(raw);
+    if (err != null) {
+      setState(() => _customMirrorError = err);
+      return;
+    }
+    setState(() => _customMirrorError = null);
+    await ref
+        .read(standaloneConfigProvider.notifier)
+        .setCustomTtsMirrorPrefix(raw);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已保存自定义加速镜像前缀')));
   }
 
   @override
@@ -92,9 +177,14 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
     final configCtrl = ref.read(standaloneConfigProvider.notifier);
     final manager = ref.read(ttsModelManagerProvider.notifier);
 
+    final mirrorIds = TtsModelCatalog.downloadMirrors.map((m) => m.id).toSet();
+    final selectedMirrorId = mirrorIds.contains(config.ttsDownloadMirror)
+        ? config.ttsDownloadMirror
+        : TtsModelCatalog.mirrorGhFast;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('离线语音模型管理'),
+        title: const Text('语音模型与引擎管理'),
         actions: [
           IconButton(
             tooltip: '刷新模型状态',
@@ -107,68 +197,202 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
         child: ListView(
           padding: const EdgeInsets.all(EchoMetrics.space3),
           children: [
-            // 下载源设置卡片
+            // 下载镜像源下拉选择卡片
             Container(
+              key: const Key('tts_mirror_card'),
+              padding: const EdgeInsets.all(EchoMetrics.space3),
               decoration: echoElevatedCardDecoration(context, radius: 16),
-              child: SwitchListTile(
-                title: Text(
-                  '优先使用国内加速镜像',
-                  style: textTheme.titleSmall?.copyWith(
-                    color: tokens.textPrimary,
-                    fontWeight: FontWeight.w600,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '模型下载镜像源',
+                    style: textTheme.titleSmall?.copyWith(
+                      color: tokens.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                subtitle: Text(
-                  '开启后优先从国内镜像下载模型，失败时自动回退 GitHub 官方源',
-                  style: textTheme.bodySmall?.copyWith(
-                    color: tokens.textSecondary,
+                  const SizedBox(height: 6),
+                  Text(
+                    '严格仅使用所选镜像下载，不静默跳转其他源；若失败请切换镜像后继续断点续传',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: tokens.textSecondary,
+                    ),
                   ),
-                ),
-                value: config.preferCnMirror,
-                onChanged: configCtrl.setPreferCnMirror,
+                  const SizedBox(height: 10),
+                  DropdownButtonHideUnderline(
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                      ),
+                      child: DropdownButton<String>(
+                        key: const Key('tts_mirror_dropdown'),
+                        isExpanded: true,
+                        value: selectedMirrorId,
+                        items: [
+                          for (final opt in TtsModelCatalog.downloadMirrors)
+                            DropdownMenuItem<String>(
+                              value: opt.id,
+                              child: Text(opt.label),
+                            ),
+                        ],
+                        onChanged: (nextId) async {
+                          if (nextId == null) return;
+                          await configCtrl.setTtsDownloadMirror(nextId);
+                          if (mounted) {
+                            setState(() => _customMirrorError = null);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  if (selectedMirrorId == TtsModelCatalog.mirrorCustom) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const Key('tts_custom_mirror_field'),
+                            controller: _customMirrorCtrl,
+                            keyboardType: TextInputType.url,
+                            decoration: InputDecoration(
+                              labelText: '自定义加速前缀',
+                              hintText: 'https://ghfast.top/',
+                              errorText: _customMirrorError,
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.tonal(
+                          key: const Key('tts_custom_mirror_save'),
+                          onPressed: _saveCustomMirror,
+                          child: const Text('保存前缀'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
               ),
             ),
             const SizedBox(height: EchoMetrics.space3),
 
-            // 模型列表
-            for (final entry in modelsState.orderedEntries) ...[
-              _ModelCard(
-                entry: entry,
-                isActive: config.activeTtsModelId == entry.spec.id,
-                activeSpeakerId: config.activeTtsSpeakerId,
-                isAuditioning: _auditioningModelId == entry.spec.id,
-                onDownload: () async {
-                  final err = await manager.downloadModel(entry.spec.id);
-                  if (!context.mounted) return;
-                  if (err != null) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(err)));
-                  }
-                },
-                onPause: () => manager.pauseDownload(entry.spec.id),
-                onClearPartial: () =>
-                    manager.clearPartialDownload(entry.spec.id),
-                onImportLocal: () => _importLocal(entry.spec),
-                onDelete: () async {
-                  await manager.deleteModel(entry.spec.id);
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('已删除 ${entry.spec.name}')),
-                  );
-                },
-                onSelectActive: () => configCtrl.setActiveTtsModel(
-                  entry.spec.id,
-                  speakerId: entry.spec.speakers.first.id,
+            // 旧模型（Kokoro / Piper）残留清理提醒卡片
+            if (modelsState.legacyModelsSizeBytes > 0) ...[
+              Container(
+                key: const Key('tts_legacy_cleanup_card'),
+                padding: const EdgeInsets.all(EchoMetrics.space3),
+                decoration: echoElevatedCardDecoration(context, radius: 16),
+                child: Row(
+                  children: [
+                    Icon(Icons.cleaning_services_outlined, color: tokens.accent),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '检测到已下架旧模型残留（${formatBytes(modelsState.legacyModelsSizeBytes)}）',
+                            style: textTheme.titleSmall?.copyWith(
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Kokoro / Piper 已移除，清理后可释放手机空间',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: tokens.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.tonal(
+                      key: const Key('tts_legacy_cleanup_button'),
+                      onPressed: () async {
+                        final freed = await manager.cleanupLegacyModels();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('已清理旧模型，释放 ${formatBytes(freed)}'),
+                          ),
+                        );
+                      },
+                      child: const Text('一键清理'),
+                    ),
+                  ],
                 ),
-                onSelectSpeaker: (sid) async {
-                  await configCtrl.setActiveTtsModel(
-                    entry.spec.id,
-                    speakerId: sid,
-                  );
-                },
-                onAudition: (sid) => _audition(entry, sid),
               ),
+              const SizedBox(height: EchoMetrics.space3),
+            ],
+
+            // 模型与引擎卡片列表
+            for (final entry in modelsState.orderedEntries) ...[
+              if (entry.spec.isSystemTts)
+                _SystemTtsCard(
+                  entry: entry,
+                  modelsState: modelsState,
+                  config: config,
+                  isActive: config.activeTtsModelId == entry.spec.id,
+                  isAuditioning: _auditioningModelId == entry.spec.id,
+                  onSelectEngine: manager.selectSystemTtsEngine,
+                  onSelectVoice: manager.selectSystemTtsVoice,
+                  onReloadInfo: manager.reloadSystemTtsInfo,
+                  onSelectActive: () => configCtrl.setActiveTtsModel(
+                    entry.spec.id,
+                    speakerId: 0,
+                  ),
+                  onAudition: () => _audition(entry, 0),
+                )
+              else
+                _ModelCard(
+                  entry: entry,
+                  config: config,
+                  isActive: config.activeTtsModelId == entry.spec.id,
+                  activeSpeakerId: config.activeTtsSpeakerId,
+                  isAuditioning: _auditioningModelId == entry.spec.id,
+                  onDownload: () async {
+                    final err = await manager.downloadModel(entry.spec.id);
+                    if (!context.mounted) return;
+                    if (err != null) {
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text(err)));
+                    }
+                  },
+                  onPause: () => manager.pauseDownload(entry.spec.id),
+                  onClearPartial: () =>
+                      manager.clearPartialDownload(entry.spec.id),
+                  onImportLocal: () => _importLocal(entry.spec),
+                  onImportZipVoiceRef: _importZipVoiceReference,
+                  onResetZipVoiceRef: manager.resetZipVoiceReferenceAudio,
+                  onDelete: () async {
+                    await manager.deleteModel(entry.spec.id);
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('已删除 ${entry.spec.name}')),
+                    );
+                  },
+                  onSelectActive: () => configCtrl.setActiveTtsModel(
+                    entry.spec.id,
+                    speakerId: entry.spec.speakers.first.id,
+                  ),
+                  onSelectSpeaker: (sid) async {
+                    await configCtrl.setActiveTtsModel(
+                      entry.spec.id,
+                      speakerId: sid,
+                    );
+                  },
+                  onAudition: (sid) => _audition(entry, sid),
+                ),
               const SizedBox(height: EchoMetrics.space2),
             ],
           ],
@@ -178,9 +402,205 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
   }
 }
 
+class _SystemTtsCard extends StatelessWidget {
+  const _SystemTtsCard({
+    required this.entry,
+    required this.modelsState,
+    required this.config,
+    required this.isActive,
+    required this.isAuditioning,
+    required this.onSelectEngine,
+    required this.onSelectVoice,
+    required this.onReloadInfo,
+    required this.onSelectActive,
+    required this.onAudition,
+  });
+
+  final TtsModelStatusEntry entry;
+  final TtsModelsState modelsState;
+  final StandaloneConfig config;
+  final bool isActive;
+  final bool isAuditioning;
+  final ValueChanged<String> onSelectEngine;
+  final ValueChanged<String> onSelectVoice;
+  final VoidCallback onReloadInfo;
+  final VoidCallback onSelectActive;
+  final VoidCallback onAudition;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final textTheme = Theme.of(context).textTheme;
+    final spec = entry.spec;
+
+    final engineItems = <DropdownMenuItem<String>>[
+      const DropdownMenuItem<String>(value: '', child: Text('跟随系统默认引擎')),
+      for (final eng in modelsState.systemEngines)
+        DropdownMenuItem<String>(
+          value: eng.packageName,
+          child: Text(
+            eng.isDefault ? '${eng.label}（默认）' : eng.label,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+    ];
+    final validEngines = engineItems.map((i) => i.value).toSet();
+    final selectedEngine = validEngines.contains(config.systemTtsEngine)
+        ? config.systemTtsEngine
+        : '';
+
+    final voiceItems = <DropdownMenuItem<String>>[
+      const DropdownMenuItem<String>(value: '', child: Text('跟随引擎默认音色')),
+      for (final v in modelsState.systemVoices)
+        DropdownMenuItem<String>(
+          value: v.name,
+          child: Text(v.label, overflow: TextOverflow.ellipsis),
+        ),
+    ];
+    final validVoices = voiceItems.map((i) => i.value).toSet();
+    final selectedVoice = validVoices.contains(config.systemTtsVoice)
+        ? config.systemTtsVoice
+        : '';
+
+    return Container(
+      key: const Key('tts_system_card'),
+      padding: const EdgeInsets.all(EchoMetrics.space3),
+      decoration: echoElevatedCardDecoration(context, radius: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  spec.name,
+                  style: textTheme.titleMedium?.copyWith(
+                    color: tokens.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (isActive ? tokens.primary : tokens.accent)
+                      .withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  isActive ? '当前使用' : spec.recommendedTag,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: isActive ? tokens.primary : tokens.accent,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            spec.subtitle,
+            style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          if (!modelsState.systemTtsSupported)
+            Text(
+              '仅 Android 真机可用（免下载调起系统自带、MultiTTS 等语音引擎）',
+              style: textTheme.labelMedium?.copyWith(color: tokens.textDisabled),
+            )
+          else ...[
+            if (modelsState.systemTtsError != null) ...[
+              Text(
+                modelsState.systemTtsError!,
+                style: textTheme.bodySmall?.copyWith(color: tokens.error),
+              ),
+              const SizedBox(height: 8),
+            ],
+            DropdownButtonHideUnderline(
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: '本机语音引擎',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                ),
+                child: DropdownButton<String>(
+                  key: const Key('tts_system_engine_dropdown'),
+                  isExpanded: true,
+                  value: selectedEngine,
+                  items: engineItems,
+                  onChanged: (v) {
+                    if (v != null) onSelectEngine(v);
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonHideUnderline(
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: '引擎音色',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                ),
+                child: DropdownButton<String>(
+                  key: const Key('tts_system_voice_dropdown'),
+                  isExpanded: true,
+                  value: selectedVoice,
+                  items: voiceItems,
+                  onChanged: (v) {
+                    if (v != null) onSelectVoice(v);
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (!isActive) ...[
+                  FilledButton.tonal(
+                    onPressed: onSelectActive,
+                    child: const Text('设为默认'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                OutlinedButton.icon(
+                  onPressed: isAuditioning ? null : onAudition,
+                  icon: isAuditioning
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.volume_up_outlined, size: 18),
+                  label: Text(isAuditioning ? '合成中...' : '试听'),
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: '刷新系统引擎与音色列表',
+                  onPressed: onReloadInfo,
+                  icon: const Icon(Icons.sync),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _ModelCard extends StatelessWidget {
   const _ModelCard({
     required this.entry,
+    required this.config,
     required this.isActive,
     required this.activeSpeakerId,
     required this.isAuditioning,
@@ -188,6 +608,8 @@ class _ModelCard extends StatelessWidget {
     required this.onPause,
     required this.onClearPartial,
     required this.onImportLocal,
+    required this.onImportZipVoiceRef,
+    required this.onResetZipVoiceRef,
     required this.onDelete,
     required this.onSelectActive,
     required this.onSelectSpeaker,
@@ -195,6 +617,7 @@ class _ModelCard extends StatelessWidget {
   });
 
   final TtsModelStatusEntry entry;
+  final StandaloneConfig config;
   final bool isActive;
   final int activeSpeakerId;
   final bool isAuditioning;
@@ -202,6 +625,8 @@ class _ModelCard extends StatelessWidget {
   final VoidCallback onPause;
   final VoidCallback onClearPartial;
   final VoidCallback onImportLocal;
+  final VoidCallback onImportZipVoiceRef;
+  final VoidCallback onResetZipVoiceRef;
   final VoidCallback onDelete;
   final VoidCallback onSelectActive;
   final ValueChanged<int> onSelectSpeaker;
@@ -216,6 +641,7 @@ class _ModelCard extends StatelessWidget {
     final selectedSid = spec.speakers.any((s) => s.id == activeSpeakerId)
         ? activeSpeakerId
         : spec.speakers.first.id;
+    final hasCustomZipVoiceRef = config.zipvoiceRefAudioPath.isNotEmpty;
 
     return Container(
       padding: const EdgeInsets.all(EchoMetrics.space3),
@@ -267,7 +693,9 @@ class _ModelCard extends StatelessWidget {
           if (entry.isBusy || entry.isPaused) ...[
             const SizedBox(height: 12),
             LinearProgressIndicator(
-              value: entry.progress > 0 ? entry.progress : (entry.isPaused ? 0 : null),
+              value: entry.progress > 0
+                  ? entry.progress
+                  : (entry.isPaused ? 0 : null),
             ),
             const SizedBox(height: 6),
             Row(
@@ -308,6 +736,61 @@ class _ModelCard extends StatelessWidget {
                   ),
               ],
             ),
+            if (spec.kind == TtsModelKind.zipvoice) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: tokens.surfaceElevated.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      hasCustomZipVoiceRef
+                          ? '参考音色：自定义 (${p.basename(config.zipvoiceRefAudioPath)})'
+                          : '参考音色：内置默认示例（可自行导入 WAV 克隆）',
+                      style: textTheme.labelMedium?.copyWith(
+                        color: tokens.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if ((entry.resolvedPaths?.referenceText ?? '')
+                        .isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '参考文本：${entry.resolvedPaths!.referenceText}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          key: const Key('tts_zipvoice_import_ref'),
+                          onPressed: onImportZipVoiceRef,
+                          icon: const Icon(Icons.mic_none_outlined, size: 16),
+                          label: const Text('导入自定义参考音 (.wav)'),
+                        ),
+                        if (hasCustomZipVoiceRef)
+                          TextButton(
+                            key: const Key('tts_zipvoice_reset_ref'),
+                            onPressed: onResetZipVoiceRef,
+                            child: const Text('恢复默认'),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [

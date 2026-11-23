@@ -13,6 +13,7 @@ import '../offline/offline_store.dart' show formatBytes;
 import '../settings/standalone_config_store.dart';
 import 'download_keepalive_service.dart';
 import 'resumable_downloader.dart';
+import 'system_tts_engine.dart';
 import 'tts_model_catalog.dart';
 import 'wav_encoder.dart';
 
@@ -66,6 +67,27 @@ class ResolvedTtsModelPaths {
     systemEnginePackage,
     systemVoiceName,
   ].join('|');
+
+  ResolvedTtsModelPaths copyWith({
+    String? systemEnginePackage,
+    String? systemVoiceName,
+  }) => ResolvedTtsModelPaths(
+    spec: spec,
+    rootDir: rootDir,
+    modelPath: modelPath,
+    tokensPath: tokensPath,
+    decoderPath: decoderPath,
+    voicesPath: voicesPath,
+    vocoderPath: vocoderPath,
+    lexiconPath: lexiconPath,
+    dataDir: dataDir,
+    dictDir: dictDir,
+    ruleFsts: ruleFsts,
+    referenceAudioPath: referenceAudioPath,
+    referenceText: referenceText,
+    systemEnginePackage: systemEnginePackage ?? this.systemEnginePackage,
+    systemVoiceName: systemVoiceName ?? this.systemVoiceName,
+  );
 }
 
 enum ModelInstallStatus {
@@ -140,12 +162,20 @@ class TtsModelsState {
     this.initialized = false,
     this.legacyModelIds = const <String>[],
     this.legacyModelsSizeBytes = 0,
+    this.systemTtsSupported = false,
+    this.systemEngines = const <SystemTtsEngineInfo>[],
+    this.systemVoices = const <SystemTtsVoiceInfo>[],
+    this.systemTtsError,
   });
 
   final Map<String, TtsModelStatusEntry> entries;
   final bool initialized;
   final List<String> legacyModelIds;
   final int legacyModelsSizeBytes;
+  final bool systemTtsSupported;
+  final List<SystemTtsEngineInfo> systemEngines;
+  final List<SystemTtsVoiceInfo> systemVoices;
+  final String? systemTtsError;
 
   List<TtsModelStatusEntry> get orderedEntries => TtsModelCatalog.all
       .map((s) => entries[s.id] ?? TtsModelStatusEntry(spec: s))
@@ -155,13 +185,38 @@ class TtsModelsState {
       orderedEntries.where((e) => e.isInstalled).toList();
 
   TtsModelStatusEntry? entryOf(String id) => entries[id];
+
+  TtsModelsState copyWith({
+    Map<String, TtsModelStatusEntry>? entries,
+    bool? initialized,
+    List<String>? legacyModelIds,
+    int? legacyModelsSizeBytes,
+    bool? systemTtsSupported,
+    List<SystemTtsEngineInfo>? systemEngines,
+    List<SystemTtsVoiceInfo>? systemVoices,
+    String? systemTtsError,
+    bool clearSystemTtsError = false,
+  }) => TtsModelsState(
+    entries: entries ?? this.entries,
+    initialized: initialized ?? this.initialized,
+    legacyModelIds: legacyModelIds ?? this.legacyModelIds,
+    legacyModelsSizeBytes:
+        legacyModelsSizeBytes ?? this.legacyModelsSizeBytes,
+    systemTtsSupported: systemTtsSupported ?? this.systemTtsSupported,
+    systemEngines: systemEngines ?? this.systemEngines,
+    systemVoices: systemVoices ?? this.systemVoices,
+    systemTtsError: clearSystemTtsError
+        ? null
+        : (systemTtsError ?? this.systemTtsError),
+  );
 }
 
 /// 端侧 TTS 模型管理器：
 /// - Android 前台服务保活（防止锁屏/切后台断流）
-/// - HTTP Range 断点续传与多镜像自动切换
+/// - HTTP Range 断点续传与严格单镜像切换
 /// - 切回前台自动恢复因网络中断的下载
-/// - Isolate 解压、完整性校验、本地导入与删除
+/// - Android 原生系统 TTS（含 MultiTTS 等）管理与 ZipVoice 参考音频导入
+/// - Isolate 解压、完整性校验、旧模型清理、本地导入与删除
 class TtsModelManager extends StateNotifier<TtsModelsState> {
   TtsModelManager(
     this._configController, {
@@ -169,6 +224,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     Directory? rootDirOverride,
     DownloadKeepAliveService? keepAliveService,
     ResumableFileDownloader? downloader,
+    SystemTtsBridge? systemTtsBridge,
   }) : _dio =
            dio ??
            Dio(
@@ -180,6 +236,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
        _rootDirOverride = rootDirOverride,
        _keepAlive = keepAliveService ?? const PlatformDownloadKeepAliveService(),
        _downloader = downloader ?? const ResumableFileDownloader(),
+       _systemTtsBridge = systemTtsBridge ?? const PlatformSystemTtsBridge(),
        super(const TtsModelsState()) {
     refresh();
   }
@@ -189,6 +246,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   final Directory? _rootDirOverride;
   final DownloadKeepAliveService _keepAlive;
   final ResumableFileDownloader _downloader;
+  final SystemTtsBridge _systemTtsBridge;
   final Map<String, CancelToken> _cancelTokens = <String, CancelToken>{};
   final Set<String> _autoResumeModelIds = <String>{};
   final Set<String> _userPausedModelIds = <String>{};
@@ -206,26 +264,85 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     return dir;
   }
 
+  TtsModelStatusEntry _buildSystemTtsEntry() {
+    const spec = TtsModelCatalog.androidSystemTts;
+    if (!_systemTtsBridge.isSupported) {
+      return TtsModelStatusEntry(spec: spec);
+    }
+    final cfg = _configController.state;
+    return TtsModelStatusEntry(
+      spec: spec,
+      status: ModelInstallStatus.installed,
+      progress: 1.0,
+      statusText: '免下载可用',
+      resolvedPaths: ResolvedTtsModelPaths(
+        spec: spec,
+        rootDir: '',
+        modelPath: '',
+        tokensPath: '',
+        systemEnginePackage: cfg.systemTtsEngine,
+        systemVoiceName: cfg.systemTtsVoice,
+      ),
+    );
+  }
+
+  Future<
+    ({
+      List<SystemTtsEngineInfo> engines,
+      List<SystemTtsVoiceInfo> voices,
+      String? error,
+    })
+  >
+  _fetchSystemTtsInfo() async {
+    if (!_systemTtsBridge.isSupported) {
+      return (
+        engines: const <SystemTtsEngineInfo>[],
+        voices: const <SystemTtsVoiceInfo>[],
+        error: null,
+      );
+    }
+    try {
+      final engines = await _systemTtsBridge.listEngines();
+      final voices = await _systemTtsBridge.listVoices(
+        _configController.state.systemTtsEngine,
+      );
+      return (engines: engines, voices: voices, error: null);
+    } catch (e) {
+      return (
+        engines: const <SystemTtsEngineInfo>[],
+        voices: const <SystemTtsVoiceInfo>[],
+        error: e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
   Future<void> refresh() async {
+    final sysInfo = await _fetchSystemTtsInfo();
     final Directory root;
     try {
       root = await _modelsRoot();
     } catch (_) {
-      // 无平台通道（如纯 Widget 单测环境）时保持未安装空态，不抛未捕获异常。
+      // 无平台通道（如纯 Widget 单测环境）时保持未安装空态，系统 TTS 按桥接能力判定。
       if (!mounted) return;
       state = TtsModelsState(
         entries: <String, TtsModelStatusEntry>{
           for (final spec in TtsModelCatalog.all)
-            spec.id: TtsModelStatusEntry(spec: spec),
+            spec.id: spec.isSystemTts
+                ? _buildSystemTtsEntry()
+                : TtsModelStatusEntry(spec: spec),
         },
         initialized: true,
+        systemTtsSupported: _systemTtsBridge.isSupported,
+        systemEngines: sysInfo.engines,
+        systemVoices: sysInfo.voices,
+        systemTtsError: sysInfo.error,
       );
       return;
     }
     final map = <String, TtsModelStatusEntry>{};
     for (final spec in TtsModelCatalog.all) {
       if (spec.isSystemTts) {
-        map[spec.id] = TtsModelStatusEntry(spec: spec);
+        map[spec.id] = _buildSystemTtsEntry();
         continue;
       }
       final existing = state.entries[spec.id];
@@ -285,25 +402,86 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       initialized: true,
       legacyModelIds: List<String>.unmodifiable(foundLegacyIds),
       legacyModelsSizeBytes: legacyBytes,
+      systemTtsSupported: _systemTtsBridge.isSupported,
+      systemEngines: sysInfo.engines,
+      systemVoices: sysInfo.voices,
+      systemTtsError: sysInfo.error,
     );
 
-    // 若当前尚未选定模型或选中的旧模型已下架且无安装，自动切换到第一个可用模型或清空无效 ID。
+    // 若当前尚未选定模型或选中的旧模型已下架且无安装，优先选择已安装的离线模型，其次系统语音。
     final activeId = _configController.state.activeTtsModelId;
     final activeInvalidOrMissing =
         activeId.isEmpty || !(map[activeId]?.isInstalled ?? false);
     if (activeInvalidOrMissing) {
-      final firstInstalled = map.values
+      final firstOfflineInstalled = map.values
           .cast<TtsModelStatusEntry?>()
-          .firstWhere((e) => e?.isInstalled == true, orElse: () => null);
-      if (firstInstalled != null) {
+          .firstWhere(
+            (e) => e?.isInstalled == true && e?.spec.isSystemTts == false,
+            orElse: () => null,
+          );
+      final firstAnyInstalled =
+          firstOfflineInstalled ??
+          map.values.cast<TtsModelStatusEntry?>().firstWhere(
+            (e) => e?.isInstalled == true,
+            orElse: () => null,
+          );
+      if (firstAnyInstalled != null) {
         await _configController.setActiveTtsModel(
-          firstInstalled.spec.id,
-          speakerId: firstInstalled.spec.speakers.first.id,
+          firstAnyInstalled.spec.id,
+          speakerId: firstAnyInstalled.spec.speakers.first.id,
         );
       } else if (activeId.isNotEmpty && TtsModelCatalog.byId(activeId) == null) {
         await _configController.setActiveTtsModel('', speakerId: 0);
       }
     }
+  }
+
+  /// 刷新 Android 系统 TTS 引擎与音色列表。
+  Future<void> reloadSystemTtsInfo() async {
+    final sysInfo = await _fetchSystemTtsInfo();
+    if (!mounted) return;
+    final nextEntries = <String, TtsModelStatusEntry>{
+      ...state.entries,
+      TtsModelCatalog.androidSystemTts.id: _buildSystemTtsEntry(),
+    };
+    state = state.copyWith(
+      entries: nextEntries,
+      systemTtsSupported: _systemTtsBridge.isSupported,
+      systemEngines: sysInfo.engines,
+      systemVoices: sysInfo.voices,
+      systemTtsError: sysInfo.error,
+      clearSystemTtsError: sysInfo.error == null,
+    );
+  }
+
+  /// 切换 Android 系统 TTS 引擎包名，并刷新音色列表、激活系统语音模式。
+  Future<void> selectSystemTtsEngine(String enginePackage) async {
+    await _configController.setSystemTtsSelection(
+      enginePackage: enginePackage,
+      voiceName: '',
+    );
+    await _configController.setActiveTtsModel(
+      TtsModelCatalog.androidSystemTts.id,
+      speakerId: 0,
+    );
+    await reloadSystemTtsInfo();
+  }
+
+  /// 切换 Android 系统 TTS 音色，并激活系统语音模式。
+  Future<void> selectSystemTtsVoice(String voiceName) async {
+    await _configController.setSystemTtsSelection(
+      enginePackage: _configController.state.systemTtsEngine,
+      voiceName: voiceName,
+    );
+    await _configController.setActiveTtsModel(
+      TtsModelCatalog.androidSystemTts.id,
+      speakerId: 0,
+    );
+    if (!mounted) return;
+    _updateEntry(
+      TtsModelCatalog.androidSystemTts.id,
+      (_) => _buildSystemTtsEntry(),
+    );
   }
 
   void _updateEntry(
@@ -314,14 +492,11 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     final spec = TtsModelCatalog.byId(modelId);
     if (spec == null) return;
     final cur = state.entries[modelId] ?? TtsModelStatusEntry(spec: spec);
-    state = TtsModelsState(
+    state = state.copyWith(
       entries: <String, TtsModelStatusEntry>{
         ...state.entries,
         modelId: transform(cur),
       },
-      initialized: state.initialized,
-      legacyModelIds: state.legacyModelIds,
-      legacyModelsSizeBytes: state.legacyModelsSizeBytes,
     );
   }
 
@@ -637,9 +812,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       }
     }
     if (mounted) {
-      state = TtsModelsState(
-        entries: state.entries,
-        initialized: state.initialized,
+      state = state.copyWith(
         legacyModelIds: const <String>[],
         legacyModelsSizeBytes: 0,
       );
@@ -1076,5 +1249,8 @@ void _extractArchiveSync(String archivePath, String destDirPath) {
 final StateNotifierProvider<TtsModelManager, TtsModelsState>
 ttsModelManagerProvider =
     StateNotifierProvider<TtsModelManager, TtsModelsState>((ref) {
-      return TtsModelManager(ref.read(standaloneConfigProvider.notifier));
+      return TtsModelManager(
+        ref.read(standaloneConfigProvider.notifier),
+        systemTtsBridge: ref.watch(systemTtsBridgeProvider),
+      );
     });

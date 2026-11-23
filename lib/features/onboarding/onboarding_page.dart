@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/ebook_api_client.dart';
 import '../../core/api/models.dart';
 import '../../core/settings/standalone_config_store.dart';
+import '../../core/tts/tts_model_catalog.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
@@ -243,6 +244,12 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
   ) {
     final modelsState = ref.watch(ttsModelManagerProvider);
     final manager = ref.read(ttsModelManagerProvider.notifier);
+    final config = ref.watch(standaloneConfigProvider);
+    final configCtrl = ref.read(standaloneConfigProvider.notifier);
+    final mirrorIds = TtsModelCatalog.downloadMirrors.map((m) => m.id).toSet();
+    final selectedMirrorId = mirrorIds.contains(config.ttsDownloadMirror)
+        ? config.ttsDownloadMirror
+        : TtsModelCatalog.mirrorGhFast;
 
     return Container(
       padding: const EdgeInsets.all(EchoMetrics.space3),
@@ -259,8 +266,39 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '所有语音合成完全在手机本地运行，无需联网。可先下载一款模型，或稍后在「我的 → 离线语音模型」中下载/导入。',
+            '所有语音合成完全在手机本地运行，无需联网。可直接使用 Android 系统语音，或下载离线高质量模型。',
             style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonHideUnderline(
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: '下载镜像源',
+                border: OutlineInputBorder(),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
+              ),
+              child: DropdownButton<String>(
+                key: const Key('onboarding_mirror_dropdown'),
+                isExpanded: true,
+                value: selectedMirrorId,
+                items: [
+                  for (final opt in TtsModelCatalog.downloadMirrors)
+                    DropdownMenuItem<String>(
+                      value: opt.id,
+                      child: Text(opt.label),
+                    ),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    configCtrl.setTtsDownloadMirror(v);
+                  }
+                },
+              ),
+            ),
           ),
           const SizedBox(height: EchoMetrics.space2),
           for (final entry in modelsState.orderedEntries) ...[
@@ -289,7 +327,9 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                         ),
                       ),
                       Text(
-                        '~${entry.spec.estimatedSizeMb}MB',
+                        entry.spec.isSystemTts
+                            ? '免下载'
+                            : '~${entry.spec.estimatedSizeMb}MB',
                         style: textTheme.labelSmall?.copyWith(
                           color: tokens.textDisabled,
                         ),
@@ -304,7 +344,44 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (entry.isBusy || entry.isPaused) ...[
+                  if (entry.spec.isSystemTts)
+                    Row(
+                      children: [
+                        if (entry.isInstalled) ...[
+                          Icon(
+                            Icons.check_circle,
+                            size: 16,
+                            color: tokens.success,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '免下载就绪',
+                            style: textTheme.labelMedium?.copyWith(
+                              color: tokens.success,
+                            ),
+                          ),
+                          const Spacer(),
+                          FilledButton.tonal(
+                            onPressed: () => configCtrl.setActiveTtsModel(
+                              entry.spec.id,
+                              speakerId: 0,
+                            ),
+                            child: Text(
+                              config.activeTtsModelId == entry.spec.id
+                                  ? '已设为默认'
+                                  : '设为默认',
+                            ),
+                          ),
+                        ] else
+                          Text(
+                            '仅 Android 真机可用',
+                            style: textTheme.labelSmall?.copyWith(
+                              color: tokens.textDisabled,
+                            ),
+                          ),
+                      ],
+                    )
+                  else if (entry.isBusy || entry.isPaused) ...[
                     LinearProgressIndicator(
                       value: entry.progress > 0
                           ? entry.progress

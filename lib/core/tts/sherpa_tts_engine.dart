@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
+import 'system_tts_engine.dart';
 import 'tts_model_catalog.dart';
 import 'tts_model_manager.dart';
 import 'wav_encoder.dart';
@@ -416,7 +417,12 @@ class FakeOnDeviceTtsEngine implements OnDeviceTtsEngine {
 
 final Provider<OnDeviceTtsEngine> onDeviceTtsEngineProvider =
     Provider<OnDeviceTtsEngine>((ref) {
-      final engine = SherpaIsolateTtsEngine();
-      ref.onDispose(engine.dispose);
-      return engine;
+      final sherpa = SherpaIsolateTtsEngine();
+      final system = AndroidSystemTtsEngine(ref.watch(systemTtsBridgeProvider));
+      final hybrid = HybridOnDeviceTtsEngine(
+        sherpaEngine: sherpa,
+        systemEngine: system,
+      );
+      ref.onDispose(hybrid.dispose);
+      return hybrid;
     });

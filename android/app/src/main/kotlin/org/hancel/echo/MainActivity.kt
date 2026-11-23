@@ -13,9 +13,11 @@ import java.util.concurrent.Executors
 class MainActivity : AudioServiceActivity() {
     private val encoderExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var systemTtsBridge: SystemTtsBridge
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        systemTtsBridge = SystemTtsBridge(applicationContext)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "org.hancel.echo/audio_encoder"
@@ -114,10 +116,56 @@ class MainActivity : AudioServiceActivity() {
                 result.notImplemented()
             }
         }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.hancel.echo/system_tts"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "listEngines" -> {
+                    systemTtsBridge.listEngines(
+                        onSuccess = { engines -> result.success(engines) },
+                        onError = { err -> result.error("SYSTEM_TTS_ENGINES_ERROR", err, null) }
+                    )
+                }
+                "listVoices" -> {
+                    val pkg = call.argument<String>("enginePackage") ?: ""
+                    systemTtsBridge.listVoices(
+                        enginePackage = pkg,
+                        onSuccess = { voices -> result.success(voices) },
+                        onError = { err -> result.error("SYSTEM_TTS_VOICES_ERROR", err, null) }
+                    )
+                }
+                "synthesizeToFile" -> {
+                    val pkg = call.argument<String>("enginePackage") ?: ""
+                    val voiceName = call.argument<String>("voiceName") ?: ""
+                    val text = call.argument<String>("text") ?: ""
+                    val speed = call.argument<Double>("speed") ?: 1.0
+                    val outputPath = call.argument<String>("outputPath") ?: ""
+                    if (outputPath.isEmpty()) {
+                        result.error("INVALID_ARGS", "outputPath 不能为空", null)
+                        return@setMethodCallHandler
+                    }
+                    systemTtsBridge.synthesizeToFile(
+                        enginePackage = pkg,
+                        voiceName = voiceName,
+                        text = text,
+                        speed = speed,
+                        outputPath = outputPath,
+                        onSuccess = { path -> result.success(path) },
+                        onError = { err -> result.error("SYSTEM_TTS_SYNTH_ERROR", err, null) }
+                    )
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onDestroy() {
         encoderExecutor.shutdown()
+        if (::systemTtsBridge.isInitialized) {
+            systemTtsBridge.dispose()
+        }
         super.onDestroy()
     }
 }
