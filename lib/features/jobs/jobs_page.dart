@@ -494,7 +494,7 @@ class _JobCard extends ConsumerWidget {
               padding: const EdgeInsets.only(top: EchoMetrics.space2),
               child: Align(
                 alignment: Alignment.centerRight,
-                child: FilledButton.tonalIcon(
+                child: OutlinedButton.icon(
                   key: Key('job_detail_${job.id}'),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(

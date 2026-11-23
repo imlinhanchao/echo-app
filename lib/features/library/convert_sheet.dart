@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../core/api/models.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
@@ -411,16 +412,11 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                   ),
                 ),
 
-              FilledButton(
+              EchoPrimaryButton(
                 key: const Key('convert_submit'),
+                label: '提交转换任务',
+                busy: _submitting,
                 onPressed: _submitting ? null : _submit,
-                child: _submitting
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('提交转换任务'),
               ),
             ],
           ],

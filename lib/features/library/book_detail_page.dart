@@ -7,6 +7,7 @@ import '../../core/export/book_exporter.dart';
 import '../../core/offline/offline_store.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
@@ -350,17 +351,17 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                   children: [
                     if (readyAudio.isNotEmpty)
                       Expanded(
-                        child: _GradientPrimaryButton(
+                        child: EchoPrimaryButton(
                           key: const Key('detail_play'),
                           icon: Icons.play_arrow,
-                          label: '继续收听',
+                          label: readyAudio.first.isReady ? '继续收听' : '抢先收听',
                           onPressed: () =>
                               _play(widget.audiobook ?? readyAudio.first),
                         ),
                       )
                     else if (isEpub)
                       Expanded(
-                        child: _GradientPrimaryButton(
+                        child: EchoPrimaryButton(
                           key: const Key('detail_read'),
                           icon: Icons.menu_book,
                           label: '开始阅读',
@@ -369,16 +370,16 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                       ),
                     if (readyAudio.isNotEmpty && isEpub) ...[
                       const SizedBox(width: EchoMetrics.space1),
-                      IconButton.outlined(
+                      EchoSquareIconButton(
                         key: const Key('detail_read'),
                         tooltip: '阅读原文',
                         onPressed: () => _openReader(),
-                        icon: const Icon(Icons.menu_book_outlined),
+                        icon: Icons.menu_book_outlined,
                       ),
                     ],
                     if (isEpub) ...[
                       const SizedBox(width: EchoMetrics.space1),
-                      FilledButton.tonalIcon(
+                      EchoSecondaryButton(
                         key: const Key('detail_convert'),
                         onPressed: () => showModalBottomSheet<void>(
                           context: context,
@@ -386,8 +387,8 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                           useSafeArea: true,
                           builder: (_) => ConvertSheet(book: book),
                         ),
-                        icon: const Icon(Icons.graphic_eq, size: 18),
-                        label: Text(readyAudio.isEmpty ? '转有声书' : '再转一版'),
+                        icon: Icons.graphic_eq,
+                        label: readyAudio.isEmpty ? '转有声书' : '再转一版',
                       ),
                     ],
                   ],
@@ -616,54 +617,4 @@ class _AudiobookTile extends ConsumerWidget {
   }
 }
 
-/// 靛蓝渐变主按钮（对齐设计图 ui-mobile-book-detail 底部固定 CTA）。
-class _GradientPrimaryButton extends StatelessWidget {
-  const _GradientPrimaryButton({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
 
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<EchoTokens>()!;
-    final radius = BorderRadius.circular(EchoMetrics.radiusCard);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: <Color>[tokens.primary, tokens.primaryHover],
-        ),
-        borderRadius: radius,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: radius,
-          onTap: onPressed,
-          child: SizedBox(
-            height: 48,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: tokens.textOnPrimary, size: 20),
-                const SizedBox(width: EchoMetrics.space1),
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: tokens.textOnPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

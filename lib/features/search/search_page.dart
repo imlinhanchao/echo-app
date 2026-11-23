@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
@@ -758,25 +759,25 @@ class _SearchDetailSheetState extends ConsumerState<_SearchDetailSheet> {
                 ],
                 const SizedBox(height: EchoMetrics.space3),
                 if (isEpub) ...[
-                  FilledButton.icon(
+                  EchoPrimaryButton(
                     key: const Key('search_detail_download_convert'),
                     onPressed: widget.onDownloadAndConvert,
-                    icon: const Icon(Icons.graphic_eq),
-                    label: const Text('下载并转有声书'),
+                    icon: Icons.graphic_eq,
+                    label: '下载并转有声书',
                   ),
                   const SizedBox(height: EchoMetrics.space1),
-                  OutlinedButton.icon(
+                  EchoSecondaryButton(
                     key: const Key('search_detail_download'),
                     onPressed: widget.onDownload,
-                    icon: const Icon(Icons.download),
-                    label: const Text('直接下载（可看）'),
+                    icon: Icons.download,
+                    label: '直接下载（可看）',
                   ),
                 ] else
-                  FilledButton.icon(
+                  EchoPrimaryButton(
                     key: const Key('search_detail_download'),
                     onPressed: widget.onDownload,
-                    icon: const Icon(Icons.download),
-                    label: const Text('下载到书库'),
+                    icon: Icons.download,
+                    label: '下载到书库',
                   ),
               ],
             );

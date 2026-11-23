@@ -134,8 +134,28 @@ ThemeData buildEchoTheme(Brightness brightness, EchoTokens tokens) {
         foregroundColor: tokens.textOnPrimary,
         disabledBackgroundColor: tokens.surfaceSubtle,
         disabledForegroundColor: tokens.textDisabled,
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: tokens.textPrimary,
+        backgroundColor: brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.05)
+            : tokens.surfaceSubtle,
+        side: BorderSide(
+          color: brightness == Brightness.dark
+              ? Colors.white.withValues(alpha: 0.14)
+              : tokens.textDisabled.withValues(alpha: 0.35),
+        ),
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
         ),
       ),
     ),
