@@ -624,7 +624,8 @@ class _BookRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
-    final isEpub = book.format.toLowerCase() == 'epub';
+    final fmt = book.format.toLowerCase();
+    final isReadable = fmt == 'epub' || fmt == 'txt';
 
     return InkWell(
       key: Key('book_card_${book.id}'),
@@ -672,7 +673,7 @@ class _BookRow extends ConsumerWidget {
               ),
               icon: Icon(Icons.menu_book_outlined, color: tokens.textPrimary),
             ),
-            if (isEpub)
+            if (isReadable)
               IconButton(
                 key: Key('book_convert_${book.id}'),
                 tooltip: '转有声书',
@@ -902,7 +903,8 @@ class _BookGridCardState extends ConsumerState<_BookGridCard> {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
     final book = widget.book;
-    final isEpub = book.format.toLowerCase() == 'epub';
+    final fmt = book.format.toLowerCase();
+    final isReadable = fmt == 'epub' || fmt == 'txt';
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -930,7 +932,7 @@ class _BookGridCardState extends ConsumerState<_BookGridCard> {
                       left: EchoMetrics.space1,
                       top: EchoMetrics.space1,
                       child: _AssetBadge(
-                        label: isEpub ? '可看' : book.format.toUpperCase(),
+                        label: isReadable ? '可看' : book.format.toUpperCase(),
                         color: tokens.surfaceElevated,
                         textColor: tokens.textPrimary,
                       ),
@@ -958,7 +960,7 @@ class _BookGridCardState extends ConsumerState<_BookGridCard> {
                               ),
                               icon: const Icon(Icons.menu_book_outlined),
                             ),
-                            if (isEpub) ...[
+                            if (isReadable) ...[
                               const SizedBox(width: EchoMetrics.space1),
                               IconButton(
                                 key: Key('book_convert_${book.id}'),

@@ -37,6 +37,8 @@ class LocalLibraryStore {
   int _nextAudiobookId = 1;
   List<LibraryBook> _books = <LibraryBook>[];
   List<AudiobookInfo> _audiobooks = <AudiobookInfo>[];
+  final Map<int, List<ChapterPreview>> _chaptersCache =
+      <int, List<ChapterPreview>>{};
   bool _loaded = false;
 
   Future<Directory> _ensureRoot() async {
@@ -64,6 +66,7 @@ class LocalLibraryStore {
   }
 
   Future<void> reload() async {
+    _chaptersCache.clear();
     final file = await _indexFile();
     if (!await file.exists()) {
       _books = <LibraryBook>[];
@@ -239,6 +242,7 @@ class LocalLibraryStore {
       status: 'ready',
     );
 
+    _chaptersCache[bookId] = List<ChapterPreview>.unmodifiable(parsed.chapters);
     _books = <LibraryBook>[book, ..._books];
     await _persistIndex();
     return book;
@@ -246,16 +250,19 @@ class LocalLibraryStore {
 
   /// 读取书籍所有章节列表（含预览与字数）。
   Future<List<ChapterPreview>> listChapters(int bookId) async {
+    final cached = _chaptersCache[bookId];
+    if (cached != null) return cached;
     final root = await _ensureRoot();
     final file = File(p.join(root.path, 'books', '$bookId', 'chapters.json'));
     if (!await file.exists()) return const <ChapterPreview>[];
     try {
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is! List) return const <ChapterPreview>[];
-      return decoded
-          .whereType<Map<String, dynamic>>()
-          .map(ChapterPreview.fromJson)
-          .toList();
+      final chapters = List<ChapterPreview>.unmodifiable(
+        decoded.whereType<Map<String, dynamic>>().map(ChapterPreview.fromJson),
+      );
+      _chaptersCache[bookId] = chapters;
+      return chapters;
     } catch (_) {
       return const <ChapterPreview>[];
     }
@@ -340,6 +347,7 @@ class LocalLibraryStore {
     for (final audio in relatedAudios) {
       await deleteAudiobook(audio.id);
     }
+    _chaptersCache.remove(bookId);
     _books = _books.where((b) => b.id != bookId).toList();
     await _persistIndex();
     final root = await _ensureRoot();

@@ -736,7 +736,8 @@ class _SearchDetailSheetState extends ConsumerState<_SearchDetailSheet> {
             final authorText = data.authors.isNotEmpty
                 ? data.authors.join(', ')
                 : '未知作者';
-            final isEpub = data.format.toLowerCase() == 'epub';
+            final fmt = data.format.toLowerCase();
+            final canConvert = fmt == 'epub' || fmt == 'txt';
             return ListView(
               controller: scrollController,
               key: const Key('search_detail_sheet'),
@@ -811,7 +812,7 @@ class _SearchDetailSheetState extends ConsumerState<_SearchDetailSheet> {
                   ),
                 ],
                 const SizedBox(height: EchoMetrics.space3),
-                if (isEpub) ...[
+                if (canConvert) ...[
                   EchoPrimaryButton(
                     key: const Key('search_detail_download_convert'),
                     onPressed: widget.onDownloadAndConvert,

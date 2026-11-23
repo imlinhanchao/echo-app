@@ -503,7 +503,9 @@ class StandaloneEchoApi extends EchoApi {
 
   @override
   Future<TtsModelsResponse> ttsModels() async {
-    await _ttsModelManager.refresh();
+    if (!_ttsModelManager.currentState.initialized) {
+      await _ttsModelManager.refresh();
+    }
     final installed = _ttsModelManager.currentState.installedEntries;
     final activeId = _readConfig().activeTtsModelId;
     final models = installed.map((entry) {

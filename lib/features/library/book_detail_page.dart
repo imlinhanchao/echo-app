@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/audio/live_tts_player_controller.dart';
 import '../../core/export/book_exporter.dart';
 import '../../core/offline/offline_store.dart';
 import '../../design/book_cover.dart';
@@ -15,6 +16,7 @@ import '../library/convert_sheet.dart';
 import '../library/library_controller.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
 import '../reader/reader_page.dart';
+import '../tts/tts_model_manager_page.dart';
 
 /// 书籍 / 有声书详情页（高保真对齐 ui-mobile-book-detail.png）：
 /// 深靛蓝氛围顶区 + 居中大封面 → 大圆角深色内容板（书名/作者/简介/有声书/章节）→ 固定渐变底栏。
@@ -106,6 +108,39 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     );
   }
 
+  Future<void> _liveListen(LibraryBook book) async {
+    final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
+    final liveState = ref.read(liveTtsPlayerProvider);
+    if (liveState.hasBook && liveState.book?.id == book.id) {
+      await liveCtrl.togglePlayPause();
+      return;
+    }
+    final chunkedState = ref.read(chunkedPlayerProvider);
+    if (chunkedState.hasBook && chunkedState.isPlaying) {
+      await ref.read(chunkedPlayerProvider.notifier).togglePlayPause();
+    }
+    await liveCtrl.playBookChapter(book);
+    if (!mounted) return;
+    final err = ref.read(liveTtsPlayerProvider).error;
+    if (err != null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(err),
+          action: SnackBarAction(
+            label: '去下载模型',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const TtsModelManagerPage(),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
@@ -119,7 +154,11 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
         .where((a) => a.bookId == book.id)
         .toList();
     final readyAudio = audiobooks.where((a) => a.isPlayable).toList();
-    final isEpub = book.format.toLowerCase() == 'epub';
+    final fmt = book.format.toLowerCase();
+    final canReadOrConvert = fmt == 'epub' || fmt == 'txt';
+    final liveState = ref.watch(liveTtsPlayerProvider);
+    final isLivePlaying =
+        liveState.hasBook && liveState.book?.id == book.id && liveState.isPlaying;
     final authorText = book.authors.isNotEmpty
         ? book.authors.join(', ')
         : '未知作者';
@@ -136,13 +175,17 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
             onSelected: (value) async {
               if (value == 'export') await _exportEpub();
             },
-            itemBuilder: (_) => const [
+            itemBuilder: (_) => [
               PopupMenuItem(
                 value: 'export',
                 child: ListTile(
                   dense: true,
-                  leading: Icon(Icons.file_download_outlined),
-                  title: Text('导出 EPUB'),
+                  leading: const Icon(Icons.file_download_outlined),
+                  title: Text(
+                    book.format.isNotEmpty
+                        ? '导出 ${book.format.toUpperCase()}'
+                        : '导出书籍',
+                  ),
                 ),
               ),
             ],
@@ -265,6 +308,18 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                 ),
               ),
               const Spacer(),
+              if (canReadOrConvert)
+                TextButton.icon(
+                  key: const Key('detail_live_tts'),
+                  onPressed: () => _liveListen(book),
+                  icon: Icon(
+                    isLivePlaying
+                        ? Icons.pause_circle_outline
+                        : Icons.record_voice_over_outlined,
+                    size: 18,
+                  ),
+                  label: Text(isLivePlaying ? '暂停朗读' : '实时朗读'),
+                ),
               if (_chapters.isNotEmpty)
                 TextButton(
                   key: const Key('detail_all_chapters'),
@@ -282,7 +337,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space2),
               child: Text(
-                '暂无章节信息（仅 EPUB 支持章节解析）',
+                '暂无章节信息（支持 EPUB / TXT 格式）',
                 style: textTheme.bodySmall?.copyWith(
                   color: tokens.textSecondary,
                 ),
@@ -332,7 +387,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
         ),
       ),
       // 底部固定操作栏（对齐设计 §4.1：靛蓝渐变主按钮 + 次级圆角操作）
-      bottomNavigationBar: (readyAudio.isNotEmpty || isEpub)
+      bottomNavigationBar: (readyAudio.isNotEmpty || canReadOrConvert)
           ? SafeArea(
               top: false,
               child: Container(
@@ -349,7 +404,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                 ),
                 child: Row(
                   children: [
-                    if (readyAudio.isNotEmpty && isEpub) ...[
+                    if (readyAudio.isNotEmpty && canReadOrConvert) ...[
                       EchoSquareIconButton(
                         key: const Key('detail_read'),
                         tooltip: '阅读原文',
@@ -358,7 +413,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                       ),
                       const SizedBox(width: EchoMetrics.space1),
                     ],
-                    if (isEpub) ...[
+                    if (canReadOrConvert) ...[
                       EchoSecondaryButton(
                         key: const Key('detail_convert'),
                         onPressed: () => showModalBottomSheet<void>(
@@ -382,7 +437,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                               _play(widget.audiobook ?? readyAudio.first),
                         ),
                       )
-                    else if (isEpub)
+                    else if (canReadOrConvert)
                       Expanded(
                         child: EchoPrimaryButton(
                           key: const Key('detail_read'),

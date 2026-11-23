@@ -776,7 +776,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           ? Center(
               key: const Key('reader_empty'),
               child: Text(
-                '本书暂无可读章节（仅 EPUB 支持阅读）',
+                '本书暂无可读章节（支持 EPUB / TXT 格式）',
                 style: textTheme.bodyLarge?.copyWith(
                   color: palette.secondary,
                 ),

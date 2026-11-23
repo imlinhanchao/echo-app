@@ -1,14 +1,22 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/api/models.dart';
+import '../../core/tts/sherpa_tts_engine.dart';
+import '../../core/tts/tts_model_manager.dart';
+import '../../core/tts/wav_encoder.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../jobs/jobs_controller.dart';
 import '../library/library_controller.dart';
+import '../tts/tts_model_manager_page.dart';
 
 /// 转有声书发起表单（Bottom Sheet）：
 /// TTS 模型 / 音色 / 语速 / 章节范围选择 / 音色试听 / 提交任务。
@@ -61,6 +69,16 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
     try {
       final models = await api.ttsModels();
       if (!mounted) return;
+      if (models.models.isEmpty) {
+        setState(() {
+          _modelsResponse = models;
+          _selectedModel = null;
+          _voices = const <TtsVoiceInfo>[];
+          _selectedVoice = null;
+          _loading = false;
+        });
+        return;
+      }
       final defaultModel = models.models.firstWhere(
         (m) => m.isDefault,
         orElse: () => models.models.first,
@@ -130,11 +148,29 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
 
     _samplePlayer ??= AudioPlayer();
     try {
-      final headers = await api.authHeaders();
-      await _samplePlayer!.setUrl(
-        api.ttsSampleUrl(model, voice).toString(),
-        headers: headers,
-      );
+      final localModel = ref.read(ttsModelManagerProvider).entryOf(model);
+      final paths = localModel?.resolvedPaths;
+      if (paths != null) {
+        final engine = ref.read(onDeviceTtsEngineProvider);
+        await engine.loadModel(paths);
+        final sid = int.tryParse(voice) ?? paths.spec.speakers.first.id;
+        final res = await engine.synthesize(
+          '你好，欢迎使用回声离线语音朗读。',
+          speakerId: sid,
+          speed: _speed,
+        );
+        final wav = encodeFloat32ToWav(res.samples, sampleRate: res.sampleRate);
+        final tmpDir = await getTemporaryDirectory();
+        final outFile = File(p.join(tmpDir.path, 'echo_convert_sample.wav'));
+        await outFile.writeAsBytes(wav, flush: true);
+        await _samplePlayer!.setFilePath(outFile.path);
+      } else {
+        final headers = await api.authHeaders();
+        await _samplePlayer!.setUrl(
+          api.ttsSampleUrl(model, voice).toString(),
+          headers: headers,
+        );
+      }
       await _samplePlayer!.play();
       if (mounted) setState(() => _samplePlaying = true);
     } catch (_) {
@@ -317,6 +353,71 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                 ),
                 const SizedBox(height: EchoMetrics.space2),
               ],
+            ] else if (models.isEmpty) ...[
+              Container(
+                key: const Key('convert_no_local_models'),
+                padding: const EdgeInsets.all(EchoMetrics.space3),
+                decoration: BoxDecoration(
+                  color: tokens.surfaceElevated,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: tokens.primary.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.record_voice_over_outlined,
+                          color: tokens.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '尚未安装离线语音模型',
+                            style: textTheme.titleSmall?.copyWith(
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '单机版所有语音合成都在手机本地完成。请先前往「离线语音模型管理」下载一款模型（Kokoro / Matcha / Piper）后再提交转换。',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: EchoMetrics.space2),
+                    Row(
+                      children: [
+                        FilledButton.icon(
+                          key: const Key('convert_goto_models_button'),
+                          onPressed: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const TtsModelManagerPage(),
+                              ),
+                            );
+                            if (mounted) _load();
+                          },
+                          icon: const Icon(Icons.download_outlined, size: 18),
+                          label: const Text('去下载语音模型'),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: _load,
+                          child: const Text('刷新'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ] else ...[
               DropdownButtonFormField<String>(
                 key: const Key('convert_model_dropdown'),

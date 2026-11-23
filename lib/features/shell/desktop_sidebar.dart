@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/settings/theme_mode_controller.dart';
-import '../../core/sync/progress_sync_service.dart';
 import '../../design/echo_glass.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -25,7 +24,6 @@ class DesktopSidebar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
-    final syncState = ref.watch(progressSyncServiceProvider);
 
     final navItems = <({IconData icon, IconData activeIcon, String label})>[
       (icon: Icons.home_outlined, activeIcon: Icons.home, label: '我的书架'),
@@ -35,7 +33,7 @@ class DesktopSidebar extends ConsumerWidget {
         activeIcon: Icons.grid_view,
         label: '任务中心',
       ),
-      (icon: Icons.person_outline, activeIcon: Icons.person, label: '账号设置'),
+      (icon: Icons.person_outline, activeIcon: Icons.person, label: '模型与设置'),
     ];
 
     return SizedBox(
@@ -173,16 +171,12 @@ class DesktopSidebar extends ConsumerWidget {
                               height: 6,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: syncState.status == SyncStatus.syncing
-                                    ? tokens.accent
-                                    : tokens.success,
+                                color: tokens.success,
                               ),
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              syncState.status == SyncStatus.syncing
-                                  ? '同步中'
-                                  : '已同步',
+                              '本地单机版',
                               style: textTheme.labelSmall?.copyWith(
                                 color: tokens.textSecondary,
                               ),
