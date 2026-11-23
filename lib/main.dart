@@ -14,6 +14,7 @@ import 'core/stats/stats_store.dart';
 import 'core/settings/server_address_store.dart';
 import 'core/settings/standalone_config_store.dart';
 import 'core/settings/theme_mode_controller.dart';
+import 'core/tts/tts_model_manager.dart';
 import 'design/echo_splash_screen.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
@@ -95,15 +96,59 @@ class EchoApp extends StatelessWidget {
   }
 
   Widget _materialApp(bool darkMode) {
-    return MaterialApp(
-      title: '回声',
-      debugShowCheckedModeBanner: false,
-      theme: lightTheme ?? theme,
-      darkTheme: theme,
-      themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
-      home: home ?? const StandaloneGate(),
+    return _AppLifecycleBridge(
+      child: MaterialApp(
+        title: '回声',
+        debugShowCheckedModeBanner: false,
+        theme: lightTheme ?? theme,
+        darkTheme: theme,
+        themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
+        home: home ?? const StandaloneGate(),
+      ),
     );
   }
+}
+
+/// 监听应用前后台切换：回到前台时自动继续此前因锁屏/断网中断的模型下载。
+class _AppLifecycleBridge extends StatefulWidget {
+  const _AppLifecycleBridge({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_AppLifecycleBridge> createState() => _AppLifecycleBridgeState();
+}
+
+class _AppLifecycleBridgeState extends State<_AppLifecycleBridge>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      try {
+        ProviderScope.containerOf(
+          context,
+          listen: false,
+        ).read(ttsModelManagerProvider.notifier).onAppResumed();
+      } catch (_) {
+        // 无 ProviderScope 的独立外观测试忽略
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// 单机版入口网关：首次启动进入两步引导页（配置 ebook-api + 语音模型，均可跳过），

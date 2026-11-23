@@ -146,7 +146,9 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
                     ).showSnackBar(SnackBar(content: Text(err)));
                   }
                 },
-                onCancel: () => manager.cancelDownload(entry.spec.id),
+                onPause: () => manager.pauseDownload(entry.spec.id),
+                onClearPartial: () =>
+                    manager.clearPartialDownload(entry.spec.id),
                 onImportLocal: () => _importLocal(entry.spec),
                 onDelete: () async {
                   await manager.deleteModel(entry.spec.id);
@@ -183,7 +185,8 @@ class _ModelCard extends StatelessWidget {
     required this.activeSpeakerId,
     required this.isAuditioning,
     required this.onDownload,
-    required this.onCancel,
+    required this.onPause,
+    required this.onClearPartial,
     required this.onImportLocal,
     required this.onDelete,
     required this.onSelectActive,
@@ -196,7 +199,8 @@ class _ModelCard extends StatelessWidget {
   final int activeSpeakerId;
   final bool isAuditioning;
   final VoidCallback onDownload;
-  final VoidCallback onCancel;
+  final VoidCallback onPause;
+  final VoidCallback onClearPartial;
   final VoidCallback onImportLocal;
   final VoidCallback onDelete;
   final VoidCallback onSelectActive;
@@ -260,10 +264,10 @@ class _ModelCard extends StatelessWidget {
             style: textTheme.labelSmall?.copyWith(color: tokens.textDisabled),
           ),
 
-          if (entry.isBusy) ...[
+          if (entry.isBusy || entry.isPaused) ...[
             const SizedBox(height: 12),
             LinearProgressIndicator(
-              value: entry.progress > 0 ? entry.progress : null,
+              value: entry.progress > 0 ? entry.progress : (entry.isPaused ? 0 : null),
             ),
             const SizedBox(height: 6),
             Row(
@@ -276,7 +280,8 @@ class _ModelCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                TextButton(onPressed: onCancel, child: const Text('取消')),
+                if (entry.status == ModelInstallStatus.downloading)
+                  TextButton(onPressed: onPause, child: const Text('暂停')),
               ],
             ),
           ],
@@ -335,14 +340,26 @@ class _ModelCard extends StatelessWidget {
             ),
           ] else if (!entry.isBusy) ...[
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 FilledButton.icon(
                   onPressed: onDownload,
-                  icon: const Icon(Icons.download_outlined, size: 18),
-                  label: const Text('一键下载'),
+                  icon: Icon(
+                    entry.isPaused
+                        ? Icons.play_arrow_rounded
+                        : Icons.download_outlined,
+                    size: 18,
+                  ),
+                  label: Text(entry.isPaused ? '继续下载' : '一键下载'),
                 ),
-                const SizedBox(width: 8),
+                if (entry.isPaused)
+                  OutlinedButton.icon(
+                    onPressed: onClearPartial,
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                    label: const Text('清除断点'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: onImportLocal,
                   icon: const Icon(Icons.folder_open_outlined, size: 18),

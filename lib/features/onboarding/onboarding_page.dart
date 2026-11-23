@@ -304,9 +304,11 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (entry.isBusy) ...[
+                  if (entry.isBusy || entry.isPaused) ...[
                     LinearProgressIndicator(
-                      value: entry.progress > 0 ? entry.progress : null,
+                      value: entry.progress > 0
+                          ? entry.progress
+                          : (entry.isPaused ? 0 : null),
                     ),
                     const SizedBox(height: 4),
                     Row(
@@ -319,11 +321,24 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                             ),
                           ),
                         ),
-                        TextButton(
-                          onPressed: () =>
-                              manager.cancelDownload(entry.spec.id),
-                          child: const Text('取消'),
-                        ),
+                        if (entry.status == ModelInstallStatus.downloading)
+                          TextButton(
+                            onPressed: () =>
+                                manager.pauseDownload(entry.spec.id),
+                            child: const Text('暂停'),
+                          )
+                        else if (entry.isPaused) ...[
+                          TextButton(
+                            onPressed: () =>
+                                manager.clearPartialDownload(entry.spec.id),
+                            child: const Text('清除'),
+                          ),
+                          FilledButton.tonal(
+                            onPressed: () =>
+                                manager.downloadModel(entry.spec.id),
+                            child: const Text('继续下载'),
+                          ),
+                        ],
                       ],
                     ),
                   ] else if (entry.isInstalled)

@@ -2,14 +2,17 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../offline/offline_store.dart' show formatBytes;
 import '../settings/standalone_config_store.dart';
+import 'download_keepalive_service.dart';
+import 'resumable_downloader.dart';
 import 'tts_model_catalog.dart';
 
 /// 已安装且通过完整性校验的端侧模型本地路径集合。
@@ -38,7 +41,13 @@ class ResolvedTtsModelPaths {
   final String dictDir;
 }
 
-enum ModelInstallStatus { notInstalled, downloading, extracting, installed }
+enum ModelInstallStatus {
+  notInstalled,
+  downloading,
+  paused,
+  extracting,
+  installed,
+}
 
 @immutable
 class TtsModelStatusEntry {
@@ -47,6 +56,8 @@ class TtsModelStatusEntry {
     this.status = ModelInstallStatus.notInstalled,
     this.progress = 0.0,
     this.statusText = '',
+    this.downloadedBytes = 0,
+    this.totalBytes = 0,
     this.installedBytes = 0,
     this.resolvedPaths,
     this.error,
@@ -56,6 +67,8 @@ class TtsModelStatusEntry {
   final ModelInstallStatus status;
   final double progress;
   final String statusText;
+  final int downloadedBytes;
+  final int totalBytes;
   final int installedBytes;
   final ResolvedTtsModelPaths? resolvedPaths;
   final String? error;
@@ -65,11 +78,14 @@ class TtsModelStatusEntry {
   bool get isBusy =>
       status == ModelInstallStatus.downloading ||
       status == ModelInstallStatus.extracting;
+  bool get isPaused => status == ModelInstallStatus.paused;
 
   TtsModelStatusEntry copyWith({
     ModelInstallStatus? status,
     double? progress,
     String? statusText,
+    int? downloadedBytes,
+    int? totalBytes,
     int? installedBytes,
     ResolvedTtsModelPaths? resolvedPaths,
     bool clearPaths = false,
@@ -81,6 +97,8 @@ class TtsModelStatusEntry {
       status: status ?? this.status,
       progress: progress ?? this.progress,
       statusText: statusText ?? this.statusText,
+      downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+      totalBytes: totalBytes ?? this.totalBytes,
       installedBytes: installedBytes ?? this.installedBytes,
       resolvedPaths: clearPaths ? null : (resolvedPaths ?? this.resolvedPaths),
       error: clearError ? null : (error ?? this.error),
@@ -108,12 +126,18 @@ class TtsModelsState {
   TtsModelStatusEntry? entryOf(String id) => entries[id];
 }
 
-/// 端侧 TTS 模型管理器：多镜像下载、Isolate 解压、完整性校验、本地导入与删除。
+/// 端侧 TTS 模型管理器：
+/// - Android 前台服务保活（防止锁屏/切后台断流）
+/// - HTTP Range 断点续传与多镜像自动切换
+/// - 切回前台自动恢复因网络中断的下载
+/// - Isolate 解压、完整性校验、本地导入与删除
 class TtsModelManager extends StateNotifier<TtsModelsState> {
   TtsModelManager(
     this._configController, {
     Dio? dio,
     Directory? rootDirOverride,
+    DownloadKeepAliveService? keepAliveService,
+    ResumableFileDownloader? downloader,
   }) : _dio =
            dio ??
            Dio(
@@ -123,6 +147,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
              ),
            ),
        _rootDirOverride = rootDirOverride,
+       _keepAlive = keepAliveService ?? const PlatformDownloadKeepAliveService(),
+       _downloader = downloader ?? const ResumableFileDownloader(),
        super(const TtsModelsState()) {
     refresh();
   }
@@ -130,7 +156,11 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   final StandaloneConfigController _configController;
   final Dio _dio;
   final Directory? _rootDirOverride;
+  final DownloadKeepAliveService _keepAlive;
+  final ResumableFileDownloader _downloader;
   final Map<String, CancelToken> _cancelTokens = <String, CancelToken>{};
+  final Set<String> _autoResumeModelIds = <String>{};
+  final Set<String> _userPausedModelIds = <String>{};
 
   TtsModelsState get currentState => state;
 
@@ -180,7 +210,23 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
           resolvedPaths: resolved,
         );
       } else {
-        map[spec.id] = TtsModelStatusEntry(spec: spec);
+        final tmpDir = Directory(p.join(root.path, '.tmp_${spec.id}'));
+        final partial = _scanPartialSummary(spec, tmpDir);
+        if (partial.downloadedBytes > 0) {
+          map[spec.id] = TtsModelStatusEntry(
+            spec: spec,
+            status: ModelInstallStatus.paused,
+            progress: partial.progress,
+            downloadedBytes: partial.downloadedBytes,
+            totalBytes: partial.totalBytes,
+            statusText: _pausedStatusText(
+              partial.downloadedBytes,
+              partial.totalBytes,
+            ),
+          );
+        } else {
+          map[spec.id] = TtsModelStatusEntry(spec: spec);
+        }
       }
     }
     if (!mounted) return;
@@ -218,11 +264,14 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     );
   }
 
-  /// 下载并解压安装指定模型（自动按国内镜像/官方源顺次降级）。
+  /// 下载或从断点续传安装指定模型（支持前台服务保活与国内镜像/官方源降级）。
   Future<String?> downloadModel(String modelId, {bool? preferCnMirror}) async {
     final spec = TtsModelCatalog.byId(modelId);
     if (spec == null) return '未知模型：$modelId';
     if (state.entries[modelId]?.isBusy == true) return null;
+
+    _userPausedModelIds.remove(modelId);
+    _autoResumeModelIds.remove(modelId);
 
     final useCn = preferCnMirror ?? _configController.state.preferCnMirror;
     final cancelToken = CancelToken();
@@ -232,64 +281,83 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     final modelDir = Directory(p.join(root.path, spec.id));
     final tmpDir = Directory(p.join(root.path, '.tmp_${spec.id}'));
 
-    try {
-      if (await tmpDir.exists()) await tmpDir.delete(recursive: true);
-      await tmpDir.create(recursive: true);
-      await modelDir.create(recursive: true);
+    await tmpDir.create(recursive: true);
+    await modelDir.create(recursive: true);
 
+    final initialPartial = _scanPartialSummary(spec, tmpDir);
+    _updateEntry(
+      modelId,
+      (e) => e.copyWith(
+        status: ModelInstallStatus.downloading,
+        progress: initialPartial.progress,
+        downloadedBytes: initialPartial.downloadedBytes,
+        totalBytes: initialPartial.totalBytes,
+        statusText: initialPartial.downloadedBytes > 0
+            ? '正在从断点续传（已下载 ${formatBytes(initialPartial.downloadedBytes)}）...'
+            : '正在连接下载源...',
+        clearError: true,
+      ),
+    );
+
+    unawaited(
+      _keepAlive.startOrUpdate(
+        title: '正在下载 ${spec.name}',
+        text: initialPartial.downloadedBytes > 0
+            ? '正在从断点续传...'
+            : '准备下载...',
+        progress: (initialPartial.progress * 100).round(),
+        max: 100,
+      ),
+    );
+
+    var lastNotifAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+    try {
       final totalAssets = spec.assets.length;
       for (var idx = 0; idx < totalAssets; idx++) {
         final asset = spec.assets[idx];
         final urls = asset.orderedUrls(preferCnMirror: useCn);
         final destFile = File(p.join(tmpDir.path, asset.filename));
 
-        _updateEntry(
-          modelId,
-          (e) => e.copyWith(
-            status: ModelInstallStatus.downloading,
-            progress: idx / totalAssets,
-            statusText: '正在下载 ${asset.filename} (${idx + 1}/$totalAssets)...',
-            clearError: true,
-          ),
-        );
+        await _downloader.download(
+          dio: _dio,
+          urls: urls,
+          destFile: destFile,
+          cancelToken: cancelToken,
+          onProgress: (received, total, mirrorIdx, mirrorCount) {
+            final assetFrac = total > 0 ? (received / total) : 0.0;
+            final overall = ((idx + assetFrac) / totalAssets) * 0.88;
+            final pct = (overall * 100).round().clamp(0, 88);
+            final text = total > 0
+                ? '下载中 ${(assetFrac * 100).toStringAsFixed(0)}% · ${formatBytes(received)} / ${formatBytes(total)}（源 ${mirrorIdx + 1}/$mirrorCount）'
+                : '下载中 ${formatBytes(received)}（源 ${mirrorIdx + 1}/$mirrorCount）';
 
-        Object? lastError;
-        var downloaded = false;
-        for (var u = 0; u < urls.length; u++) {
-          final url = urls[u];
-          try {
-            if (await destFile.exists()) await destFile.delete();
-            await _dio.download(
-              url,
-              destFile.path,
-              cancelToken: cancelToken,
-              onReceiveProgress: (received, total) {
-                final assetFrac = total > 0 ? (received / total) : 0.0;
-                final overall = ((idx + assetFrac) / totalAssets) * 0.88;
-                _updateEntry(
-                  modelId,
-                  (e) => e.copyWith(
-                    status: ModelInstallStatus.downloading,
-                    progress: overall.clamp(0.0, 0.88),
-                    statusText: total > 0
-                        ? '下载中 ${(assetFrac * 100).toStringAsFixed(0)}%（镜像 ${u + 1}/${urls.length}）'
-                        : '下载中 ${(received / (1024 * 1024)).toStringAsFixed(1)} MB...',
-                  ),
-                );
-              },
+            _updateEntry(
+              modelId,
+              (e) => e.copyWith(
+                status: ModelInstallStatus.downloading,
+                progress: overall.clamp(0.0, 0.88),
+                downloadedBytes: received,
+                totalBytes: total,
+                statusText: text,
+                clearError: true,
+              ),
             );
-            downloaded = true;
-            break;
-          } on DioException catch (e) {
-            if (e.type == DioExceptionType.cancel) rethrow;
-            lastError = e.message ?? '网络错误';
-          } catch (e) {
-            lastError = e;
-          }
-        }
-        if (!downloaded) {
-          throw Exception('所有镜像下载失败（${asset.filename}）：$lastError');
-        }
+
+            final now = DateTime.now();
+            if (now.difference(lastNotifAt).inMilliseconds >= 500) {
+              lastNotifAt = now;
+              unawaited(
+                _keepAlive.startOrUpdate(
+                  title: '正在下载 ${spec.name}',
+                  text: text,
+                  progress: pct,
+                  max: 100,
+                ),
+              );
+            }
+          },
+        );
 
         if (asset.isArchive) {
           _updateEntry(
@@ -300,20 +368,28 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
               statusText: '正在解压模型文件，请稍候...',
             ),
           );
-          await Isolate.run(
-            () => _extractArchiveSync(destFile.path, modelDir.path),
+          unawaited(
+            _keepAlive.startOrUpdate(
+              title: '正在安装 ${spec.name}',
+              text: '正在解压模型文件...',
+              progress: 90,
+              max: 100,
+            ),
           );
+          await _extractArchiveInIsolate(destFile.path, modelDir.path);
         } else {
           final target = File(p.join(modelDir.path, asset.filename));
           await destFile.copy(target.path);
         }
       }
 
-      if (await tmpDir.exists()) await tmpDir.delete(recursive: true);
-
       final resolved = await _resolveInstalledModel(spec, modelDir);
       if (resolved == null) {
         throw Exception('模型文件不完整，校验未通过');
+      }
+
+      if (await tmpDir.exists()) {
+        await tmpDir.delete(recursive: true);
       }
 
       final bytes = _dirSizeSync(modelDir);
@@ -323,6 +399,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
           status: ModelInstallStatus.installed,
           progress: 1.0,
           statusText: '已安装',
+          downloadedBytes: bytes,
+          totalBytes: bytes,
           installedBytes: bytes,
           resolvedPaths: resolved,
           clearError: true,
@@ -337,39 +415,130 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       }
       return null;
     } on DioException catch (e) {
-      if (await tmpDir.exists()) await tmpDir.delete(recursive: true);
-      final msg = e.type == DioExceptionType.cancel ? '已取消下载' : '下载失败：${e.message}';
+      final isCancelled =
+          e.type == DioExceptionType.cancel || cancelToken.isCancelled;
+      final partial = _scanPartialSummary(spec, tmpDir);
+      if (isCancelled) {
+        final hasPart = partial.downloadedBytes > 0;
+        _updateEntry(
+          modelId,
+          (cur) => cur.copyWith(
+            status: hasPart
+                ? ModelInstallStatus.paused
+                : ModelInstallStatus.notInstalled,
+            progress: partial.progress,
+            downloadedBytes: partial.downloadedBytes,
+            totalBytes: partial.totalBytes,
+            statusText: hasPart
+                ? _pausedStatusText(partial.downloadedBytes, partial.totalBytes)
+                : '',
+            clearError: true,
+          ),
+        );
+        return hasPart ? '已暂停下载（已保留断点）' : '已取消下载';
+      }
+
+      // 网络异常中断：保留断点并标记回到前台自动续传
+      _autoResumeModelIds.add(modelId);
+      final hasPart = partial.downloadedBytes > 0;
+      final errMsg = hasPart
+          ? '下载中断（已保留断点），切回前台或点击继续下载即可续传'
+          : '下载失败：${e.message}';
       _updateEntry(
         modelId,
-        (e) => e.copyWith(
-          status: ModelInstallStatus.notInstalled,
-          progress: 0,
-          statusText: '',
-          error: msg,
+        (cur) => cur.copyWith(
+          status: hasPart
+              ? ModelInstallStatus.paused
+              : ModelInstallStatus.notInstalled,
+          progress: partial.progress,
+          downloadedBytes: partial.downloadedBytes,
+          totalBytes: partial.totalBytes,
+          statusText: hasPart
+              ? _pausedStatusText(partial.downloadedBytes, partial.totalBytes)
+              : '',
+          error: errMsg,
         ),
       );
-      return msg;
+      return errMsg;
     } catch (e) {
-      if (await tmpDir.exists()) await tmpDir.delete(recursive: true);
-      final msg = e.toString().replaceFirst('Exception: ', '');
+      final partial = _scanPartialSummary(spec, tmpDir);
+      final hasPart = partial.downloadedBytes > 0;
+      if (hasPart && !_userPausedModelIds.contains(modelId)) {
+        _autoResumeModelIds.add(modelId);
+      }
+      final rawMsg = e.toString().replaceFirst('Exception: ', '');
+      final msg = hasPart
+          ? '下载中断（已保留断点），切回前台或点击继续下载即可续传'
+          : rawMsg;
       _updateEntry(
         modelId,
-        (e) => e.copyWith(
-          status: ModelInstallStatus.notInstalled,
-          progress: 0,
-          statusText: '',
+        (cur) => cur.copyWith(
+          status: hasPart
+              ? ModelInstallStatus.paused
+              : ModelInstallStatus.notInstalled,
+          progress: partial.progress,
+          downloadedBytes: partial.downloadedBytes,
+          totalBytes: partial.totalBytes,
+          statusText: hasPart
+              ? _pausedStatusText(partial.downloadedBytes, partial.totalBytes)
+              : '',
           error: msg,
         ),
       );
       return msg;
     } finally {
       _cancelTokens.remove(modelId);
+      final stillBusy = state.entries.values.any((e) => e.isBusy);
+      if (!stillBusy) {
+        unawaited(_keepAlive.stop());
+      }
     }
   }
 
-  /// 取消正在进行的模型下载。
-  void cancelDownload(String modelId) {
-    _cancelTokens[modelId]?.cancel('user_cancelled');
+  /// 暂停当前下载并保留磁盘上的 `.part` 断点文件。
+  void pauseDownload(String modelId) {
+    _userPausedModelIds.add(modelId);
+    _autoResumeModelIds.remove(modelId);
+    _cancelTokens[modelId]?.cancel('user_paused');
+  }
+
+  /// 兼容旧调用名称，默认执行保断点暂停。
+  void cancelDownload(String modelId) => pauseDownload(modelId);
+
+  /// 清除某模型的未完成断点文件并恢复初始未安装状态。
+  Future<void> clearPartialDownload(String modelId) async {
+    _userPausedModelIds.remove(modelId);
+    _autoResumeModelIds.remove(modelId);
+    _cancelTokens[modelId]?.cancel('user_cleared');
+
+    final root = await _modelsRoot();
+    final tmpDir = Directory(p.join(root.path, '.tmp_$modelId'));
+    if (await tmpDir.exists()) {
+      await tmpDir.delete(recursive: true);
+    }
+    _updateEntry(
+      modelId,
+      (e) => e.copyWith(
+        status: ModelInstallStatus.notInstalled,
+        progress: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        statusText: '',
+        clearError: true,
+      ),
+    );
+  }
+
+  /// 应用回到前台时，自动继续先前因锁屏/断网中断的模型下载任务。
+  Future<void> onAppResumed() async {
+    if (_autoResumeModelIds.isEmpty) return;
+    final ids = List<String>.of(_autoResumeModelIds);
+    for (final id in ids) {
+      if (_userPausedModelIds.contains(id)) continue;
+      final entry = state.entries[id];
+      if (entry == null || entry.isInstalled || entry.isBusy) continue;
+      unawaited(downloadModel(id));
+    }
   }
 
   /// 从手机本地压缩包（`.tar.bz2` / `.tar.gz` / `.zip`）或单文件（如 `.onnx` vocoder）导入模型。
@@ -397,9 +566,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
           p.join(modelDir.path, p.basename(archiveFile.path)),
         );
       } else {
-        await Isolate.run(
-          () => _extractArchiveSync(archiveFile.path, modelDir.path),
-        );
+        await _extractArchiveInIsolate(archiveFile.path, modelDir.path);
       }
 
       final resolved = await _resolveInstalledModel(spec, modelDir);
@@ -452,19 +619,27 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     }
   }
 
-  /// 删除已安装的本地模型释放空间。
+  /// 删除已安装的本地模型释放空间（同时清理未完成的临时断点目录）。
   Future<void> deleteModel(String modelId) async {
-    cancelDownload(modelId);
+    pauseDownload(modelId);
+    _userPausedModelIds.remove(modelId);
+    _autoResumeModelIds.remove(modelId);
     final root = await _modelsRoot();
     final modelDir = Directory(p.join(root.path, modelId));
     if (await modelDir.exists()) {
       await modelDir.delete(recursive: true);
+    }
+    final tmpDir = Directory(p.join(root.path, '.tmp_$modelId'));
+    if (await tmpDir.exists()) {
+      await tmpDir.delete(recursive: true);
     }
     _updateEntry(
       modelId,
       (e) => e.copyWith(
         status: ModelInstallStatus.notInstalled,
         progress: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
         statusText: '',
         installedBytes: 0,
         clearPaths: true,
@@ -486,6 +661,45 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     final active = state.entries[activeId];
     if (active != null && active.isInstalled) return active.resolvedPaths;
     return state.installedEntries.firstOrNull?.resolvedPaths;
+  }
+
+  ({int downloadedBytes, int totalBytes, double progress}) _scanPartialSummary(
+    TtsModelSpec spec,
+    Directory tmpDir,
+  ) {
+    if (!tmpDir.existsSync()) {
+      return (downloadedBytes: 0, totalBytes: 0, progress: 0.0);
+    }
+    var sumDownloaded = 0;
+    var sumTotal = 0;
+    var fractionSum = 0.0;
+    for (final asset in spec.assets) {
+      final st = ResumableFileDownloader.readPartialState(
+        File(p.join(tmpDir.path, asset.filename)),
+      );
+      sumDownloaded += st.downloadedBytes;
+      sumTotal += st.totalBytes;
+      if (st.isComplete) {
+        fractionSum += 1.0;
+      } else if (st.totalBytes > 0) {
+        fractionSum += (st.downloadedBytes / st.totalBytes).clamp(0.0, 1.0);
+      }
+    }
+    final progress = spec.assets.isEmpty
+        ? 0.0
+        : ((fractionSum / spec.assets.length) * 0.88).clamp(0.0, 0.88);
+    return (
+      downloadedBytes: sumDownloaded,
+      totalBytes: sumTotal,
+      progress: progress,
+    );
+  }
+
+  String _pausedStatusText(int downloadedBytes, int totalBytes) {
+    if (totalBytes > 0) {
+      return '已暂停 · 已下载 ${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}';
+    }
+    return '已暂停 · 已下载 ${formatBytes(downloadedBytes)}';
   }
 
   Future<ResolvedTtsModelPaths?> _resolveInstalledModel(
@@ -570,34 +784,78 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   }
 }
 
-/// 在后台 Isolate 中执行 `.tar.bz2` / `.tar.gz` / `.zip` 解压。
-void _extractArchiveSync(String archivePath, String destDirPath) {
-  final bytes = File(archivePath).readAsBytesSync();
-  final lower = archivePath.toLowerCase();
-  final Archive archive;
-  if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) {
-    final tarBytes = BZip2Decoder().decodeBytes(bytes);
-    archive = TarDecoder().decodeBytes(tarBytes);
-  } else if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
-    final tarBytes = GZipDecoder().decodeBytes(bytes);
-    archive = TarDecoder().decodeBytes(tarBytes);
-  } else if (lower.endsWith('.zip')) {
-    archive = ZipDecoder().decodeBytes(bytes);
-  } else {
-    throw FormatException('不支持的压缩格式：${p.basename(archivePath)}');
-  }
+/// 顶层隔离函数：仅传纯字符串路径，避免闭包捕获 [TtsModelManager] 实例（含 `CancelToken`/`Completer`）。
+Future<void> _extractArchiveInIsolate(String archivePath, String destDirPath) {
+  return Isolate.run(() => _extractArchiveSync(archivePath, destDirPath));
+}
 
-  for (final file in archive.files) {
-    final outPath = p.normalize(p.join(destDirPath, file.name));
-    if (!p.isWithin(destDirPath, outPath) && outPath != destDirPath) {
-      continue; // 防目录穿越
-    }
-    if (file.isFile) {
-      final outFile = File(outPath);
-      outFile.parent.createSync(recursive: true);
-      outFile.writeAsBytesSync(file.content as List<int>);
+/// 在后台 Isolate 中流式执行 `.tar.bz2` / `.tar.gz` / `.zip` 解压，控制手机内存峰值。
+void _extractArchiveSync(String archivePath, String destDirPath) {
+  final lower = archivePath.toLowerCase();
+  String? tempTarPath;
+  InputFileStream? archiveInput;
+
+  try {
+    final Archive archive;
+    if (lower.endsWith('.tar.bz2') ||
+        lower.endsWith('.tbz2') ||
+        lower.endsWith('.tar.gz') ||
+        lower.endsWith('.tgz')) {
+      tempTarPath = '$archivePath.extracted.tar';
+      final compressedIn = InputFileStream(archivePath);
+      final tarOut = OutputFileStream(tempTarPath);
+      try {
+        if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) {
+          BZip2Decoder().decodeBuffer(compressedIn, output: tarOut);
+        } else {
+          GZipDecoder().decodeStream(compressedIn, tarOut);
+        }
+      } finally {
+        compressedIn.closeSync();
+        tarOut.closeSync();
+      }
+      archiveInput = InputFileStream(tempTarPath);
+      archive = TarDecoder().decodeBuffer(archiveInput);
+    } else if (lower.endsWith('.tar')) {
+      archiveInput = InputFileStream(archivePath);
+      archive = TarDecoder().decodeBuffer(archiveInput);
+    } else if (lower.endsWith('.zip')) {
+      archiveInput = InputFileStream(archivePath);
+      archive = ZipDecoder().decodeBuffer(archiveInput);
     } else {
-      Directory(outPath).createSync(recursive: true);
+      throw FormatException('不支持的压缩格式：${p.basename(archivePath)}');
+    }
+
+    final canonicalRoot = p.canonicalize(destDirPath);
+    for (final file in archive.files) {
+      final outPath = p.normalize(p.join(destDirPath, file.name));
+      final canonicalOut = p.canonicalize(outPath);
+      if (!p.isWithin(canonicalRoot, canonicalOut) &&
+          canonicalOut != canonicalRoot) {
+        continue; // 防目录穿越
+      }
+      if (file.isFile) {
+        final outFile = File(outPath);
+        outFile.parent.createSync(recursive: true);
+        final outStream = OutputFileStream(outPath);
+        try {
+          file.writeContent(outStream);
+        } finally {
+          outStream.closeSync();
+        }
+      } else if (!file.isSymbolicLink) {
+        Directory(outPath).createSync(recursive: true);
+      }
+    }
+  } finally {
+    archiveInput?.closeSync();
+    if (tempTarPath != null) {
+      final f = File(tempTarPath);
+      if (f.existsSync()) {
+        try {
+          f.deleteSync();
+        } catch (_) {}
+      }
     }
   }
 }

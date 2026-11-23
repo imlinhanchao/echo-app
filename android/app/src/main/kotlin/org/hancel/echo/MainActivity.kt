@@ -1,5 +1,7 @@
 package org.hancel.echo
 
+import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -47,6 +49,45 @@ class MainActivity : AudioServiceActivity() {
                 }
             } else {
                 result.notImplemented()
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.hancel.echo/download_keepalive"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startOrUpdate" -> {
+                    val title = call.argument<String>("title") ?: "正在下载离线语音模型"
+                    val text = call.argument<String>("text") ?: "下载中..."
+                    val progress = call.argument<Int>("progress") ?: 0
+                    val max = call.argument<Int>("max") ?: 100
+                    try {
+                        val intent = Intent(this, ModelDownloadForegroundService::class.java).apply {
+                            action = ModelDownloadForegroundService.ACTION_START_OR_UPDATE
+                            putExtra(ModelDownloadForegroundService.EXTRA_TITLE, title)
+                            putExtra(ModelDownloadForegroundService.EXTRA_TEXT, text)
+                            putExtra(ModelDownloadForegroundService.EXTRA_PROGRESS, progress)
+                            putExtra(ModelDownloadForegroundService.EXTRA_MAX, max)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                    } catch (_: Exception) {
+                        // 某些国产 ROM 若限制后台拉起前台服务，降级为无保活下载，避免崩溃
+                    }
+                    result.success(null)
+                }
+                "stop" -> {
+                    try {
+                        stopService(Intent(this, ModelDownloadForegroundService::class.java))
+                    } catch (_: Exception) {
+                    }
+                    result.success(null)
+                }
+                else -> result.notImplemented()
             }
         }
     }
