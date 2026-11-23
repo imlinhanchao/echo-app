@@ -9,6 +9,9 @@ import 'package:echo/core/api/echo_api.dart';
 import 'package:echo/core/api/models.dart';
 import 'package:echo/core/auth/token_store.dart';
 import 'package:echo/core/reader/reading_store.dart';
+import 'package:echo/core/reader/screen_keep_alive.dart';
+import 'package:echo/core/settings/standalone_config_store.dart';
+import 'package:echo/core/tts/sentence_splitter.dart';
 import 'package:echo/design/echo_theme.dart';
 import 'package:echo/design/echo_tokens.dart';
 import 'package:echo/features/auth/auth_controller.dart';
@@ -59,6 +62,15 @@ class _ReaderStubAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+class _FakeScreenKeepAliveService implements ScreenKeepAliveService {
+  final List<bool> events = <bool>[];
+
+  @override
+  Future<void> setEnabled(bool enabled) async {
+    events.add(enabled);
+  }
 }
 
 void main() {
@@ -121,6 +133,27 @@ void main() {
       expect(pages.last.endChar, greaterThan(0));
       final idx = pageIndexForOffset(pages, 3, pages[1].startChar + 1);
       expect(idx, 1);
+    });
+
+    test('前导空白与分句器共享同一原始字符坐标系，翻页断点不偏移', () {
+      const rawText = '\n  第一句开头先留空。第二句接着往后。\n\n第三句来到第二页进行测试。第四句继续。';
+      final sentences = const SentenceSplitter().split(rawText);
+      final pages = paginateChapterBySize(
+        chapterIndex: 0,
+        chapterTitle: '第一章',
+        text: rawText,
+        style: style,
+        textScaler: TextScaler.noScaling,
+        maxWidth: 260,
+        maxHeight: 80,
+      );
+      expect(pages.first.startChar, sentences.first.startOffset);
+      // 验证第二页起始偏移落在原始坐标，不会因为前导 trim 而拉回到前一句末尾
+      expect(pages.length, greaterThanOrEqualTo(2));
+      expect(
+        rawText.substring(pages[1].startChar, pages[1].startChar + 1).trim(),
+        isNotEmpty,
+      );
     });
   });
 
@@ -239,8 +272,62 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('reader_page_text_2')), findsOneWidget);
-    expect(find.byKey(const Key('reader_page_text_0')), findsNothing);
+    expect(find.byKey(const Key('reader_page_text_0')), findsOneWidget);
+    expect(find.textContaining('第2章第1段'), findsOneWidget);
+    expect(find.textContaining('第1章第1段'), findsNothing);
+    expect(find.byKey(const Key('reader_page_text_2')), findsNothing);
+  });
+
+  testWidgets('防锁屏：进入阅读默认启用常亮，排版面板可开关且退出必释放', (
+    WidgetTester tester,
+  ) async {
+    final tokenStore = MemoryTokenStore();
+    await tokenStore.write('echo_pat_reader');
+    final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+      ..httpClientAdapter = _ReaderStubAdapter();
+    final api = EchoApi(dio: dio, tokenStore: tokenStore);
+    final readingStore = MemoryReadingStore();
+    final keepAlive = _FakeScreenKeepAliveService();
+    final configStorage = MemoryStandaloneConfigStorage(
+      const StandaloneConfig(onboardingCompleted: true),
+    );
+    StandaloneConfigStore.setForTest(
+      const StandaloneConfig(onboardingCompleted: true),
+      storage: configStorage,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          echoApiProvider.overrideWithValue(api),
+          readingStoreProvider.overrideWithValue(readingStore),
+          screenKeepAliveServiceProvider.overrideWithValue(keepAlive),
+        ],
+        child: MaterialApp(
+          theme: buildEchoTheme(Brightness.dark, darkTokens),
+          home: const ReaderPageView(book: book),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(keepAlive.events.first, isTrue);
+
+    // 打开排版设置并关闭防锁屏
+    await tester.tap(find.byKey(const Key('reader_font_button')));
+    await tester.pumpAndSettle();
+    final switchFinder = find.byKey(const Key('reader_keep_screen_on_switch'));
+    expect(switchFinder, findsOneWidget);
+    await tester.tap(switchFinder);
+    await tester.pumpAndSettle();
+
+    expect(keepAlive.events.last, isFalse);
+    final persisted = await configStorage.read();
+    expect(persisted.keepScreenOnWhileReading, isFalse);
+
+    // 离开阅读页时保证再次调用释放
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(keepAlive.events.last, isFalse);
   });
 
   group('边听边看：当前句定位与 initialChapterIndex', () {

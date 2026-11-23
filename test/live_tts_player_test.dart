@@ -96,6 +96,51 @@ void main() {
       expect(await controller.tempCacheBytes(), 0);
     });
 
+    test('starts from first sentence of visible page rather than previous page tail when boundary aligns', () async {
+      const sampleTxt =
+          '第一章 启程\n\n  第一页前句内容在这里结束。\n\n第二页第一句话从这里开始朗读。第二页第二句紧随其后。';
+      final book = await libraryStore.importBytes(
+        Uint8List.fromList(utf8.encode(sampleTxt)),
+        filename: 'align.txt',
+      );
+      final chapters = await libraryStore.listChapters(book.id);
+      final rawText = chapters.first.text;
+      final p2Offset = rawText.indexOf('第二页第一句话');
+      expect(p2Offset, greaterThan(0));
+
+      final controller = LiveTtsPlayerController(
+        libraryStore: libraryStore,
+        ttsEngine: ttsEngine,
+        audioEngine: audioEngine,
+        resolveActiveModel: () => fakeModelPaths,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'kokoro-int8-multi-lang-v1_1',
+          activeTtsSpeakerId: 45,
+          defaultTtsSpeed: 1.0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      addTearDown(controller.dispose);
+
+      // 传上一句紧邻的 endOffset（模拟上一页恰好在句号换行处翻页）
+      final prevEndOffset = rawText.indexOf('。', rawText.indexOf('第一页前句')) + 1;
+      await controller.playBookChapter(
+        book,
+        chapterIndex: 0,
+        startCharOffset: prevEndOffset,
+      );
+      expect(controller.state.currentCueText, contains('第二页第一句话'));
+      expect(controller.state.currentCueText, isNot(contains('第一页前句')));
+
+      // 再直接传第二页首字偏移验证同一结果
+      await controller.playBookChapter(
+        book,
+        chapterIndex: 0,
+        startCharOffset: p2Offset,
+      );
+      expect(controller.state.currentCueText, contains('第二页第一句话'));
+    });
+
     test('reports friendly error when no TTS model is installed', () async {
       final book = await libraryStore.importBytes(
         Uint8List.fromList(utf8.encode('第一章\n这是一段正文内容用于朗读测试。')),

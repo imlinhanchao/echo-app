@@ -240,9 +240,23 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
 
     var startSentenceIdx = 0;
     if (startCharOffset > 0) {
+      startSentenceIdx = sentences.length - 1;
       for (var i = 0; i < sentences.length; i++) {
-        if (sentences[i].endOffset >= startCharOffset) {
+        final s = sentences[i];
+        if (s.startOffset >= startCharOffset) {
           startSentenceIdx = i;
+          break;
+        }
+        // 若上一句跨页延伸进当前页且在本页内至少占该句一半以上（或无下一句），则从该句开始；
+        // 严格要求 endOffset > startCharOffset，避免 endOffset == startCharOffset 时误中前一页最后一句。
+        if (s.endOffset > startCharOffset) {
+          final spanLen = s.endOffset - s.startOffset;
+          final remainingInPage = s.endOffset - startCharOffset;
+          if (remainingInPage * 2 >= spanLen || i == sentences.length - 1) {
+            startSentenceIdx = i;
+          } else {
+            startSentenceIdx = i + 1;
+          }
           break;
         }
       }

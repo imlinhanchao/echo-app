@@ -48,6 +48,7 @@ class LiveTtsMiniBar extends ConsumerWidget {
                 builder: (_) => ReaderPageView(
                   book: book,
                   initialChapterIndex: state.chapterIndex,
+                  initialCharOffset: state.currentSentence?.startOffset ?? 0,
                 ),
               ),
             );

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,8 +8,11 @@ import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/audio/live_tts_player_controller.dart';
 import '../../core/reader/reading_store.dart';
+import '../../core/reader/screen_keep_alive.dart';
+import '../../core/settings/standalone_config_store.dart';
 import '../../core/stats/stats_store.dart';
 import '../../core/sync/progress_sync_service.dart';
+import '../../core/tts/sentence_splitter.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -48,20 +54,25 @@ import '../tts/tts_model_manager_page.dart';
 }
 
 /// 阅读器（对齐设计 §4.1 & §5.2 边听边看）：
-/// - 按可视尺寸精确分页，左右滑动翻页；
+/// - 按章懒分页 + LRU 缓存，大书秒开且不阻塞 UI 与实时朗读；
 /// - 记住上次阅读位置（章号 + 字符偏移，字号变化后仍精准）；
-/// - 顶部「边听边看」原地起播/暂停，正文实时以淡靛蓝高亮当前朗读句并自动翻页。
+/// - 顶部「边听边看」从当前可见页首句起播，正文实时高亮当前句并自动翻页；
+/// - 默认阅读时保持屏幕常亮，可在排版设置中随时开关。
 class ReaderPageView extends ConsumerStatefulWidget {
   const ReaderPageView({
     super.key,
     required this.book,
     this.initialChapterIndex,
+    this.initialCharOffset,
   });
 
   final LibraryBook book;
 
-  /// 从播放器跳回阅读器时传入当前朗读章号，实现听看无缝衔接。
+  /// 从播放器或目录跳入时指定目标章号。
   final int? initialChapterIndex;
+
+  /// 从实时听书悬浮条跳入时直接传入当前句字符偏移，零延迟定位。
+  final int? initialCharOffset;
 
   @override
   ConsumerState<ReaderPageView> createState() => _ReaderPageState();
@@ -70,7 +81,9 @@ class ReaderPageView extends ConsumerStatefulWidget {
 enum _ReaderTheme { warmDark, pureBlack, lightPaper }
 
 class _ReaderPageState extends ConsumerState<ReaderPageView> {
-  final PageController _pageController = PageController();
+  PageController _pageController = PageController();
+  int _pageViewEpoch = 0;
+
   List<ChapterPreview> _chapters = const <ChapterPreview>[];
   List<ReaderPage> _pages = const <ReaderPage>[];
   int _currentPage = 0;
@@ -88,27 +101,72 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   /// 上一次分页使用的版心尺寸，尺寸变化时需要重排。
   Size? _layoutSize;
 
-  /// 上一次自动翻页匹配的字幕文本，避免同一句反复触发翻页。
-  String? _lastAutoPagedCue;
-
-  /// 分页代数令牌：尺寸/字号变化或页面销毁时自增，立即中止旧的后台分页循环，防止并发卡死。
+  /// 分页代数令牌：尺寸/字号/切章或销毁时自增，立即中止过时分片分页任务。
   int _paginationGen = 0;
+  bool _pendingJumpToLastPage = false;
+  bool _switchingChapter = false;
+  double _overscrollDelta = 0.0;
+
+  /// 已处理过的离线字幕/实时朗读位置，防止重复触发翻页。
+  String? _lastAutoPagedCue;
+  int _lastSyncedLiveChapter = -1;
+  int _lastSyncedLiveSentence = -1;
+
+  late final ScreenKeepAliveService _screenKeepAlive;
 
   @override
   void initState() {
     super.initState();
-    if (widget.initialChapterIndex != null) {
-      _chapterIndex = widget.initialChapterIndex!;
-      _charOffset = 0;
+    _screenKeepAlive = ref.read(screenKeepAliveServiceProvider);
+    final keepScreenOn =
+        ref.read(standaloneConfigProvider).keepScreenOnWhileReading;
+    if (keepScreenOn) {
+      unawaited(_screenKeepAlive.setEnabled(true));
     }
-    _loadChapters();
+
+    // 若从底部实时听书条返回本书，直接同步复用已加载章节与当前朗读位置，零 IO/JSON 等待
+    final liveState = ref.read(liveTtsPlayerProvider);
+    if (liveState.hasBook &&
+        liveState.book?.id == widget.book.id &&
+        liveState.chapters.isNotEmpty) {
+      _chapters = liveState.chapters;
+      final arrayIdx = widget.initialChapterIndex != null
+          ? _findChapterArrayIdx(liveState.chapters, widget.initialChapterIndex!)
+          : liveState.chapterIndex.clamp(0, liveState.chapters.length - 1);
+      _chapterIndex = liveState.chapters[arrayIdx].index;
+      _charOffset =
+          widget.initialCharOffset ??
+          liveState.currentSentence?.startOffset ??
+          0;
+      _loading = false;
+      _lastSyncedLiveChapter = liveState.chapterIndex;
+      _lastSyncedLiveSentence = liveState.sentenceIndex;
+    } else {
+      if (widget.initialChapterIndex != null) {
+        _chapterIndex = widget.initialChapterIndex!;
+        _charOffset = widget.initialCharOffset ?? 0;
+      }
+      _loadChapters();
+    }
   }
 
   @override
   void dispose() {
     _paginationGen++;
+    unawaited(_screenKeepAlive.setEnabled(false));
     _pageController.dispose();
     super.dispose();
+  }
+
+  static int _findChapterArrayIdx(List<ChapterPreview> chapters, int target) {
+    final byIndex = chapters.indexWhere((c) => c.index == target);
+    if (byIndex >= 0) return byIndex;
+    return target.clamp(0, chapters.length - 1);
+  }
+
+  int _currentChapterArrayIdx() {
+    if (_chapters.isEmpty) return 0;
+    return _findChapterArrayIdx(_chapters, _chapterIndex);
   }
 
   ({Color bg, Color fg, Color secondary}) _themeColors(EchoTokens tokens) =>
@@ -154,13 +212,16 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         _chapters = chapters;
         if (widget.initialChapterIndex != null) {
           _chapterIndex = widget.initialChapterIndex!;
-          _charOffset = 0;
+          _charOffset = widget.initialCharOffset ?? 0;
         } else if (saved != null) {
           _chapterIndex = saved.chapterIndex;
           _charOffset = saved.charOffset;
+        } else if (chapters.isNotEmpty) {
+          _chapterIndex = chapters.first.index;
+          _charOffset = 0;
         }
         _loading = false;
-        _layoutSize = null; // 触发下一次布局时重新分页
+        _layoutSize = null;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -171,112 +232,110 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
   }
 
-  /// 按当前版心尺寸精确分页（两阶段：优先排版目标章实现首屏即显，其余逐章让帧增量合并）。
-  Future<void> _repaginate(Size size, EchoTokens tokens) async {
+  /// 按当前章 + 当前版心尺寸懒分页（先查 LRU 缓存，未命中则分时让帧排版当前单章）。
+  Future<void> _paginateCurrentChapter(
+    Size size,
+    EchoTokens tokens, {
+    bool jumpToLastPage = false,
+  }) async {
     if (_chapters.isEmpty) return;
-    // 立即锁定当前尺寸与代数，彻底避免 build 重入引发并发分页风暴（ANR 根因）
+    final useLastPage = jumpToLastPage || _pendingJumpToLastPage;
+    _pendingJumpToLastPage = false;
     _layoutSize = size;
     final gen = ++_paginationGen;
     final style = _textStyle(tokens);
     final textScaler = MediaQuery.textScalerOf(context);
+    final textScaleFactor = textScaler.scale(10.0) / 10.0;
 
-    final targetChapterIdx = _chapters.indexWhere(
-      (c) => c.index == _chapterIndex,
-    );
-    final initialIdx = targetChapterIdx >= 0 ? targetChapterIdx : 0;
+    final arrayIdx = _currentChapterArrayIdx();
+    final targetChapter = _chapters[arrayIdx];
+    final chapterTitle = targetChapter.title.isNotEmpty
+        ? targetChapter.title
+        : '第 ${arrayIdx + 1} 章';
 
-    // 阶段 1：优先排版目标章，保证首屏立即可读
-    final targetChapter = _chapters[initialIdx];
-    final targetPages = paginateChapterBySize(
+    final cacheKey = ChapterPaginationKey(
+      bookId: widget.book.id,
       chapterIndex: targetChapter.index,
-      chapterTitle: targetChapter.title.isNotEmpty
-          ? targetChapter.title
-          : '第 ${initialIdx + 1} 章',
-      text: targetChapter.text,
-      style: style,
-      textScaler: textScaler,
       maxWidth: size.width,
       maxHeight: size.height,
+      fontSize: _fontSize,
+      lineHeight: _lineHeight,
+      textScaleFactor: textScaleFactor,
     );
 
-    if (!mounted || gen != _paginationGen) return;
+    var pages = ChapterPaginationCache.instance.get(cacheKey);
+    if (pages == null) {
+      pages = await paginateChapterBySizeAsync(
+        chapterIndex: targetChapter.index,
+        chapterTitle: chapterTitle,
+        text: targetChapter.text,
+        style: style,
+        textScaler: textScaler,
+        maxWidth: size.width,
+        maxHeight: size.height,
+        isCancelled: () => !mounted || gen != _paginationGen,
+      );
+      if (!mounted || gen != _paginationGen) return;
+      if (pages.isNotEmpty) {
+        ChapterPaginationCache.instance.put(cacheKey, pages);
+      }
+    }
 
-    final initialTarget = pageIndexForOffset(
-      targetPages,
-      _chapterIndex,
-      _charOffset,
-    );
+    if (!mounted || gen != _paginationGen || pages.isEmpty) return;
+
+    final targetPage = useLastPage
+        ? pages.length - 1
+        : pageIndexForOffset(pages, targetChapter.index, _charOffset);
+
+    final oldController = _pageController;
+    final nextController = PageController(initialPage: targetPage);
+
     setState(() {
-      _pages = targetPages;
-      _currentPage = initialTarget;
+      _pageController = nextController;
+      _pageViewEpoch++;
+      _pages = pages!;
+      _currentPage = targetPage;
+      _chapterIndex = targetChapter.index;
+      if (useLastPage) {
+        _charOffset = pages[targetPage].startChar;
+      }
+      _switchingChapter = false;
     });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_pageController.hasClients) return;
-      if (_pageController.page?.round() != initialTarget) {
-        _pageController.jumpToPage(initialTarget);
-      }
+      oldController.dispose();
     });
-
-    if (_chapters.length <= 1) return;
-
-    // 阶段 2：逐章让出主线程增量排版其余章节，并定期刷新 _pages，确保超大书籍也能立刻往后翻页与跳章
-    final allPages = <ReaderPage>[];
-    void commitPartial() {
-      if (!mounted || gen != _paginationGen) return;
-      final target = pageIndexForOffset(allPages, _chapterIndex, _charOffset);
-      setState(() {
-        _pages = List<ReaderPage>.of(allPages);
-        _currentPage = target;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || gen != _paginationGen || !_pageController.hasClients) {
-          return;
-        }
-        if (_pageController.page?.round() != target) {
-          _pageController.jumpToPage(target);
-        }
-      });
-    }
-
-    for (var i = 0; i < _chapters.length; i++) {
-      if (!mounted || gen != _paginationGen) return;
-      if (i == initialIdx) {
-        allPages.addAll(targetPages);
-      } else {
-        await Future<void>.delayed(const Duration(milliseconds: 4));
-        if (!mounted || gen != _paginationGen) return;
-        final chapter = _chapters[i];
-        allPages.addAll(
-          paginateChapterBySize(
-            chapterIndex: chapter.index,
-            chapterTitle: chapter.title.isNotEmpty
-                ? chapter.title
-                : '第 ${i + 1} 章',
-            text: chapter.text,
-            style: style,
-            textScaler: textScaler,
-            maxWidth: size.width,
-            maxHeight: size.height,
-          ),
-        );
-      }
-      // 刚排完当前章的下一章，或每排完 8 章时，立即刷新一次可翻页范围
-      if (i == initialIdx + 1 || (i > initialIdx && (i - initialIdx) % 8 == 0)) {
-        commitPartial();
-      }
-    }
-
-    commitPartial();
   }
 
-  /// 章节目录：跳到该章第一页（若后台分页尚未覆盖到该章，则立即以该章优先重排）。
+  void _jumpToChapterArrayIndex(
+    int arrayIdx, {
+    int charOffset = 0,
+    bool jumpToLastPage = false,
+  }) {
+    if (arrayIdx < 0 || arrayIdx >= _chapters.length) return;
+    final chapter = _chapters[arrayIdx];
+    setState(() {
+      _switchingChapter = true;
+      _overscrollDelta = 0.0;
+      _chapterIndex = chapter.index;
+      _charOffset = charOffset;
+      _pendingJumpToLastPage = jumpToLastPage;
+    });
+    unawaited(_persistPosition(chapter.index, charOffset));
+
+    final size = _layoutSize;
+    if (size != null && mounted) {
+      final tokens = Theme.of(context).extension<EchoTokens>()!;
+      unawaited(
+        _paginateCurrentChapter(size, tokens, jumpToLastPage: jumpToLastPage),
+      );
+    }
+  }
+
+  /// 章节目录：直接切换到对应章节并按需分页。
   void _showToc() {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    // 每章第一页的下标
-    final firstPageOfChapter = <int, int>{};
-    for (var i = 0; i < _pages.length; i++) {
-      firstPageOfChapter.putIfAbsent(_pages[i].chapterIndex, () => i);
-    }
+    final currentArrayIdx = _currentChapterArrayIdx();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -291,8 +350,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           itemCount: _chapters.length,
           itemBuilder: (_, i) {
             final chapter = _chapters[i];
-            final firstPage = firstPageOfChapter[chapter.index];
-            final selected = _chapterIndex == chapter.index;
+            final selected = i == currentArrayIdx;
             return ListTile(
               key: Key('reader_toc_item_$i'),
               selected: selected,
@@ -313,24 +371,27 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
               ),
               onTap: () {
                 Navigator.of(sheetCtx).pop();
-                if (firstPage != null) {
-                  _pageController.jumpToPage(firstPage);
-                } else {
-                  setState(() {
-                    _chapterIndex = chapter.index;
-                    _charOffset = 0;
-                  });
-                  final size = _layoutSize;
-                  if (size != null) {
-                    _repaginate(size, tokens);
-                  }
-                }
+                _jumpToChapterArrayIndex(i);
               },
             );
           },
         ),
       ),
     );
+  }
+
+  Future<void> _persistPosition(int chapterIndex, int charOffset) async {
+    final position = ReadingPosition(
+      bookId: widget.book.id,
+      chapterIndex: chapterIndex,
+      charOffset: charOffset,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    await ref.read(readingStoreProvider).write(position);
+    if (!mounted) return;
+    ref
+        .read(progressSyncServiceProvider.notifier)
+        .reportReadingProgress(position);
   }
 
   Future<void> _onPageChanged(int index) async {
@@ -342,19 +403,51 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       _charOffset = page.startChar;
     });
     StatsStore.instance.addPageRead();
-    final position = ReadingPosition(
-      bookId: widget.book.id,
-      chapterIndex: page.chapterIndex,
-      charOffset: page.startChar,
-      updatedAt: DateTime.now().toUtc(),
-    );
-    await ref.read(readingStoreProvider).write(position);
-    ref
-        .read(progressSyncServiceProvider.notifier)
-        .reportReadingProgress(position);
+    await _persistPosition(page.chapterIndex, page.startChar);
   }
 
-  /// 排版设置面板（字号滑块 / 行距滑块 / 护眼底色）。
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.horizontal || _chapters.length <= 1) {
+      return false;
+    }
+    if (notification is ScrollStartNotification ||
+        notification is ScrollEndNotification) {
+      _overscrollDelta = 0.0;
+      return false;
+    }
+    if (notification is OverscrollNotification &&
+        notification.dragDetails != null &&
+        !_switchingChapter) {
+      _overscrollDelta += notification.overscroll;
+      final arrayIdx = _currentChapterArrayIdx();
+      if (_overscrollDelta >= 48.0 && arrayIdx + 1 < _chapters.length) {
+        _jumpToChapterArrayIndex(arrayIdx + 1);
+      } else if (_overscrollDelta <= -48.0 && arrayIdx > 0) {
+        _jumpToChapterArrayIndex(arrayIdx - 1, jumpToLastPage: true);
+      }
+    }
+    return false;
+  }
+
+  int _computeBookProgressPercent() {
+    if (_chapters.isEmpty || _pages.isEmpty) return 0;
+    final arrayIdx = _currentChapterArrayIdx();
+    var totalChars = 0;
+    var beforeChars = 0;
+    for (var i = 0; i < _chapters.length; i++) {
+      final len = math.max(1, _chapters[i].chars);
+      if (i < arrayIdx) {
+        beforeChars += len;
+      }
+      totalChars += len;
+    }
+    final curLen = math.max(1, _chapters[arrayIdx].chars);
+    final chFrac = (_currentPage + 1) / _pages.length;
+    final readChars = beforeChars + curLen * chFrac;
+    return ((readChars / totalChars) * 100).round().clamp(1, 100);
+  }
+
+  /// 排版设置面板（字号滑块 / 行距滑块 / 护眼底色 / 阅读防锁屏）。
   void _showTypographySheet() {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     showModalBottomSheet<void>(
@@ -362,6 +455,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       builder: (sheetCtx) => StatefulBuilder(
         builder: (sheetCtx, setSheetState) {
           final textTheme = Theme.of(sheetCtx).textTheme;
+          final keepScreenOn = ref.read(standaloneConfigProvider).keepScreenOnWhileReading;
           return SafeArea(
             child: Padding(
               key: const Key('reader_typography_sheet'),
@@ -468,6 +562,33 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: EchoMetrics.space1),
+                  SwitchListTile(
+                    key: const Key('reader_keep_screen_on_switch'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      '阅读时屏幕常亮',
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: tokens.textPrimary,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '阻止阅读或边听边看期间自动熄屏锁屏',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                    value: keepScreenOn,
+                    onChanged: (enabled) async {
+                      await ref
+                          .read(standaloneConfigProvider.notifier)
+                          .setKeepScreenOnWhileReading(enabled);
+                      await _screenKeepAlive.setEnabled(enabled);
+                      if (sheetCtx.mounted) {
+                        setSheetState(() {});
+                      }
+                    },
+                  ),
                 ],
               ),
             ),
@@ -477,7 +598,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     );
   }
 
-  /// 边听边看：在阅读器内原地起播/暂停当前章节；[openFullPlayer] 为 true 时同时展开全屏播放器。
+  /// 边听边看：从当前可见页首句起播/续播，若正在朗读本页则切换暂停/播放。
   Future<void> _listenFromHere({bool openFullPlayer = false}) async {
     if (_listening) return;
     setState(() => _listening = true);
@@ -494,9 +615,31 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final liveState = ref.read(liveTtsPlayerProvider);
     final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
 
-    // 1. 若本书正在进行端侧「边听边生成」实时朗读：原地切换播放/暂停
+    final arrayIdx = _currentChapterArrayIdx();
+    final page = (_currentPage >= 0 && _currentPage < _pages.length)
+        ? _pages[_currentPage]
+        : null;
+
+    // 1. 若本书正在进行端侧「边听边生成」实时朗读：
+    //    - 仍停留在正在朗读的同一页时：原地切换播放/暂停；
+    //    - 若已手动翻到其他页/章：直接从当前可见页首句续播。
     if (liveState.hasBook && liveState.book?.id == widget.book.id) {
-      await liveCtrl.togglePlayPause();
+      final curSentence = liveState.currentSentence;
+      final isOnSpokenPage =
+          page != null &&
+          liveState.chapterIndex == arrayIdx &&
+          curSentence != null &&
+          curSentence.startOffset < page.endChar &&
+          curSentence.endOffset > page.startChar;
+      if (!isOnSpokenPage && page != null) {
+        await liveCtrl.playBookChapter(
+          widget.book,
+          chapterIndex: arrayIdx,
+          startCharOffset: page.startChar,
+        );
+      } else {
+        await liveCtrl.togglePlayPause();
+      }
       return;
     }
 
@@ -518,17 +661,14 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         .firstOrNull;
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (audio == null) {
-      // 4. 否则直接启动端侧「边听边生成」实时流式朗读（从当前页起始字符起播）
+      // 4. 否则直接启动端侧「边听边生成」实时流式朗读（从当前可见页首句起播）
       if (playerState.hasBook && playerState.isPlaying) {
         await controller.togglePlayPause();
       }
-      final startOffset =
-          (_currentPage >= 0 && _currentPage < _pages.length)
-          ? _pages[_currentPage].startChar
-          : 0;
+      final startOffset = page?.startChar ?? _charOffset;
       await liveCtrl.playBookChapter(
         widget.book,
-        chapterIndex: _chapterIndex,
+        chapterIndex: arrayIdx,
         startCharOffset: startOffset,
       );
       final err = ref.read(liveTtsPlayerProvider).error;
@@ -586,61 +726,191 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
   }
 
-  /// 当前朗读句离开本页时，自动翻到包含该句的页面。
+  /// 离线有声书听看跟随：跨章切换或同章自动翻页。
   void _syncPageWithActiveCue(ChunkedPlayerState playerState) {
     if (playerState.audiobook?.bookId != widget.book.id) return;
-    _syncPageWithCueText(
-      playerState.currentChunk?.chapterIndex,
-      playerState.activeCue?.text ?? '',
-    );
-  }
+    if (!mounted || _chapters.isEmpty) return;
 
-  void _syncPageWithCueText(int? targetChapter, String rawCue) {
-    if (!mounted || !_pageController.hasClients || _pages.isEmpty) return;
-    final cueText = rawCue.trim();
+    final targetChapter = playerState.currentChunk?.chapterIndex;
+    final cueText = (playerState.activeCue?.text ?? '').trim();
     if (cueText.isEmpty || cueText == _lastAutoPagedCue) return;
 
-    // 已在当前页命中：无需翻页
+    if (targetChapter != null && targetChapter != _chapterIndex) {
+      _lastAutoPagedCue = cueText;
+      final idx = _findChapterArrayIdx(_chapters, targetChapter);
+      final offset = _chapters[idx].text.indexOf(cueText);
+      _jumpToChapterArrayIndex(idx, charOffset: offset >= 0 ? offset : 0);
+      return;
+    }
+
+    if (!_pageController.hasClients || _pages.isEmpty) return;
     if (_currentPage >= 0 &&
         _currentPage < _pages.length &&
         findCueSpanInPage(_pages[_currentPage].text, cueText) != null) {
       _lastAutoPagedCue = cueText;
       return;
     }
+    for (var i = 0; i < _pages.length; i++) {
+      if (findCueSpanInPage(_pages[i].text, cueText) != null) {
+        _lastAutoPagedCue = cueText;
+        _animateOrJumpToPage(i);
+        break;
+      }
+    }
+  }
 
-    var targetPage = -1;
-    // 优先在当前朗读章内检索
-    if (targetChapter != null) {
+  /// 实时 TTS 听看跟随：精准按字符区间判断跨页/跨章，不误退回上一页。
+  void _syncPageWithLiveState(LiveTtsState next) {
+    if (!mounted || _chapters.isEmpty) return;
+    if (next.chapterIndex == _lastSyncedLiveChapter &&
+        next.sentenceIndex == _lastSyncedLiveSentence) {
+      return;
+    }
+
+    final sentence = next.currentSentence;
+    final targetArrayIdx = next.chapterIndex.clamp(0, _chapters.length - 1);
+    final currentArrayIdx = _currentChapterArrayIdx();
+
+    _lastSyncedLiveChapter = next.chapterIndex;
+    _lastSyncedLiveSentence = next.sentenceIndex;
+
+    if (targetArrayIdx != currentArrayIdx) {
+      _jumpToChapterArrayIndex(
+        targetArrayIdx,
+        charOffset: sentence?.startOffset ?? 0,
+      );
+      return;
+    }
+
+    if (_pages.isEmpty || !_pageController.hasClients) {
+      if (sentence != null) {
+        _charOffset = sentence.startOffset;
+      }
+      return;
+    }
+
+    if (sentence != null) {
+      if (_currentPage >= 0 && _currentPage < _pages.length) {
+        final curPage = _pages[_currentPage];
+        final overlapsCurrent =
+            sentence.startOffset < curPage.endChar &&
+            sentence.endOffset > curPage.startChar;
+        if (overlapsCurrent) return;
+      }
+      final chapterObj = _chapters[targetArrayIdx];
+      final targetPage = pageIndexForOffset(
+        _pages,
+        chapterObj.index,
+        sentence.startOffset,
+      );
+      if (targetPage != _currentPage) {
+        _animateOrJumpToPage(targetPage);
+      }
+    } else if (next.currentCueText.trim().isNotEmpty) {
+      final cue = next.currentCueText.trim();
       for (var i = 0; i < _pages.length; i++) {
-        if (_pages[i].chapterIndex == targetChapter &&
-            findCueSpanInPage(_pages[i].text, cueText) != null) {
-          targetPage = i;
+        if (findCueSpanInPage(_pages[i].text, cue) != null) {
+          if (i != _currentPage) {
+            _animateOrJumpToPage(i);
+          }
           break;
         }
       }
     }
-    // 回退：全书检索
-    if (targetPage == -1) {
-      for (var i = 0; i < _pages.length; i++) {
-        if (findCueSpanInPage(_pages[i].text, cueText) != null) {
-          targetPage = i;
-          break;
-        }
-      }
+  }
+
+  void _animateOrJumpToPage(int targetPage) {
+    if (!mounted || !_pageController.hasClients) return;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (reduceMotion) {
+      _pageController.jumpToPage(targetPage);
+    } else {
+      _pageController.animateToPage(
+        targetPage,
+        duration: EchoMetrics.motionBase,
+        curve: EchoMetrics.easeEnter,
+      );
     }
-    if (targetPage >= 0 && targetPage != _currentPage) {
-      _lastAutoPagedCue = cueText;
-      final reduceMotion = MediaQuery.disableAnimationsOf(context);
-      if (reduceMotion) {
-        _pageController.jumpToPage(targetPage);
-      } else {
-        _pageController.animateToPage(
-          targetPage,
-          duration: EchoMetrics.motionBase,
-          curve: EchoMetrics.easeEnter,
-        );
-      }
-    }
+  }
+
+  Widget _buildLiveControlBar(
+    EchoTokens tokens,
+    TextTheme textTheme,
+    ({Color bg, Color fg, Color secondary}) palette,
+    LiveTtsState liveState,
+  ) {
+    final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
+    return Container(
+      key: const Key('reader_live_control_bar'),
+      padding: const EdgeInsets.symmetric(
+        horizontal: EchoMetrics.space2,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: palette.bg,
+        border: Border(
+          top: BorderSide(color: palette.secondary.withValues(alpha: 0.2)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.graphic_eq, size: 16, color: tokens.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              liveState.currentCueText.isNotEmpty
+                  ? liveState.currentCueText
+                  : (liveState.isSynthesizing ? '正在合成语音...' : '实时朗读中'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.bodySmall?.copyWith(color: palette.secondary),
+            ),
+          ),
+          IconButton(
+            key: const Key('reader_live_prev_sentence'),
+            tooltip: '上一句',
+            visualDensity: VisualDensity.compact,
+            onPressed: liveCtrl.prevSentence,
+            icon: Icon(Icons.skip_previous_rounded, color: palette.fg),
+          ),
+          IconButton(
+            key: const Key('reader_live_toggle_play'),
+            tooltip: liveState.isPlaying ? '暂停朗读' : '继续朗读',
+            visualDensity: VisualDensity.compact,
+            onPressed: liveCtrl.togglePlayPause,
+            icon: liveState.isSynthesizing
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: tokens.primary,
+                    ),
+                  )
+                : Icon(
+                    liveState.isPlaying
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_filled,
+                    color: tokens.primary,
+                  ),
+          ),
+          IconButton(
+            key: const Key('reader_live_next_sentence'),
+            tooltip: '下一句',
+            visualDensity: VisualDensity.compact,
+            onPressed: liveCtrl.nextSentence,
+            icon: Icon(Icons.skip_next_rounded, color: palette.fg),
+          ),
+          IconButton(
+            key: const Key('reader_live_stop'),
+            tooltip: '停止听书',
+            visualDensity: VisualDensity.compact,
+            onPressed: liveCtrl.stop,
+            icon: Icon(Icons.close, size: 18, color: palette.secondary),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -660,6 +930,11 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final activeCueText = isLiveThisBook
         ? liveState.currentCueText
         : (isThisBookLoaded ? playerState.activeCue?.text : null);
+    final activeSentence =
+        (isLiveThisBook &&
+            liveState.chapterIndex == _currentChapterArrayIdx())
+        ? liveState.currentSentence
+        : null;
 
     ref.listen<ChunkedPlayerState>(chunkedPlayerProvider, (prev, next) {
       if (next.audiobook?.bookId != widget.book.id) return;
@@ -673,10 +948,11 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
 
     ref.listen<LiveTtsState>(liveTtsPlayerProvider, (prev, next) {
       if (next.book?.id != widget.book.id) return;
-      if (prev?.currentCueText != next.currentCueText ||
-          prev?.chapterIndex != next.chapterIndex) {
+      if (prev?.sentenceIndex != next.sentenceIndex ||
+          prev?.chapterIndex != next.chapterIndex ||
+          prev?.currentCueText != next.currentCueText) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _syncPageWithCueText(next.chapterIndex, next.currentCueText);
+          _syncPageWithLiveState(next);
         });
       }
     });
@@ -690,6 +966,17 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final page = (_currentPage >= 0 && _currentPage < _pages.length)
         ? _pages[_currentPage]
         : null;
+    final currentArrayIdx = _currentChapterArrayIdx();
+    final curChapterObj =
+        _chapters.isNotEmpty ? _chapters[currentArrayIdx] : null;
+    final headerChapterTitle =
+        page?.chapterTitle ??
+        (curChapterObj == null
+            ? ''
+            : (curChapterObj.title.isNotEmpty
+                  ? curChapterObj.title
+                  : '第 ${currentArrayIdx + 1} 章'));
+    final bookPct = _computeBookProgressPercent();
 
     return Scaffold(
       key: const Key('reader_page'),
@@ -708,7 +995,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
               style: textTheme.titleMedium?.copyWith(color: palette.fg),
             ),
             Text(
-              page?.chapterTitle ?? '',
+              headerChapterTitle,
               key: const Key('reader_chapter_label'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -734,7 +1021,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           ),
           IconButton(
             key: const Key('reader_play_button'),
-            tooltip: isPlayingThisBook ? '暂停边听边看' : '边听边看',
+            tooltip: isPlayingThisBook ? '从本页听书 / 暂停' : '边听边看',
             onPressed: _loading ? null : () => _listenFromHere(),
             icon: Icon(
               isPlayingThisBook
@@ -784,87 +1071,106 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
             )
           : _ReaderBody(
               pages: _pages,
+              pageViewEpoch: _pageViewEpoch,
               pageController: _pageController,
               textStyle: _textStyle(tokens),
               highlightColor: tokens.readingHighlight,
+              activeSentence: activeSentence,
               activeCueText: activeCueText,
               layoutSize: _layoutSize,
-              onNeedPagination: _repaginate,
+              onNeedPagination: _paginateCurrentChapter,
               onPageChanged: _onPageChanged,
+              onScrollNotification: _onScrollNotification,
             ),
       bottomNavigationBar: _loading || _pages.isEmpty
           ? null
-          : BottomAppBar(
-              color: palette.bg,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '第 ${page?.pageInChapter ?? 1}/${page?.pageCountInChapter ?? 1} 页',
-                    key: const Key('reader_page_indicator'),
-                    style: textTheme.labelMedium?.copyWith(
-                      color: palette.secondary,
-                    ),
-                  ),
-                  Text(
-                    _pages.isEmpty
-                        ? '0%'
-                        : '${_currentPage + 1}/${_pages.length} · '
-                              '${((_currentPage + 1) / _pages.length * 100).round()}%',
-                    key: const Key('reader_global_indicator'),
-                    style: textTheme.labelMedium?.copyWith(
-                      color: palette.secondary,
-                    ),
-                  ),
-                  if (isThisBookLoaded)
-                    TextButton.icon(
-                      key: const Key('reader_open_player'),
-                      onPressed: () => openPlayer(context),
-                      icon: Icon(
-                        isPlayingThisBook
-                            ? Icons.graphic_eq
-                            : Icons.play_circle_outline,
-                        size: 18,
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isLiveThisBook)
+                  _buildLiveControlBar(tokens, textTheme, palette, liveState),
+                BottomAppBar(
+                  color: palette.bg,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          '第 ${currentArrayIdx + 1}/${_chapters.length} 章 · '
+                          '${page?.pageInChapter ?? 1}/${page?.pageCountInChapter ?? 1} 页',
+                          key: const Key('reader_page_indicator'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.labelMedium?.copyWith(
+                            color: palette.secondary,
+                          ),
+                        ),
                       ),
-                      label: const Text('全屏播放器'),
-                    )
-                  else if (hasAudio)
-                    TextButton.icon(
-                      key: const Key('reader_listen_here'),
-                      onPressed: () => _listenFromHere(),
-                      icon: const Icon(Icons.play_circle_outline, size: 18),
-                      label: const Text('边听边看'),
-                    )
-                  else
-                    const SizedBox.shrink(),
-                ],
-              ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '全书 $bookPct%',
+                        key: const Key('reader_global_indicator'),
+                        style: textTheme.labelMedium?.copyWith(
+                          color: palette.secondary,
+                        ),
+                      ),
+                      if (isThisBookLoaded)
+                        TextButton.icon(
+                          key: const Key('reader_open_player'),
+                          onPressed: () => openPlayer(context),
+                          icon: Icon(
+                            isPlayingThisBook
+                                ? Icons.graphic_eq
+                                : Icons.play_circle_outline,
+                            size: 18,
+                          ),
+                          label: const Text('全屏播放器'),
+                        )
+                      else if (hasAudio && !isLiveThisBook)
+                        TextButton.icon(
+                          key: const Key('reader_listen_here'),
+                          onPressed: () => _listenFromHere(),
+                          icon: const Icon(Icons.play_circle_outline, size: 18),
+                          label: const Text('边听边看'),
+                        )
+                      else
+                        const SizedBox.shrink(),
+                    ],
+                  ),
+                ),
+              ],
             ),
     );
   }
 }
 
-/// 版心：用 LayoutBuilder 拿到可用宽高，宽屏约束最大宽度 680dp（45–75ch），交给父级做精确分页。
+/// 版心：用 LayoutBuilder 拿到可用宽高，宽屏约束最大宽度 680dp（45–75ch），按章精确分页。
 class _ReaderBody extends StatelessWidget {
   const _ReaderBody({
     required this.pages,
+    required this.pageViewEpoch,
     required this.pageController,
     required this.textStyle,
     required this.highlightColor,
+    required this.activeSentence,
     required this.activeCueText,
     required this.layoutSize,
     required this.onNeedPagination,
     required this.onPageChanged,
+    required this.onScrollNotification,
   });
 
   final List<ReaderPage> pages;
+  final int pageViewEpoch;
   final PageController pageController;
   final TextStyle textStyle;
   final Color highlightColor;
+  final TextSentence? activeSentence;
   final String? activeCueText;
   final Size? layoutSize;
   final Future<void> Function(Size size, EchoTokens tokens) onNeedPagination;
   final ValueChanged<int> onPageChanged;
+  final bool Function(ScrollNotification) onScrollNotification;
 
   static const double _maxReadingWidth = 680.0;
 
@@ -875,14 +1181,33 @@ class _ReaderBody extends StatelessWidget {
     EchoMetrics.space1,
   );
 
-  Widget _buildPageText(int index, String pageText) {
+  ({int start, int end})? _resolveHighlightSpan(ReaderPage page) {
+    final sentence = activeSentence;
+    if (sentence != null) {
+      final overlapStart = math.max(sentence.startOffset, page.startChar);
+      final overlapEnd = math.min(sentence.endOffset, page.endChar);
+      if (overlapStart < overlapEnd) {
+        final localStart =
+            (overlapStart - page.startChar).clamp(0, page.text.length);
+        final localEnd =
+            (overlapEnd - page.startChar).clamp(0, page.text.length);
+        if (localStart < localEnd) {
+          return (start: localStart, end: localEnd);
+        }
+      }
+    }
     final cue = activeCueText;
-    final span = (cue != null && cue.isNotEmpty)
-        ? findCueSpanInPage(pageText, cue)
-        : null;
+    if (cue != null && cue.isNotEmpty) {
+      return findCueSpanInPage(page.text, cue);
+    }
+    return null;
+  }
+
+  Widget _buildPageText(int index, ReaderPage page) {
+    final span = _resolveHighlightSpan(page);
     if (span == null) {
       return Text(
-        pageText,
+        page.text,
         key: Key('reader_page_text_$index'),
         style: textStyle,
       );
@@ -892,13 +1217,14 @@ class _ReaderBody extends StatelessWidget {
       TextSpan(
         style: textStyle,
         children: <InlineSpan>[
-          if (span.start > 0) TextSpan(text: pageText.substring(0, span.start)),
+          if (span.start > 0)
+            TextSpan(text: page.text.substring(0, span.start)),
           TextSpan(
-            text: pageText.substring(span.start, span.end),
+            text: page.text.substring(span.start, span.end),
             style: textStyle.copyWith(backgroundColor: highlightColor),
           ),
-          if (span.end < pageText.length)
-            TextSpan(text: pageText.substring(span.end)),
+          if (span.end < page.text.length)
+            TextSpan(text: page.text.substring(span.end)),
         ],
       ),
     );
@@ -916,7 +1242,7 @@ class _ReaderBody extends StatelessWidget {
           effectiveWidth - _insets.horizontal,
           constraints.maxHeight - _insets.vertical,
         );
-        // 尺寸变化（首次布局/旋转/字号/行距）触发重新分页
+        // 尺寸变化（首次布局/旋转/字号/行距）触发按章重新分页
         if (layoutSize == null ||
             (layoutSize!.width - available.width).abs() > 0.5 ||
             (layoutSize!.height - available.height).abs() > 0.5) {
@@ -924,21 +1250,33 @@ class _ReaderBody extends StatelessWidget {
             onNeedPagination(available, tokens);
           });
         }
-        return PageView.builder(
-          key: const Key('reader_pageview'),
-          controller: pageController,
-          onPageChanged: onPageChanged,
-          itemCount: pages.length,
-          itemBuilder: (context, index) => Center(
-            child: ConstrainedBox(
-              key: index == 0 ? const Key('reader_column_constraint') : null,
-              constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
-              child: SizedBox(
-                width: effectiveWidth,
-                height: constraints.maxHeight,
-                child: Padding(
-                  padding: _insets,
-                  child: _buildPageText(index, pages[index].text),
+        if (pages.isEmpty) {
+          return Center(
+            child: CircularProgressIndicator(color: tokens.primary),
+          );
+        }
+        return NotificationListener<ScrollNotification>(
+          onNotification: onScrollNotification,
+          child: KeyedSubtree(
+            key: ValueKey<int>(pageViewEpoch),
+            child: PageView.builder(
+              key: const Key('reader_pageview'),
+              physics: const ClampingScrollPhysics(),
+              controller: pageController,
+              onPageChanged: onPageChanged,
+              itemCount: pages.length,
+              itemBuilder: (context, index) => Center(
+                child: ConstrainedBox(
+                  key: index == 0 ? const Key('reader_column_constraint') : null,
+                  constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
+                  child: SizedBox(
+                    width: effectiveWidth,
+                    height: constraints.maxHeight,
+                    child: Padding(
+                      padding: _insets,
+                      child: _buildPageText(index, pages[index]),
+                    ),
+                  ),
                 ),
               ),
             ),

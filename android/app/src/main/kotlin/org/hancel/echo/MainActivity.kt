@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -88,6 +89,29 @@ class MainActivity : AudioServiceActivity() {
                     result.success(null)
                 }
                 else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.hancel.echo/wakelock"
+        ).setMethodCallHandler { call, result ->
+            if (call.method == "setKeepScreenOn") {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                mainHandler.post {
+                    try {
+                        if (enabled) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        }
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("WAKELOCK_FAILED", e.message, null)
+                    }
+                }
+            } else {
+                result.notImplemented()
             }
         }
     }

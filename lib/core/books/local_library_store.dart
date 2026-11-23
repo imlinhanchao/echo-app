@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../api/models.dart';
 import '../offline/offline_store.dart';
+import '../reader/reading_store.dart';
 import 'epub_parser.dart';
 import 'txt_parser.dart';
 
@@ -242,30 +244,39 @@ class LocalLibraryStore {
       status: 'ready',
     );
 
-    _chaptersCache[bookId] = List<ChapterPreview>.unmodifiable(parsed.chapters);
+    _putChaptersCache(bookId, List<ChapterPreview>.unmodifiable(parsed.chapters));
     _books = <LibraryBook>[book, ..._books];
     await _persistIndex();
     return book;
   }
 
+  static const int _maxCachedBooks = 6;
+
+  void _putChaptersCache(int bookId, List<ChapterPreview> chapters) {
+    _chaptersCache.remove(bookId);
+    _chaptersCache[bookId] = chapters;
+    while (_chaptersCache.length > _maxCachedBooks) {
+      _chaptersCache.remove(_chaptersCache.keys.first);
+    }
+  }
+
   /// 读取书籍所有章节列表（含预览与字数）。
+  ///
+  /// 大书 JSON 解码放在后台 Isolate 执行，避免阻塞 UI 线程导致打开阅读页卡顿。
   Future<List<ChapterPreview>> listChapters(int bookId) async {
-    final cached = _chaptersCache[bookId];
-    if (cached != null) return cached;
+    final cached = _chaptersCache.remove(bookId);
+    if (cached != null) {
+      _chaptersCache[bookId] = cached;
+      return cached;
+    }
     final root = await _ensureRoot();
     final file = File(p.join(root.path, 'books', '$bookId', 'chapters.json'));
     if (!await file.exists()) return const <ChapterPreview>[];
-    try {
-      final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! List) return const <ChapterPreview>[];
-      final chapters = List<ChapterPreview>.unmodifiable(
-        decoded.whereType<Map<String, dynamic>>().map(ChapterPreview.fromJson),
-      );
-      _chaptersCache[bookId] = chapters;
-      return chapters;
-    } catch (_) {
-      return const <ChapterPreview>[];
+    final chapters = await Isolate.run(() => _decodeChaptersJsonFile(file.path));
+    if (chapters.isNotEmpty) {
+      _putChaptersCache(bookId, chapters);
     }
+    return chapters;
   }
 
   /// 读取单章完整正文。
@@ -348,6 +359,7 @@ class LocalLibraryStore {
       await deleteAudiobook(audio.id);
     }
     _chaptersCache.remove(bookId);
+    ChapterPaginationCache.instance.clearForBook(bookId);
     _books = _books.where((b) => b.id != bookId).toList();
     await _persistIndex();
     final root = await _ensureRoot();
@@ -434,6 +446,21 @@ class LocalLibraryStore {
             )
             .toList(),
       };
+}
+
+/// 顶层纯函数：仅接收文件路径字符串在后台 Isolate 读取解析 `chapters.json`。
+List<ChapterPreview> _decodeChaptersJsonFile(String filePath) {
+  final file = File(filePath);
+  if (!file.existsSync()) return const <ChapterPreview>[];
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! List) return const <ChapterPreview>[];
+    return List<ChapterPreview>.unmodifiable(
+      decoded.whereType<Map<String, dynamic>>().map(ChapterPreview.fromJson),
+    );
+  } catch (_) {
+    return const <ChapterPreview>[];
+  }
 }
 
 final Provider<LocalLibraryStore> localLibraryStoreProvider =

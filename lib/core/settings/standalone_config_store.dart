@@ -15,6 +15,7 @@ class StandaloneConfig {
     this.activeTtsSpeakerId = 0,
     this.defaultTtsSpeed = 1.0,
     this.preferCnMirror = true,
+    this.keepScreenOnWhileReading = true,
   });
 
   factory StandaloneConfig.fromJson(Map<String, dynamic> json) =>
@@ -31,6 +32,8 @@ class StandaloneConfig {
               2.5,
             ),
         preferCnMirror: json['prefer_cn_mirror'] as bool? ?? true,
+        keepScreenOnWhileReading:
+            json['keep_screen_on_while_reading'] as bool? ?? true,
       );
 
   final String ebookApiBaseUrl;
@@ -40,6 +43,7 @@ class StandaloneConfig {
   final int activeTtsSpeakerId;
   final double defaultTtsSpeed;
   final bool preferCnMirror;
+  final bool keepScreenOnWhileReading;
 
   bool get hasEbookApi => ebookApiBaseUrl.trim().isNotEmpty;
 
@@ -51,6 +55,7 @@ class StandaloneConfig {
     'active_tts_speaker_id': activeTtsSpeakerId,
     'default_tts_speed': defaultTtsSpeed,
     'prefer_cn_mirror': preferCnMirror,
+    'keep_screen_on_while_reading': keepScreenOnWhileReading,
   };
 
   StandaloneConfig copyWith({
@@ -61,6 +66,7 @@ class StandaloneConfig {
     int? activeTtsSpeakerId,
     double? defaultTtsSpeed,
     bool? preferCnMirror,
+    bool? keepScreenOnWhileReading,
   }) {
     return StandaloneConfig(
       ebookApiBaseUrl: ebookApiBaseUrl ?? this.ebookApiBaseUrl,
@@ -70,6 +76,8 @@ class StandaloneConfig {
       activeTtsSpeakerId: activeTtsSpeakerId ?? this.activeTtsSpeakerId,
       defaultTtsSpeed: defaultTtsSpeed ?? this.defaultTtsSpeed,
       preferCnMirror: preferCnMirror ?? this.preferCnMirror,
+      keepScreenOnWhileReading:
+          keepScreenOnWhileReading ?? this.keepScreenOnWhileReading,
     );
   }
 }
@@ -217,6 +225,9 @@ class StandaloneConfigController extends StateNotifier<StandaloneConfig> {
 
   Future<void> setPreferCnMirror(bool prefer) =>
       _commit(state.copyWith(preferCnMirror: prefer));
+
+  Future<void> setKeepScreenOnWhileReading(bool enabled) =>
+      _commit(state.copyWith(keepScreenOnWhileReading: enabled));
 }
 
 final Provider<StandaloneConfigStorage> standaloneConfigStorageProvider =
