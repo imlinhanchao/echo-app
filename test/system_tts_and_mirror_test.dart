@@ -173,17 +173,17 @@ void main() {
     testWidgets('支持下拉切换严格镜像/保存自定义前缀、清理 Kokoro/Piper 残留与切换 MultiTTS', (
       tester,
     ) async {
-      final rootDir = await Directory.systemTemp.createTemp('echo_mgr_ui_');
-      addTearDown(() async {
-        if (await rootDir.exists()) await rootDir.delete(recursive: true);
+      final rootDir = Directory.systemTemp.createTempSync('echo_mgr_ui_');
+      addTearDown(() {
+        if (rootDir.existsSync()) rootDir.deleteSync(recursive: true);
       });
 
       // 写入已下架的 Piper 残留目录
       final oldPiper = File(
         p.join(rootDir.path, 'vits-piper-zh_CN-huayan-medium', 'model.onnx'),
       );
-      await oldPiper.parent.create(recursive: true);
-      await oldPiper.writeAsBytes(List<int>.filled(2048, 7));
+      oldPiper.parent.createSync(recursive: true);
+      oldPiper.writeAsBytesSync(List<int>.filled(2048, 7));
 
       final storage = MemoryStandaloneConfigStorage(
         const StandaloneConfig(onboardingCompleted: true),
@@ -193,6 +193,20 @@ void main() {
         storage: storage,
       );
       final fakeBridge = FakeSystemTtsBridge(isSupported: true);
+      final configCtrl = StandaloneConfigController(
+        storage,
+        const StandaloneConfig(onboardingCompleted: true),
+      );
+      final manager = await tester.runAsync(() async {
+        final m = TtsModelManager(
+          configCtrl,
+          rootDirOverride: rootDir,
+          keepAliveService: const NoopDownloadKeepAliveService(),
+          systemTtsBridge: fakeBridge,
+        );
+        await m.refresh();
+        return m;
+      });
 
       final theme = buildEchoTheme(
         Brightness.dark,
@@ -203,15 +217,9 @@ void main() {
         ProviderScope(
           overrides: [
             standaloneConfigStorageProvider.overrideWithValue(storage),
+            standaloneConfigProvider.overrideWith((_) => configCtrl),
             systemTtsBridgeProvider.overrideWithValue(fakeBridge),
-            ttsModelManagerProvider.overrideWith(
-              (ref) => TtsModelManager(
-                ref.read(standaloneConfigProvider.notifier),
-                rootDirOverride: rootDir,
-                keepAliveService: const NoopDownloadKeepAliveService(),
-                systemTtsBridge: fakeBridge,
-              ),
-            ),
+            ttsModelManagerProvider.overrideWith((_) => manager!),
           ],
           child: MaterialApp(
             theme: theme,
@@ -223,12 +231,21 @@ void main() {
 
       // 1. 下架旧模型清理卡片展示并可一键清理
       expect(find.byKey(const Key('tts_legacy_cleanup_card')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('tts_legacy_cleanup_button')));
+      final cleanupBtn = find.byKey(const Key('tts_legacy_cleanup_button'));
+      await tester.ensureVisible(cleanupBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(cleanupBtn);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('tts_legacy_cleanup_card')), findsNothing);
       expect(oldPiper.parent.existsSync(), isFalse);
 
-      // 2. 镜像下拉框切换为自定义前缀，并保存合法前缀
+      // 2. 滚回顶部：镜像下拉框切换为自定义前缀，并保存合法前缀
+      await tester.dragUntilVisible(
+        find.byKey(const Key('tts_mirror_dropdown')),
+        find.byType(ListView),
+        const Offset(0, 200),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('tts_mirror_dropdown')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('自定义加速前缀').last);
@@ -239,6 +256,7 @@ void main() {
         find.byKey(const Key('tts_custom_mirror_field')),
         'https://mirror.myhome.lan',
       );
+      await tester.ensureVisible(find.byKey(const Key('tts_custom_mirror_save')));
       await tester.tap(find.byKey(const Key('tts_custom_mirror_save')));
       await tester.pumpAndSettle();
 
@@ -251,7 +269,11 @@ void main() {
 
       // 3. 系统语音卡片允许切换为 MultiTTS 引擎
       final sysEngFinder = find.byKey(const Key('tts_system_engine_dropdown'));
-      await tester.ensureVisible(sysEngFinder);
+      await tester.dragUntilVisible(
+        sysEngFinder,
+        find.byType(ListView),
+        const Offset(0, -200),
+      );
       await tester.pumpAndSettle();
       await tester.tap(sysEngFinder);
       await tester.pumpAndSettle();

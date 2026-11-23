@@ -798,16 +798,18 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
 
   /// 清理已下架的旧模型（Kokoro / Piper）目录与断点缓存，释放手机存储空间。
   Future<int> cleanupLegacyModels() async {
-    final root = await _modelsRoot();
+    final root = _rootDirOverride != null
+        ? (_rootDirOverride..createSync(recursive: true))
+        : await _modelsRoot();
     var freed = 0;
     for (final legacyId in TtsModelCatalog.legacyModelIds) {
       for (final dir in <Directory>[
         Directory(p.join(root.path, legacyId)),
         Directory(p.join(root.path, '.tmp_$legacyId')),
       ]) {
-        if (await dir.exists()) {
+        if (dir.existsSync()) {
           freed += _dirSizeSync(dir);
-          await dir.delete(recursive: true);
+          dir.deleteSync(recursive: true);
         }
       }
     }
