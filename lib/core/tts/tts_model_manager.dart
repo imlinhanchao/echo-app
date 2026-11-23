@@ -132,6 +132,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   final Directory? _rootDirOverride;
   final Map<String, CancelToken> _cancelTokens = <String, CancelToken>{};
 
+  TtsModelsState get currentState => state;
+
   Future<Directory> _modelsRoot() async {
     if (_rootDirOverride != null) {
       await _rootDirOverride.create(recursive: true);
@@ -144,7 +146,21 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   }
 
   Future<void> refresh() async {
-    final root = await _modelsRoot();
+    final Directory root;
+    try {
+      root = await _modelsRoot();
+    } catch (_) {
+      // 无平台通道（如纯 Widget 单测环境）时保持未安装空态，不抛未捕获异常。
+      if (!mounted) return;
+      state = TtsModelsState(
+        entries: <String, TtsModelStatusEntry>{
+          for (final spec in TtsModelCatalog.all)
+            spec.id: TtsModelStatusEntry(spec: spec),
+        },
+        initialized: true,
+      );
+      return;
+    }
     final map = <String, TtsModelStatusEntry>{};
     for (final spec in TtsModelCatalog.all) {
       final existing = state.entries[spec.id];

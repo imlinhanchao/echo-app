@@ -16,13 +16,11 @@ import 'package:echo/features/notes/desktop_notes_focus_page.dart';
 import 'package:echo/features/player/player_sheet.dart';
 import 'package:echo/features/reader/reader_page.dart';
 import 'package:echo/features/search/search_page.dart';
-import 'package:echo/features/shell/echo_shell.dart';
 import 'package:echo/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'stub_adapter.dart';
 import 'tokens_fixtures.dart';
 
 class _RichStubAdapter implements HttpClientAdapter {

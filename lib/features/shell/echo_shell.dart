@@ -10,6 +10,7 @@ import '../jobs/jobs_page.dart';
 import '../library/bookshelf_tab.dart';
 import '../notes/desktop_notes_drawer.dart';
 import '../player/desktop_player_bar.dart';
+import '../player/live_tts_mini_bar.dart';
 import '../player/player_sheet.dart'
     show MiniPlayerBar, TabletCapsulePlayerBar;
 import '../profile/profile_page.dart';
@@ -207,7 +208,13 @@ class EchoShellState extends ConsumerState<EchoShell> {
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: MiniPlayerBar(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        LiveTtsMiniBar(),
+                        MiniPlayerBar(),
+                      ],
+                    ),
                   ),
                 ],
               ),

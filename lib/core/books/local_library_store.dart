@@ -273,6 +273,16 @@ class LocalLibraryStore {
     return null;
   }
 
+  /// 获取书籍原始文件（用于本地导出分享）。
+  Future<File?> getSourceFile(int bookId) async {
+    final book = await getBook(bookId);
+    if (book == null) return null;
+    final root = await _ensureRoot();
+    final ext = book.format.isEmpty ? 'txt' : book.format;
+    final file = File(p.join(root.path, 'books', '$bookId', 'source.$ext'));
+    return await file.exists() ? file : null;
+  }
+
   /// 分配新的本地有声书 ID。
   Future<int> allocateAudiobookId() async {
     await ensureLoaded();

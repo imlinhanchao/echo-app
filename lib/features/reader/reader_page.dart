@@ -3,14 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/audio/live_tts_player_controller.dart';
 import '../../core/reader/reading_store.dart';
 import '../../core/stats/stats_store.dart';
 import '../../core/sync/progress_sync_service.dart';
+import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../library/library_controller.dart';
 import '../player/player_sheet.dart' show openPlayer;
+import '../tts/tts_model_manager_page.dart';
 
 /// 在单页正文中定位当前朗读句的字符区间（支持跨换行/空白差异的容错匹配）。
 ({int start, int end})? findCueSpanInPage(String pageText, String cueText) {
@@ -488,8 +491,16 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   Future<void> _listenFromHereInner({required bool openFullPlayer}) async {
     final playerState = ref.read(chunkedPlayerProvider);
     final controller = ref.read(chunkedPlayerProvider.notifier);
+    final liveState = ref.read(liveTtsPlayerProvider);
+    final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
 
-    // 若本书已加载到播放器：顶栏原地切换播放/暂停；底栏可展开全屏播放器
+    // 1. 若本书正在进行端侧「边听边生成」实时朗读：原地切换播放/暂停
+    if (liveState.hasBook && liveState.book?.id == widget.book.id) {
+      await liveCtrl.togglePlayPause();
+      return;
+    }
+
+    // 2. 若本书已加载到分块播放器：顶栏原地切换播放/暂停；底栏可展开全屏播放器
     if (playerState.hasBook && playerState.audiobook?.bookId == widget.book.id) {
       if (openFullPlayer) {
         await openPlayer(context);
@@ -499,6 +510,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       return;
     }
 
+    // 3. 若已有本地离线转好的有声书分块：优先零 CPU 播放离线分块
     final audio = ref
         .read(libraryControllerProvider)
         .audiobooks
@@ -506,9 +518,37 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         .firstOrNull;
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (audio == null) {
-      messenger?.showSnackBar(
-        const SnackBar(content: Text('这本书还没有有声书，先在书架转一本吧')),
+      // 4. 否则直接启动端侧「边听边生成」实时流式朗读（从当前页起始字符起播）
+      if (playerState.hasBook && playerState.isPlaying) {
+        await controller.togglePlayPause();
+      }
+      final startOffset =
+          (_currentPage >= 0 && _currentPage < _pages.length)
+          ? _pages[_currentPage].startChar
+          : 0;
+      await liveCtrl.playBookChapter(
+        widget.book,
+        chapterIndex: _chapterIndex,
+        startCharOffset: startOffset,
       );
+      final err = ref.read(liveTtsPlayerProvider).error;
+      if (err != null && mounted) {
+        messenger?.showSnackBar(
+          SnackBar(
+            content: Text(err),
+            action: SnackBarAction(
+              label: '去下载模型',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TtsModelManagerPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      }
       return;
     }
 
@@ -548,9 +588,16 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
 
   /// 当前朗读句离开本页时，自动翻到包含该句的页面。
   void _syncPageWithActiveCue(ChunkedPlayerState playerState) {
-    if (!mounted || !_pageController.hasClients || _pages.isEmpty) return;
     if (playerState.audiobook?.bookId != widget.book.id) return;
-    final cueText = playerState.activeCue?.text.trim() ?? '';
+    _syncPageWithCueText(
+      playerState.currentChunk?.chapterIndex,
+      playerState.activeCue?.text ?? '',
+    );
+  }
+
+  void _syncPageWithCueText(int? targetChapter, String rawCue) {
+    if (!mounted || !_pageController.hasClients || _pages.isEmpty) return;
+    final cueText = rawCue.trim();
     if (cueText.isEmpty || cueText == _lastAutoPagedCue) return;
 
     // 已在当前页命中：无需翻页
@@ -561,7 +608,6 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       return;
     }
 
-    final targetChapter = playerState.currentChunk?.chapterIndex;
     var targetPage = -1;
     // 优先在当前朗读章内检索
     if (targetChapter != null) {
@@ -603,10 +649,17 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final textTheme = Theme.of(context).textTheme;
     final palette = _themeColors(tokens);
     final playerState = ref.watch(chunkedPlayerProvider);
+    final liveState = ref.watch(liveTtsPlayerProvider);
     final isThisBookLoaded =
         playerState.hasBook && playerState.audiobook?.bookId == widget.book.id;
-    final isPlayingThisBook = isThisBookLoaded && playerState.isPlaying;
-    final activeCueText = isThisBookLoaded ? playerState.activeCue?.text : null;
+    final isLiveThisBook =
+        liveState.hasBook && liveState.book?.id == widget.book.id;
+    final isPlayingThisBook =
+        (isThisBookLoaded && playerState.isPlaying) ||
+        (isLiveThisBook && liveState.isPlaying);
+    final activeCueText = isLiveThisBook
+        ? liveState.currentCueText
+        : (isThisBookLoaded ? playerState.activeCue?.text : null);
 
     ref.listen<ChunkedPlayerState>(chunkedPlayerProvider, (prev, next) {
       if (next.audiobook?.bookId != widget.book.id) return;
@@ -618,10 +671,22 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       }
     });
 
-    final hasAudio = ref
-        .watch(libraryControllerProvider)
-        .audiobooks
-        .any((a) => a.bookId == widget.book.id && a.isPlayable);
+    ref.listen<LiveTtsState>(liveTtsPlayerProvider, (prev, next) {
+      if (next.book?.id != widget.book.id) return;
+      if (prev?.currentCueText != next.currentCueText ||
+          prev?.chapterIndex != next.chapterIndex) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _syncPageWithCueText(next.chapterIndex, next.currentCueText);
+        });
+      }
+    });
+
+    final hasAudio =
+        ref
+            .watch(libraryControllerProvider)
+            .audiobooks
+            .any((a) => a.bookId == widget.book.id && a.isPlayable) ||
+        ref.watch(ttsModelManagerProvider).installedEntries.isNotEmpty;
     final page = (_currentPage >= 0 && _currentPage < _pages.length)
         ? _pages[_currentPage]
         : null;

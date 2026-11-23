@@ -15,7 +15,6 @@ import '../tts/sentence_splitter.dart';
 import '../tts/sherpa_tts_engine.dart';
 import '../tts/tts_model_manager.dart';
 import '../tts/wav_encoder.dart';
-import 'audio_service_engine.dart';
 import 'chunked_player_controller.dart';
 
 /// 实时「边听边生成」朗读器状态。
@@ -528,7 +527,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
 final StateNotifierProvider<LiveTtsPlayerController, LiveTtsState>
 liveTtsPlayerProvider =
     StateNotifierProvider<LiveTtsPlayerController, LiveTtsState>((ref) {
-      final AudioEngine engine = AudioServiceEngine.instance;
+      final AudioEngine engine = ref.watch(audioEngineProvider);
       return LiveTtsPlayerController(
         libraryStore: ref.watch(localLibraryStoreProvider),
         ttsEngine: ref.watch(onDeviceTtsEngineProvider),

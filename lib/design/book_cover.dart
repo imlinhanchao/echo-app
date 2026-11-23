@@ -61,7 +61,7 @@ class BookCover extends StatelessWidget {
     } else if (coverUrl != null &&
         (coverUrl.startsWith('file://') || coverUrl.startsWith('/'))) {
       final path = coverUrl.startsWith('file://')
-          ? coverUrl.substring(7)
+          ? Uri.parse(coverUrl).toFilePath()
           : coverUrl;
       imageWidget = Image.file(
         File(path),

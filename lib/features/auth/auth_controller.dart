@@ -1,24 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/ebook_api_client.dart';
 import '../../core/api/echo_api.dart';
 import '../../core/api/models.dart';
+import '../../core/api/provider_token_store.dart';
+import '../../core/api/standalone_echo_api.dart';
 import '../../core/auth/token_store.dart';
-import '../../core/settings/server_address_store.dart';
+import '../../core/books/local_library_store.dart';
+import '../../core/settings/standalone_config_store.dart';
+import '../../core/tts/local_convert_service.dart';
+import '../../core/tts/tts_model_manager.dart';
+import '../library/library_controller.dart';
 
-/// Token 存储（生产：安全存储）。
+/// Token 存储（保留兼容符号，单机版不依赖服务端登录）。
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
-/// echo-service API 客户端。
-/// 服务地址取用户设置（登录页 / 我的页可改，持久化在 [ServerAddressStore]），
-/// 未设置时回落到构建期 `--dart-define=ECHO_BASE_URL`。
-/// 会话过期回调延迟读取 authControllerProvider，避免构造期循环依赖；
-/// 显式标注顶层类型以断开相互引用的类型推断环。
+/// 单机版全局 API 入口（统一承接本地书库、ebook-api 与本地 TTS 任务）。
 final Provider<EchoApi> echoApiProvider = Provider<EchoApi>(
-  (ref) => EchoApi(
-    baseUri: Uri.parse(ServerAddressStore.current.value),
-    tokenStore: ref.watch(tokenStoreProvider),
-    onSessionExpired: () =>
-        ref.read(authControllerProvider.notifier).handleSessionExpired(),
+  (ref) => StandaloneEchoApi(
+    libraryStore: ref.watch(localLibraryStoreProvider),
+    readEbookApi: () => ref.read(ebookApiClientProvider),
+    tokenStore: ref.watch(providerTokenStoreProvider),
+    ttsModelManager: ref.watch(ttsModelManagerProvider.notifier),
+    convertService: ref.watch(localConvertServiceProvider),
+    readConfig: () => ref.read(standaloneConfigProvider),
+    onLibraryChanged: () =>
+        ref.read(libraryControllerProvider.notifier).refresh(),
   ),
 );
 

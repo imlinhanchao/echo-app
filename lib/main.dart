@@ -12,12 +12,14 @@ import 'core/notes/note_store.dart';
 import 'core/offline/offline_store.dart';
 import 'core/stats/stats_store.dart';
 import 'core/settings/server_address_store.dart';
+import 'core/settings/standalone_config_store.dart';
 import 'core/settings/theme_mode_controller.dart';
 import 'design/echo_splash_screen.dart';
 import 'design/echo_theme.dart';
 import 'design/echo_tokens.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_page.dart';
+import 'features/onboarding/onboarding_page.dart';
 import 'features/shell/echo_shell.dart';
 
 Future<void> main() async {
@@ -42,7 +44,9 @@ Future<void> main() async {
   await NoteStore.instance.load();
   // 恢复亮/暗偏好（dark-first，默认深色）。
   await ThemeModeController.init();
-  // 恢复用户设置的服务地址与历史（未设置时用构建期 ECHO_BASE_URL）。
+  // 恢复单机版全局配置（ebook-api 地址、引导完成状态、默认 TTS 模型）
+  await StandaloneConfigStore.init();
+  // 恢复旧服务地址缓存（保留兼容）
   await ServerAddressStore.init();
   // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。
   final darkTokens = await EchoTokens.load(Brightness.dark);
@@ -97,12 +101,33 @@ class EchoApp extends StatelessWidget {
       theme: lightTheme ?? theme,
       darkTheme: theme,
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
-      home: home ?? const AuthGate(),
+      home: home ?? const StandaloneGate(),
     );
   }
 }
 
-/// 根据认证状态切换：启动恢复中 / 登录 / 已登录书架主界面。
+/// 单机版入口网关：首次启动进入两步引导页（配置 ebook-api + 语音模型，均可跳过），
+/// 完成后直达书架主界面（无账号登录）。
+class StandaloneGate extends ConsumerWidget {
+  const StandaloneGate({super.key});
+
+  static const EchoUser localUser = EchoUser(
+    id: 0,
+    email: '本地书库',
+    name: '单机模式',
+  );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final config = ref.watch(standaloneConfigProvider);
+    if (!config.onboardingCompleted) {
+      return const OnboardingPage();
+    }
+    return const EchoHome(user: localUser);
+  }
+}
+
+/// 兼容旧测试的认证网关符号。
 class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
 

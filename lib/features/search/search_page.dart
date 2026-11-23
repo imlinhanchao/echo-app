@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/settings/standalone_config_store.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
@@ -10,6 +11,7 @@ import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../jobs/jobs_controller.dart';
 import '../providers/provider_account_page.dart';
+import '../settings/ebook_api_settings_page.dart';
 import 'search_controller.dart';
 
 // flutter/material 自带同名 SearchController，这里显式指向本项目的控制器类型
@@ -271,6 +273,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final textTheme = Theme.of(context).textTheme;
     final state = ref.watch(searchControllerProvider);
     final controller = ref.read(searchControllerProvider.notifier);
+    final standaloneCfg = ref.watch(standaloneConfigProvider);
 
     return Column(
       children: [
@@ -290,9 +293,59 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   color: tokens.textPrimary,
                 ),
               ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const EbookApiSettingsPage(),
+                  ),
+                ),
+                icon: const Icon(Icons.dns_outlined, size: 16),
+                label: Text(standaloneCfg.hasEbookApi ? '书源服务' : '配置服务'),
+              ),
             ],
           ),
         ),
+        if (!standaloneCfg.hasEbookApi)
+          Container(
+            key: const Key('search_ebook_api_banner'),
+            margin: const EdgeInsets.fromLTRB(
+              EchoMetrics.space2,
+              EchoMetrics.space1,
+              EchoMetrics.space2,
+              0,
+            ),
+            padding: const EdgeInsets.all(EchoMetrics.space2),
+            decoration: BoxDecoration(
+              color: tokens.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: tokens.primary.withValues(alpha: 0.28),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: tokens.primary, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '尚未配置 ebook-api 服务地址，配置后即可在线搜书下载',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: tokens.textPrimary,
+                    ),
+                  ),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const EbookApiSettingsPage(),
+                    ),
+                  ),
+                  child: const Text('去配置'),
+                ),
+              ],
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.all(EchoMetrics.space2),
           child: TextField(

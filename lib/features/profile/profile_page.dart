@@ -3,17 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/audio/live_tts_player_controller.dart';
 import '../../core/offline/offline_store.dart';
-import '../../core/stats/stats_store.dart';
-import '../../core/settings/server_address_store.dart';
+import '../../core/settings/standalone_config_store.dart';
 import '../../core/settings/theme_mode_controller.dart';
-import '../../core/sync/progress_sync_service.dart';
+import '../../core/stats/stats_store.dart';
+import '../../core/tts/tts_model_catalog.dart';
+import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
-import '../auth/auth_controller.dart';
 import '../providers/provider_account_page.dart';
-import '../settings/server_address_page.dart';
+import '../settings/ebook_api_settings_page.dart';
+import '../tts/tts_model_manager_page.dart';
 import 'offline_manager_page.dart';
 import 'playback_settings_page.dart';
 
@@ -83,7 +85,7 @@ class ProfilePage extends ConsumerWidget {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      'Echo · 用户 #${user.id}',
+                      'Echo · 单机模式',
                       style: textTheme.labelSmall?.copyWith(
                         color: tokens.primary,
                         fontWeight: FontWeight.w600,
@@ -118,20 +120,53 @@ class ProfilePage extends ConsumerWidget {
           decoration: echoElevatedCardDecoration(context, radius: 16),
           child: Column(
             children: [
-              ValueListenableBuilder<String>(
-                valueListenable: ServerAddressStore.current,
-                builder: (context, address, _) => ListTile(
-                  key: const Key('profile_server_address'),
-                  leading: Icon(Icons.dns_outlined, color: tokens.textPrimary),
-                  title: const Text('服务地址'),
-                  subtitle: Text(address),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ServerAddressPage(),
+              Consumer(
+                builder: (context, ref, _) {
+                  final cfg = ref.watch(standaloneConfigProvider);
+                  final modelsState = ref.watch(ttsModelManagerProvider);
+                  final activeSpec = TtsModelCatalog.byId(cfg.activeTtsModelId);
+                  final installedCount = modelsState.installedEntries.length;
+                  final subtitle = activeSpec != null &&
+                          (modelsState.entryOf(activeSpec.id)?.isInstalled ??
+                              false)
+                      ? '当前：${activeSpec.name}（已装 $installedCount 款）'
+                      : '尚未安装模型，点击下载（Kokoro / Matcha / Piper）';
+                  return ListTile(
+                    key: const Key('profile_tts_models'),
+                    leading: Icon(
+                      Icons.record_voice_over_outlined,
+                      color: tokens.textPrimary,
                     ),
-                  ),
-                ),
+                    title: const Text('离线语音模型管理'),
+                    subtitle: Text(subtitle),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const TtsModelManagerPage(),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 1, indent: 56),
+              Consumer(
+                builder: (context, ref, _) {
+                  final cfg = ref.watch(standaloneConfigProvider);
+                  return ListTile(
+                    key: const Key('profile_server_address'),
+                    leading: Icon(Icons.dns_outlined, color: tokens.textPrimary),
+                    title: const Text('ebook-api 书源服务'),
+                    subtitle: Text(
+                      cfg.hasEbookApi ? cfg.ebookApiBaseUrl : '未配置（仅使用本地导入）',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const EbookApiSettingsPage(),
+                      ),
+                    ),
+                  );
+                },
               ),
               const Divider(height: 1, indent: 56),
               // 亮/暗模式（dark-first：默认深色）。
@@ -157,7 +192,7 @@ class ProfilePage extends ConsumerWidget {
                 key: const Key('profile_providers'),
                 leading: Icon(Icons.source_outlined, color: tokens.textPrimary),
                 title: const Text('书源账号'),
-                subtitle: const Text('zlib 镜像 / 邮箱密码 / Cookie 导入'),
+                subtitle: const Text('zlib 镜像 / 邮箱密码 / Cookie 封装'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -166,46 +201,22 @@ class ProfilePage extends ConsumerWidget {
                 ),
               ),
               const Divider(height: 1, indent: 56),
-              Consumer(
-                builder: (context, ref, _) {
-                  final syncState = ref.watch(progressSyncServiceProvider);
-                  final syncNotifier = ref.read(
-                    progressSyncServiceProvider.notifier,
-                  );
-                  String syncSubtitle;
-                  if (syncState.status == SyncStatus.syncing) {
-                    syncSubtitle = '正在同步中...';
-                  } else if (syncState.status == SyncStatus.error) {
-                    syncSubtitle = '同步失败，点击重试';
-                  } else if (syncState.lastSyncTime != null) {
-                    final t = syncState.lastSyncTime!;
-                    final timeStr =
-                        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-                    syncSubtitle = '已与云端同步 (最近 $timeStr)';
-                  } else {
-                    syncSubtitle = '已启用双向云同步，点击立即刷新';
-                  }
-
-                  return ListTile(
-                    key: const Key('profile_cloud_sync'),
-                    leading: Icon(
-                      Icons.cloud_sync_outlined,
-                      color: tokens.textPrimary,
-                    ),
-                    title: const Text('进度云同步'),
-                    subtitle: Text(syncSubtitle),
-                    trailing: syncState.status == SyncStatus.syncing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : IconButton(
-                            key: const Key('profile_sync_button'),
-                            icon: const Icon(Icons.sync),
-                            tooltip: '立即同步',
-                            onPressed: syncNotifier.syncAll,
-                          ),
+              ListTile(
+                key: const Key('profile_clear_live_cache'),
+                leading: Icon(
+                  Icons.cleaning_services_outlined,
+                  color: tokens.textPrimary,
+                ),
+                title: const Text('清理临时朗读缓存'),
+                subtitle: const Text('实时「边听边生成」产生的临时 WAV 缓存'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final freed = await ref
+                      .read(liveTtsPlayerProvider.notifier)
+                      .clearTempCache();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('已释放临时缓存 ${formatBytes(freed)}')),
                   );
                 },
               ),
@@ -230,17 +241,10 @@ class ProfilePage extends ConsumerWidget {
                 key: const Key('profile_about'),
                 leading: Icon(Icons.info_outline, color: tokens.textPrimary),
                 title: const Text('关于'),
-                subtitle: const Text('回声 v0.3.9'),
+                subtitle: const Text('回声 · 单机版 v0.3.9'),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: EchoMetrics.space3),
-        FilledButton.tonalIcon(
-          key: const Key('echo_logout'),
-          onPressed: () => ref.read(authControllerProvider.notifier).logout(),
-          icon: const Icon(Icons.logout),
-          label: const Text('退出登录'),
         ),
       ],
     );

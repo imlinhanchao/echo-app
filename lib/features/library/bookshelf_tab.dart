@@ -1,8 +1,13 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/audio/live_tts_player_controller.dart';
+import '../../core/books/local_library_store.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
@@ -13,6 +18,30 @@ import 'book_detail_page.dart';
 import '../shell/echo_shell.dart' show EchoShell;
 import 'convert_sheet.dart';
 import 'library_controller.dart';
+
+/// 从手机本地选择 EPUB / TXT 文件导入单机书库。
+Future<void> _importLocalBook(BuildContext context, WidgetRef ref) async {
+  try {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const <String>['epub', 'txt'],
+    );
+    final filePath = picked?.files.single.path;
+    if (filePath == null || filePath.isEmpty) return;
+    final store = ref.read(localLibraryStoreProvider);
+    final book = await store.importFile(File(filePath));
+    await ref.read(libraryControllerProvider.notifier).refresh();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已导入《${book.title}》')),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('导入失败：$e')),
+    );
+  }
+}
 
 /// 删除二次确认（防误触：文件删除不可恢复）。
 Future<bool> confirmDelete(
@@ -57,6 +86,8 @@ class BookshelfTab extends ConsumerWidget {
     final libState = ref.watch(libraryControllerProvider);
     final libController = ref.read(libraryControllerProvider.notifier);
     final playerState = ref.watch(chunkedPlayerProvider);
+    final liveTtsState = ref.watch(liveTtsPlayerProvider);
+    final hasAnyPlayer = playerState.hasBook || liveTtsState.hasBook;
     // 只看真正有意义的条目：完成 / 转换中；失败与取消的不占首页
     final shelfAudios = libState.audiobooks
         .where((a) => a.showOnShelf)
@@ -82,17 +113,29 @@ class BookshelfTab extends ConsumerWidget {
           EchoMetrics.space3,
           MediaQuery.paddingOf(context).top + EchoMetrics.space2,
           EchoMetrics.space3,
-          playerState.hasBook ? 104 : EchoMetrics.space3,
+          hasAnyPlayer ? 104 : EchoMetrics.space3,
         ),
         children: [
-          // 问候语
-          Text(
-            greeting,
-            key: const Key('echo_greeting'),
-            style: textTheme.headlineSmall?.copyWith(
-              color: tokens.textPrimary,
-              fontWeight: FontWeight.w700,
-            ),
+          // 问候语 + 本地导入按钮
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  greeting,
+                  key: const Key('echo_greeting'),
+                  style: textTheme.headlineSmall?.copyWith(
+                    color: tokens.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              FilledButton.tonalIcon(
+                key: const Key('bookshelf_import_local_button'),
+                onPressed: () => _importLocalBook(context, ref),
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+                label: const Text('导入本地书'),
+              ),
+            ],
           ),
           const SizedBox(height: EchoMetrics.space2),
 
