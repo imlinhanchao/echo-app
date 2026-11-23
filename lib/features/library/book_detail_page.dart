@@ -478,25 +478,34 @@ class _AudiobookTile extends ConsumerWidget {
     final textTheme = Theme.of(context).textTheme;
     ref.watch(offlineStoreProvider);
     final state = ref.read(offlineStoreProvider.notifier).stateOf(audio.id);
+    final isFailed = audio.isFailedOrCancelled;
     final label = audio.isReady
         ? '${audio.model} · ${audio.voice} · ${formatDurationMs((audio.durationS * 1000).round())}'
         : audio.isPlayable
         ? '${audio.model} · 转换中 ${audio.progress}% · 可抢先收听'
+        : isFailed
+        ? '${audio.status == 'cancelled' ? '已取消' : '转换失败'} (${audio.progress}%) · 左滑删除'
         : '状态：${audio.status} (${audio.progress}%)';
 
-    return Card(
+    final card = Card(
       key: Key('detail_audio_${audio.id}'),
       child: ListTile(
         leading: Icon(
-          audio.isPlayable ? Icons.headphones : Icons.hourglass_top,
-          color: audio.isPlayable ? tokens.primary : tokens.textSecondary,
+          audio.isPlayable
+              ? Icons.headphones
+              : (isFailed ? Icons.error_outline : Icons.hourglass_top),
+          color: audio.isPlayable
+              ? tokens.primary
+              : (isFailed ? tokens.error : tokens.textSecondary),
         ),
         title: Text(
           audio.isReady
               ? '有声书 #${audio.id}'
-              : (audio.isPlayable
-                    ? '转码中 #${audio.id}（可抢先听）'
-                    : '转码中 #${audio.id}'),
+              : audio.isPlayable
+              ? '转码中 #${audio.id}（可抢先听）'
+              : isFailed
+              ? '${audio.status == 'cancelled' ? '已取消' : '转换失败'} #${audio.id}'
+              : '转码中 #${audio.id}',
           style: textTheme.bodyMedium?.copyWith(color: tokens.textPrimary),
         ),
         subtitle: Column(
@@ -504,7 +513,9 @@ class _AudiobookTile extends ConsumerWidget {
           children: [
             Text(
               label,
-              style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+              style: textTheme.bodySmall?.copyWith(
+                color: isFailed ? tokens.error : tokens.textSecondary,
+              ),
             ),
             if (state.status == OfflineStatus.downloading)
               Padding(
@@ -556,6 +567,51 @@ class _AudiobookTile extends ConsumerWidget {
           ],
         ),
       ),
+    );
+
+    if (!isFailed) return card;
+
+    return Dismissible(
+      key: ValueKey<String>('dismiss_audio_${audio.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space3),
+        alignment: Alignment.centerRight,
+        decoration: BoxDecoration(
+          color: tokens.error.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.delete_outline, color: Colors.white, size: 20),
+            SizedBox(width: 6),
+            Text(
+              '删除',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      confirmDismiss: (_) async {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        final err = await ref
+            .read(libraryControllerProvider.notifier)
+            .deleteAudiobook(audio.id);
+        if (err != null) {
+          messenger?.showSnackBar(SnackBar(content: Text(err)));
+          return false;
+        }
+        messenger?.showSnackBar(
+          SnackBar(content: Text('已删除转换记录 #${audio.id}')),
+        );
+        return true;
+      },
+      child: card,
     );
   }
 }
