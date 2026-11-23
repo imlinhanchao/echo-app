@@ -54,13 +54,13 @@ void main() {
       final info = await service.convertBook(
         book: book,
         modelPaths: const ResolvedTtsModelPaths(
-          spec: TtsModelCatalog.piperZhHuayan,
+          spec: TtsModelCatalog.meloTtsZhEn,
           rootDir: '/tmp/fake',
           modelPath: '/tmp/fake/model.onnx',
           tokensPath: '/tmp/fake/tokens.txt',
         ),
         speakerId: 0,
-        voiceLabel: '华研女声',
+        voiceLabel: 'Melo 标准女声',
         onProgress: (pct, _) => progressEvents.add(pct),
       );
 

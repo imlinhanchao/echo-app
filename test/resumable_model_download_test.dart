@@ -10,20 +10,20 @@ import 'package:echo/core/tts/resumable_downloader.dart';
 import 'package:echo/core/tts/tts_model_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Uint8List _buildFakePiperArchive() {
+Uint8List _buildFakeMeloArchive() {
   final archive = Archive();
   final onnxBytes = Uint8List.fromList(List<int>.generate(96 * 1024, (i) => i % 251));
   final tokenBytes = utf8.encode('a 0\nb 1\n');
   archive.addFile(
     ArchiveFile(
-      'vits-piper-zh_CN-huayan-medium/zh_CN-huayan-medium.onnx',
+      'vits-melo-tts-zh_en/model.onnx',
       onnxBytes.length,
       onnxBytes,
     ),
   );
   archive.addFile(
     ArchiveFile(
-      'vits-piper-zh_CN-huayan-medium/tokens.txt',
+      'vits-melo-tts-zh_en/tokens.txt',
       tokenBytes.length,
       tokenBytes,
     ),
@@ -187,7 +187,7 @@ void main() {
     });
 
     test('preserves partial download as paused on disconnect, restores on reload, auto-resumes on foreground, and clears partial on request', () async {
-      final archiveBytes = _buildFakePiperArchive();
+      final archiveBytes = _buildFakeMeloArchive();
       var dropAllRequests = true;
       final splitPoint = archiveBytes.length ~/ 2;
 
@@ -242,7 +242,7 @@ void main() {
         InterceptorsWrapper(
           onRequest: (options, handler) {
             options.path =
-                'http://127.0.0.1:${server.port}/vits-piper-zh_CN-huayan-medium.tar.bz2';
+                'http://127.0.0.1:${server.port}/vits-melo-tts-zh_en.tar.bz2';
             handler.next(options);
           },
         ),
@@ -255,7 +255,7 @@ void main() {
         storage,
         const StandaloneConfig(onboardingCompleted: true),
       );
-      const modelId = 'vits-piper-zh_CN-huayan-medium';
+      const modelId = 'vits-melo-tts-zh_en';
 
       final manager = TtsModelManager(
         configCtrl,
@@ -307,7 +307,7 @@ void main() {
 
       // 4. 校验 clearPartialDownload 清理断点目录
       final fakePart = File(
-        '${modelsDir.path}/.tmp_$modelId/vits-piper-zh_CN-huayan-medium.tar.bz2.part',
+        '${modelsDir.path}/.tmp_$modelId/vits-melo-tts-zh_en.tar.bz2.part',
       );
       await fakePart.parent.create(recursive: true);
       await fakePart.writeAsBytes(<int>[1, 2, 3, 4]);
@@ -322,7 +322,7 @@ void main() {
       );
 
       // 5. 校验 importLocalArchive 在 Isolate 中流式解压同样无闭包捕获异常
-      final localArchiveFile = File('${modelsDir.path}/local_piper.tar.bz2');
+      final localArchiveFile = File('${modelsDir.path}/local_melo.tar.bz2');
       await localArchiveFile.writeAsBytes(archiveBytes);
       await manager.deleteModel(modelId);
       final importErr = await manager.importLocalArchive(

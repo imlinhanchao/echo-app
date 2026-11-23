@@ -10,6 +10,7 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
 import 'tts_model_catalog.dart';
 import 'tts_model_manager.dart';
+import 'wav_encoder.dart';
 
 /// 单次端侧 TTS 合成输出。
 @immutable
@@ -48,6 +49,7 @@ class SherpaIsolateTtsEngine implements OnDeviceTtsEngine {
   final Map<int, Completer<dynamic>> _pending = <int, Completer<dynamic>>{};
   int _nextReqId = 1;
   String? _loadedModelId;
+  String? _loadedCacheKey;
   Future<void>? _spawning;
 
   @override
@@ -110,22 +112,30 @@ class SherpaIsolateTtsEngine implements OnDeviceTtsEngine {
     ResolvedTtsModelPaths paths, {
     int? numThreads,
   }) async {
-    if (_loadedModelId == paths.spec.id && _workerPort != null) return;
+    if (paths.spec.isSystemTts) {
+      throw StateError('Android 系统语音需通过 HybridOnDeviceTtsEngine 加载');
+    }
+    if (_loadedCacheKey == paths.cacheKey && _workerPort != null) return;
     final threads =
         numThreads ?? math.max(1, math.min(4, Platform.numberOfProcessors ~/ 2));
     await _send('load', <String, dynamic>{
       'modelId': paths.spec.id,
       'kind': paths.spec.kind.name,
       'modelPath': paths.modelPath,
+      'decoderPath': paths.decoderPath,
       'tokensPath': paths.tokensPath,
       'voicesPath': paths.voicesPath,
       'vocoderPath': paths.vocoderPath,
       'lexiconPath': paths.lexiconPath,
       'dataDir': paths.dataDir,
       'dictDir': paths.dictDir,
+      'ruleFsts': paths.ruleFsts,
+      'referenceAudioPath': paths.referenceAudioPath,
+      'referenceText': paths.referenceText,
       'numThreads': threads,
     });
     _loadedModelId = paths.spec.id;
+    _loadedCacheKey = paths.cacheKey;
   }
 
   @override
@@ -172,6 +182,7 @@ class SherpaIsolateTtsEngine implements OnDeviceTtsEngine {
     _isolate = null;
     _workerPort = null;
     _loadedModelId = null;
+    _loadedCacheKey = null;
     _spawning = null;
   }
 }
@@ -189,6 +200,10 @@ void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
 
   var bindingsReady = false;
   sherpa_onnx.OfflineTts? tts;
+  var activeKind = '';
+  Float32List? refSamples;
+  var refSampleRate = 0;
+  var refText = '';
 
   inbox.listen((dynamic message) {
     if (message is! Map) return;
@@ -204,27 +219,50 @@ void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
         }
         tts?.free();
         tts = null;
+        refSamples = null;
+        refSampleRate = 0;
+        refText = '';
 
         final kindName = payload['kind'] as String;
         final modelPath = payload['modelPath'] as String;
+        final decoderPath = payload['decoderPath'] as String? ?? '';
         final tokensPath = payload['tokensPath'] as String;
-        final voicesPath = payload['voicesPath'] as String? ?? '';
         final vocoderPath = payload['vocoderPath'] as String? ?? '';
         final lexiconPath = payload['lexiconPath'] as String? ?? '';
         final dataDir = payload['dataDir'] as String? ?? '';
         final dictDir = payload['dictDir'] as String? ?? '';
+        final ruleFsts = payload['ruleFsts'] as String? ?? '';
+        final referenceAudioPath =
+            payload['referenceAudioPath'] as String? ?? '';
+        final referenceText = payload['referenceText'] as String? ?? '';
         final numThreads = payload['numThreads'] as int? ?? 2;
 
         final sherpa_onnx.OfflineTtsModelConfig modelConfig;
-        if (kindName == TtsModelKind.kokoro.name) {
+        if (kindName == TtsModelKind.zipvoice.name) {
+          if (referenceAudioPath.isEmpty ||
+              !File(referenceAudioPath).existsSync()) {
+            throw StateError('ZipVoice 缺少参考音频文件：$referenceAudioPath');
+          }
+          if (referenceText.trim().isEmpty) {
+            throw StateError('ZipVoice 缺少参考音频对应的文本内容');
+          }
+          final bytes = File(referenceAudioPath).readAsBytesSync();
+          final decoded = decodeWavToFloat32(bytes);
+          if (decoded.samples.isEmpty || decoded.sampleRate <= 0) {
+            throw StateError('无法解码 ZipVoice 参考音频：$referenceAudioPath');
+          }
+          refSamples = decoded.samples;
+          refSampleRate = decoded.sampleRate;
+          refText = referenceText.trim();
+
           modelConfig = sherpa_onnx.OfflineTtsModelConfig(
-            kokoro: sherpa_onnx.OfflineTtsKokoroModelConfig(
-              model: modelPath,
-              voices: voicesPath,
+            zipvoice: sherpa_onnx.OfflineTtsZipVoiceModelConfig(
               tokens: tokensPath,
-              dataDir: dataDir,
-              dictDir: dictDir,
+              encoder: modelPath,
+              decoder: decoderPath,
+              vocoder: vocoderPath,
               lexicon: lexiconPath,
+              dataDir: dataDir,
             ),
             numThreads: numThreads,
             debug: false,
@@ -256,8 +294,12 @@ void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
           );
         }
 
+        activeKind = kindName;
         tts = sherpa_onnx.OfflineTts(
-          sherpa_onnx.OfflineTtsConfig(model: modelConfig),
+          sherpa_onnx.OfflineTtsConfig(
+            model: modelConfig,
+            ruleFsts: ruleFsts,
+          ),
         );
         bootstrap.responsePort.send(<String, dynamic>{
           'id': id,
@@ -272,7 +314,23 @@ void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
         final sid = payload['sid'] as int? ?? 0;
         final speed = (payload['speed'] as num?)?.toDouble() ?? 1.0;
 
-        final generated = active.generate(text: text, sid: sid, speed: speed);
+        final sherpa_onnx.GeneratedAudio generated;
+        if (activeKind == TtsModelKind.zipvoice.name) {
+          generated = active.generateWithConfig(
+            text: text,
+            config: sherpa_onnx.OfflineTtsGenerationConfig(
+              sid: sid,
+              speed: speed,
+              referenceAudio: refSamples,
+              referenceSampleRate: refSampleRate,
+              referenceText: refText,
+              numSteps: 4,
+              extra: const <String, Object>{'min_char_in_sentence': 10},
+            ),
+          );
+        } else {
+          generated = active.generate(text: text, sid: sid, speed: speed);
+        }
         final copied = Float32List.fromList(generated.samples);
         final transferable = TransferableTypedData.fromList(<TypedData>[
           copied,

@@ -20,11 +20,10 @@ void main() {
     late FakeAudioEngine audioEngine;
 
     const fakeModelPaths = ResolvedTtsModelPaths(
-      spec: TtsModelCatalog.kokoroZhV11,
-      rootDir: '/tmp/fake_kokoro',
-      modelPath: '/tmp/fake_kokoro/model.int8.onnx',
-      tokensPath: '/tmp/fake_kokoro/tokens.txt',
-      voicesPath: '/tmp/fake_kokoro/voices.bin',
+      spec: TtsModelCatalog.meloTtsZhEn,
+      rootDir: '/tmp/fake_melo',
+      modelPath: '/tmp/fake_melo/model.onnx',
+      tokensPath: '/tmp/fake_melo/tokens.txt',
     );
 
     setUp(() async {
@@ -56,8 +55,8 @@ void main() {
         audioEngine: audioEngine,
         resolveActiveModel: () => fakeModelPaths,
         readConfig: () => const StandaloneConfig(
-          activeTtsModelId: 'kokoro-int8-multi-lang-v1_1',
-          activeTtsSpeakerId: 45,
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          activeTtsSpeakerId: 0,
           defaultTtsSpeed: 1.0,
         ),
         cacheDirOverride: cacheDir,
@@ -69,7 +68,7 @@ void main() {
       expect(controller.state.isPlaying, isTrue);
       expect(controller.state.sentenceIndex, 0);
       expect(controller.state.currentCueText, contains('启程'));
-      expect(ttsEngine.loadedModelId, 'kokoro-int8-multi-lang-v1_1');
+      expect(ttsEngine.loadedModelId, 'vits-melo-tts-zh_en');
 
       // 等待后台预合成完成
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -114,8 +113,8 @@ void main() {
         audioEngine: audioEngine,
         resolveActiveModel: () => fakeModelPaths,
         readConfig: () => const StandaloneConfig(
-          activeTtsModelId: 'kokoro-int8-multi-lang-v1_1',
-          activeTtsSpeakerId: 45,
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          activeTtsSpeakerId: 0,
           defaultTtsSpeed: 1.0,
         ),
         cacheDirOverride: cacheDir,

@@ -14,6 +14,7 @@ import '../settings/standalone_config_store.dart';
 import 'download_keepalive_service.dart';
 import 'resumable_downloader.dart';
 import 'tts_model_catalog.dart';
+import 'wav_encoder.dart';
 
 /// 已安装且通过完整性校验的端侧模型本地路径集合。
 @immutable
@@ -23,22 +24,48 @@ class ResolvedTtsModelPaths {
     required this.rootDir,
     required this.modelPath,
     required this.tokensPath,
+    this.decoderPath = '',
     this.voicesPath = '',
     this.vocoderPath = '',
     this.lexiconPath = '',
     this.dataDir = '',
     this.dictDir = '',
+    this.ruleFsts = '',
+    this.referenceAudioPath = '',
+    this.referenceText = '',
+    this.systemEnginePackage = '',
+    this.systemVoiceName = '',
   });
 
   final TtsModelSpec spec;
   final String rootDir;
   final String modelPath;
   final String tokensPath;
+  final String decoderPath;
   final String voicesPath;
   final String vocoderPath;
   final String lexiconPath;
   final String dataDir;
   final String dictDir;
+  final String ruleFsts;
+  final String referenceAudioPath;
+  final String referenceText;
+  final String systemEnginePackage;
+  final String systemVoiceName;
+
+  /// 用于判定引擎是否需要重载配置的唯一指纹。
+  String get cacheKey => <String>[
+    spec.id,
+    modelPath,
+    decoderPath,
+    vocoderPath,
+    tokensPath,
+    ruleFsts,
+    referenceAudioPath,
+    referenceText,
+    systemEnginePackage,
+    systemVoiceName,
+  ].join('|');
 }
 
 enum ModelInstallStatus {
@@ -111,10 +138,14 @@ class TtsModelsState {
   const TtsModelsState({
     this.entries = const <String, TtsModelStatusEntry>{},
     this.initialized = false,
+    this.legacyModelIds = const <String>[],
+    this.legacyModelsSizeBytes = 0,
   });
 
   final Map<String, TtsModelStatusEntry> entries;
   final bool initialized;
+  final List<String> legacyModelIds;
+  final int legacyModelsSizeBytes;
 
   List<TtsModelStatusEntry> get orderedEntries => TtsModelCatalog.all
       .map((s) => entries[s.id] ?? TtsModelStatusEntry(spec: s))
@@ -193,6 +224,10 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     }
     final map = <String, TtsModelStatusEntry>{};
     for (final spec in TtsModelCatalog.all) {
+      if (spec.isSystemTts) {
+        map[spec.id] = TtsModelStatusEntry(spec: spec);
+        continue;
+      }
       final existing = state.entries[spec.id];
       if (existing != null && existing.isBusy) {
         map[spec.id] = existing;
@@ -229,12 +264,34 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
         }
       }
     }
-    if (!mounted) return;
-    state = TtsModelsState(entries: map, initialized: true);
 
-    // 若当前尚未选定模型且已有已安装模型，自动选中第一个可用模型。
+    final foundLegacyIds = <String>[];
+    var legacyBytes = 0;
+    for (final legacyId in TtsModelCatalog.legacyModelIds) {
+      var dirBytes = 0;
+      final d1 = Directory(p.join(root.path, legacyId));
+      final d2 = Directory(p.join(root.path, '.tmp_$legacyId'));
+      if (d1.existsSync()) dirBytes += _dirSizeSync(d1);
+      if (d2.existsSync()) dirBytes += _dirSizeSync(d2);
+      if (d1.existsSync() || d2.existsSync()) {
+        foundLegacyIds.add(legacyId);
+        legacyBytes += dirBytes;
+      }
+    }
+
+    if (!mounted) return;
+    state = TtsModelsState(
+      entries: map,
+      initialized: true,
+      legacyModelIds: List<String>.unmodifiable(foundLegacyIds),
+      legacyModelsSizeBytes: legacyBytes,
+    );
+
+    // 若当前尚未选定模型或选中的旧模型已下架且无安装，自动切换到第一个可用模型或清空无效 ID。
     final activeId = _configController.state.activeTtsModelId;
-    if (activeId.isEmpty || !(map[activeId]?.isInstalled ?? false)) {
+    final activeInvalidOrMissing =
+        activeId.isEmpty || !(map[activeId]?.isInstalled ?? false);
+    if (activeInvalidOrMissing) {
       final firstInstalled = map.values
           .cast<TtsModelStatusEntry?>()
           .firstWhere((e) => e?.isInstalled == true, orElse: () => null);
@@ -243,6 +300,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
           firstInstalled.spec.id,
           speakerId: firstInstalled.spec.speakers.first.id,
         );
+      } else if (activeId.isNotEmpty && TtsModelCatalog.byId(activeId) == null) {
+        await _configController.setActiveTtsModel('', speakerId: 0);
       }
     }
   }
@@ -261,19 +320,37 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
         modelId: transform(cur),
       },
       initialized: state.initialized,
+      legacyModelIds: state.legacyModelIds,
+      legacyModelsSizeBytes: state.legacyModelsSizeBytes,
     );
   }
 
-  /// 下载或从断点续传安装指定模型（支持前台服务保活与国内镜像/官方源降级）。
-  Future<String?> downloadModel(String modelId, {bool? preferCnMirror}) async {
+  /// 下载或从断点续传安装指定模型（严格使用用户所选单一镜像 + 前台服务保活）。
+  Future<String?> downloadModel(
+    String modelId, {
+    String? mirrorIdOverride,
+    String? customPrefixOverride,
+  }) async {
     final spec = TtsModelCatalog.byId(modelId);
     if (spec == null) return '未知模型：$modelId';
+    if (spec.isSystemTts) return null;
     if (state.entries[modelId]?.isBusy == true) return null;
+
+    final mirrorId = mirrorIdOverride ?? _configController.state.ttsDownloadMirror;
+    final customPrefix =
+        customPrefixOverride ?? _configController.state.customTtsMirrorPrefix;
+    if (mirrorId == TtsModelCatalog.mirrorCustom) {
+      final err = TtsModelCatalog.validateCustomMirrorPrefix(customPrefix);
+      if (err != null) {
+        _updateEntry(modelId, (cur) => cur.copyWith(error: err));
+        return err;
+      }
+    }
+    final mirrorOpt = TtsModelCatalog.mirrorById(mirrorId);
 
     _userPausedModelIds.remove(modelId);
     _autoResumeModelIds.remove(modelId);
 
-    final useCn = preferCnMirror ?? _configController.state.preferCnMirror;
     final cancelToken = CancelToken();
     _cancelTokens[modelId] = cancelToken;
 
@@ -293,8 +370,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
         downloadedBytes: initialPartial.downloadedBytes,
         totalBytes: initialPartial.totalBytes,
         statusText: initialPartial.downloadedBytes > 0
-            ? '正在从断点续传（已下载 ${formatBytes(initialPartial.downloadedBytes)}）...'
-            : '正在连接下载源...',
+            ? '正在通过 ${mirrorOpt.label} 从断点续传（已下载 ${formatBytes(initialPartial.downloadedBytes)}）...'
+            : '正在连接 ${mirrorOpt.label}...',
         clearError: true,
       ),
     );
@@ -316,7 +393,10 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       final totalAssets = spec.assets.length;
       for (var idx = 0; idx < totalAssets; idx++) {
         final asset = spec.assets[idx];
-        final urls = asset.orderedUrls(preferCnMirror: useCn);
+        final urls = asset.urlsForMirror(
+          mirrorId: mirrorId,
+          customPrefix: customPrefix,
+        );
         final destFile = File(p.join(tmpDir.path, asset.filename));
 
         await _downloader.download(
@@ -329,8 +409,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
             final overall = ((idx + assetFrac) / totalAssets) * 0.88;
             final pct = (overall * 100).round().clamp(0, 88);
             final text = total > 0
-                ? '下载中 ${(assetFrac * 100).toStringAsFixed(0)}% · ${formatBytes(received)} / ${formatBytes(total)}（源 ${mirrorIdx + 1}/$mirrorCount）'
-                : '下载中 ${formatBytes(received)}（源 ${mirrorIdx + 1}/$mirrorCount）';
+                ? '下载中 ${(assetFrac * 100).toStringAsFixed(0)}% · ${formatBytes(received)} / ${formatBytes(total)}（${mirrorOpt.label}）'
+                : '下载中 ${formatBytes(received)}（${mirrorOpt.label}）';
 
             _updateEntry(
               modelId,
@@ -442,8 +522,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       _autoResumeModelIds.add(modelId);
       final hasPart = partial.downloadedBytes > 0;
       final errMsg = hasPart
-          ? '下载中断（已保留断点），切回前台或点击继续下载即可续传'
-          : '下载失败：${e.message}';
+          ? '「${mirrorOpt.label}」下载中断（已保留断点），可切换上方镜像或切回前台继续下载'
+          : '「${mirrorOpt.label}」下载失败，请切换上方下载镜像后重试：${e.message}';
       _updateEntry(
         modelId,
         (cur) => cur.copyWith(
@@ -468,8 +548,8 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       }
       final rawMsg = e.toString().replaceFirst('Exception: ', '');
       final msg = hasPart
-          ? '下载中断（已保留断点），切回前台或点击继续下载即可续传'
-          : rawMsg;
+          ? '「${mirrorOpt.label}」下载中断（已保留断点），可切换上方镜像或切回前台继续下载'
+          : '「${mirrorOpt.label}」下载失败，请切换上方下载镜像后重试：$rawMsg';
       _updateEntry(
         modelId,
         (cur) => cur.copyWith(
@@ -539,6 +619,82 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       if (entry == null || entry.isInstalled || entry.isBusy) continue;
       unawaited(downloadModel(id));
     }
+  }
+
+  /// 清理已下架的旧模型（Kokoro / Piper）目录与断点缓存，释放手机存储空间。
+  Future<int> cleanupLegacyModels() async {
+    final root = await _modelsRoot();
+    var freed = 0;
+    for (final legacyId in TtsModelCatalog.legacyModelIds) {
+      for (final dir in <Directory>[
+        Directory(p.join(root.path, legacyId)),
+        Directory(p.join(root.path, '.tmp_$legacyId')),
+      ]) {
+        if (await dir.exists()) {
+          freed += _dirSizeSync(dir);
+          await dir.delete(recursive: true);
+        }
+      }
+    }
+    if (mounted) {
+      state = TtsModelsState(
+        entries: state.entries,
+        initialized: state.initialized,
+        legacyModelIds: const <String>[],
+        legacyModelsSizeBytes: 0,
+      );
+    }
+    return freed;
+  }
+
+  /// 为 ZipVoice 导入自定义参考音频（WAV + 对应文本），持久化拷贝后刷新路径配置。
+  Future<String?> importZipVoiceReferenceAudio(
+    File wavFile,
+    String referenceText,
+  ) async {
+    final trimmedText = referenceText.trim();
+    if (trimmedText.isEmpty) {
+      return '请填写参考音频中朗读的文字内容';
+    }
+    if (!await wavFile.exists()) {
+      return '所选 WAV 文件不存在';
+    }
+    try {
+      final bytes = await wavFile.readAsBytes();
+      final decoded = decodeWavToFloat32(bytes);
+      final durS =
+          decoded.sampleRate > 0 ? decoded.samples.length / decoded.sampleRate : 0.0;
+      if (durS < 1.0) {
+        return '参考音频过短（不足 1 秒），请选择 3-10 秒清晰人声 WAV';
+      }
+      if (durS > 25.0) {
+        return '参考音频过长（${durS.toStringAsFixed(1)} 秒），请裁剪至 3-15 秒以保证手机推理速度';
+      }
+      final root = await _modelsRoot();
+      final dest = File(p.join(root.path, 'zipvoice_custom_ref.wav'));
+      await dest.writeAsBytes(bytes, flush: true);
+      await _configController.setZipvoiceReference(
+        audioPath: dest.path,
+        text: trimmedText,
+      );
+      await refresh();
+      return null;
+    } catch (e) {
+      return '参考音频校验失败：$e';
+    }
+  }
+
+  /// 恢复 ZipVoice 内置默认参考音频与文本。
+  Future<void> resetZipVoiceReferenceAudio() async {
+    final root = await _modelsRoot();
+    final customFile = File(p.join(root.path, 'zipvoice_custom_ref.wav'));
+    if (await customFile.exists()) {
+      try {
+        await customFile.delete();
+      } catch (_) {}
+    }
+    await _configController.setZipvoiceReference(audioPath: '', text: '');
+    await refresh();
   }
 
   /// 从手机本地压缩包（`.tar.bz2` / `.tar.gz` / `.zip`）或单文件（如 `.onnx` vocoder）导入模型。
@@ -740,6 +896,17 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     }
     if (modelPath == null) return null;
 
+    var decoderPath = '';
+    if (spec.decoderFileCandidates.isNotEmpty) {
+      String? foundDecoder;
+      for (final candidate in spec.decoderFileCandidates) {
+        foundDecoder = findFile(candidate);
+        if (foundDecoder != null) break;
+      }
+      if (foundDecoder == null) return null;
+      decoderPath = foundDecoder;
+    }
+
     final tokensPath = findFile(spec.tokensFile);
     if (tokensPath == null) return null;
 
@@ -759,16 +926,62 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       if (found != null && found.isNotEmpty) lexicons.add(found);
     }
 
+    final ruleFsts = <String>[];
+    for (final fst in spec.ruleFstFiles) {
+      final found = findFile(fst);
+      if (found != null && found.isNotEmpty) ruleFsts.add(found);
+    }
+
+    var refAudioPath = '';
+    var refText = '';
+    if (spec.kind == TtsModelKind.zipvoice) {
+      final customPath = _configController.state.zipvoiceRefAudioPath;
+      final customText = _configController.state.zipvoiceRefText;
+      if (customPath.isNotEmpty &&
+          customText.isNotEmpty &&
+          File(customPath).existsSync()) {
+        refAudioPath = customPath;
+        refText = customText;
+      } else {
+        refAudioPath = findFile(spec.defaultReferenceAudio) ?? '';
+        if (refAudioPath.isEmpty) {
+          for (final dir in <Directory>[
+            Directory(p.join(searchRoot.path, 'test_wavs')),
+            Directory(p.join(modelDir.path, 'test_wavs')),
+          ]) {
+            if (dir.existsSync()) {
+              final wav = dir
+                  .listSync()
+                  .whereType<File>()
+                  .firstWhere(
+                    (f) => f.path.toLowerCase().endsWith('.wav'),
+                    orElse: () => File(''),
+                  );
+              if (wav.path.isNotEmpty) {
+                refAudioPath = wav.path;
+                break;
+              }
+            }
+          }
+        }
+        refText = spec.defaultReferenceText;
+      }
+    }
+
     return ResolvedTtsModelPaths(
       spec: spec,
       rootDir: searchRoot.path,
       modelPath: modelPath,
+      decoderPath: decoderPath,
       tokensPath: tokensPath,
       voicesPath: voicesPath ?? '',
       vocoderPath: vocoderPath ?? '',
       lexiconPath: lexicons.join(','),
       dataDir: findDir(spec.dataDirName),
       dictDir: findDir(spec.dictDirName),
+      ruleFsts: ruleFsts.join(','),
+      referenceAudioPath: refAudioPath,
+      referenceText: refText,
     );
   }
 

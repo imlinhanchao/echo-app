@@ -84,7 +84,7 @@ void main() {
 
       // 第 2 步：展示离线语音模型卡片，滚动到底部点击跳过进入书架
       expect(find.text('选择一个离线语音模型'), findsOneWidget);
-      await tester.drag(find.byType(ListView), const Offset(0, -500));
+      await tester.ensureVisible(find.byKey(const Key('onboarding_finish_button')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('onboarding_finish_button')));
       await tester.pumpAndSettle();

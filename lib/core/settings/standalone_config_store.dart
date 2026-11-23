@@ -14,27 +14,45 @@ class StandaloneConfig {
     this.activeTtsModelId = '',
     this.activeTtsSpeakerId = 0,
     this.defaultTtsSpeed = 1.0,
-    this.preferCnMirror = true,
+    this.ttsDownloadMirror = 'ghfast',
+    this.customTtsMirrorPrefix = '',
+    this.zipvoiceRefAudioPath = '',
+    this.zipvoiceRefText = '',
+    this.systemTtsEngine = '',
+    this.systemTtsVoice = '',
     this.keepScreenOnWhileReading = true,
   });
 
-  factory StandaloneConfig.fromJson(Map<String, dynamic> json) =>
-      StandaloneConfig(
-        ebookApiBaseUrl: (json['ebook_api_base_url'] as String? ?? '').trim(),
-        ebookApiKey: (json['ebook_api_key'] as String? ?? '').trim(),
-        onboardingCompleted: json['onboarding_completed'] as bool? ?? false,
-        activeTtsModelId: (json['active_tts_model_id'] as String? ?? '').trim(),
-        activeTtsSpeakerId:
-            (json['active_tts_speaker_id'] as num?)?.toInt() ?? 0,
-        defaultTtsSpeed:
-            ((json['default_tts_speed'] as num?)?.toDouble() ?? 1.0).clamp(
-              0.5,
-              2.5,
-            ),
-        preferCnMirror: json['prefer_cn_mirror'] as bool? ?? true,
-        keepScreenOnWhileReading:
-            json['keep_screen_on_while_reading'] as bool? ?? true,
-      );
+  factory StandaloneConfig.fromJson(Map<String, dynamic> json) {
+    final legacyPreferCn = json['prefer_cn_mirror'] as bool? ?? true;
+    final rawMirror = (json['tts_download_mirror'] as String? ?? '').trim();
+    final mirrorId = rawMirror.isNotEmpty
+        ? rawMirror
+        : (legacyPreferCn ? 'ghfast' : 'github');
+    return StandaloneConfig(
+      ebookApiBaseUrl: (json['ebook_api_base_url'] as String? ?? '').trim(),
+      ebookApiKey: (json['ebook_api_key'] as String? ?? '').trim(),
+      onboardingCompleted: json['onboarding_completed'] as bool? ?? false,
+      activeTtsModelId: (json['active_tts_model_id'] as String? ?? '').trim(),
+      activeTtsSpeakerId:
+          (json['active_tts_speaker_id'] as num?)?.toInt() ?? 0,
+      defaultTtsSpeed:
+          ((json['default_tts_speed'] as num?)?.toDouble() ?? 1.0).clamp(
+            0.5,
+            2.5,
+          ),
+      ttsDownloadMirror: mirrorId,
+      customTtsMirrorPrefix:
+          (json['custom_tts_mirror_prefix'] as String? ?? '').trim(),
+      zipvoiceRefAudioPath:
+          (json['zipvoice_ref_audio_path'] as String? ?? '').trim(),
+      zipvoiceRefText: (json['zipvoice_ref_text'] as String? ?? '').trim(),
+      systemTtsEngine: (json['system_tts_engine'] as String? ?? '').trim(),
+      systemTtsVoice: (json['system_tts_voice'] as String? ?? '').trim(),
+      keepScreenOnWhileReading:
+          json['keep_screen_on_while_reading'] as bool? ?? true,
+    );
+  }
 
   final String ebookApiBaseUrl;
   final String ebookApiKey;
@@ -42,8 +60,15 @@ class StandaloneConfig {
   final String activeTtsModelId;
   final int activeTtsSpeakerId;
   final double defaultTtsSpeed;
-  final bool preferCnMirror;
+  final String ttsDownloadMirror;
+  final String customTtsMirrorPrefix;
+  final String zipvoiceRefAudioPath;
+  final String zipvoiceRefText;
+  final String systemTtsEngine;
+  final String systemTtsVoice;
   final bool keepScreenOnWhileReading;
+
+  bool get preferCnMirror => ttsDownloadMirror != 'github';
 
   bool get hasEbookApi => ebookApiBaseUrl.trim().isNotEmpty;
 
@@ -54,6 +79,12 @@ class StandaloneConfig {
     'active_tts_model_id': activeTtsModelId,
     'active_tts_speaker_id': activeTtsSpeakerId,
     'default_tts_speed': defaultTtsSpeed,
+    'tts_download_mirror': ttsDownloadMirror,
+    'custom_tts_mirror_prefix': customTtsMirrorPrefix,
+    'zipvoice_ref_audio_path': zipvoiceRefAudioPath,
+    'zipvoice_ref_text': zipvoiceRefText,
+    'system_tts_engine': systemTtsEngine,
+    'system_tts_voice': systemTtsVoice,
     'prefer_cn_mirror': preferCnMirror,
     'keep_screen_on_while_reading': keepScreenOnWhileReading,
   };
@@ -65,7 +96,12 @@ class StandaloneConfig {
     String? activeTtsModelId,
     int? activeTtsSpeakerId,
     double? defaultTtsSpeed,
-    bool? preferCnMirror,
+    String? ttsDownloadMirror,
+    String? customTtsMirrorPrefix,
+    String? zipvoiceRefAudioPath,
+    String? zipvoiceRefText,
+    String? systemTtsEngine,
+    String? systemTtsVoice,
     bool? keepScreenOnWhileReading,
   }) {
     return StandaloneConfig(
@@ -75,7 +111,13 @@ class StandaloneConfig {
       activeTtsModelId: activeTtsModelId ?? this.activeTtsModelId,
       activeTtsSpeakerId: activeTtsSpeakerId ?? this.activeTtsSpeakerId,
       defaultTtsSpeed: defaultTtsSpeed ?? this.defaultTtsSpeed,
-      preferCnMirror: preferCnMirror ?? this.preferCnMirror,
+      ttsDownloadMirror: ttsDownloadMirror ?? this.ttsDownloadMirror,
+      customTtsMirrorPrefix:
+          customTtsMirrorPrefix ?? this.customTtsMirrorPrefix,
+      zipvoiceRefAudioPath: zipvoiceRefAudioPath ?? this.zipvoiceRefAudioPath,
+      zipvoiceRefText: zipvoiceRefText ?? this.zipvoiceRefText,
+      systemTtsEngine: systemTtsEngine ?? this.systemTtsEngine,
+      systemTtsVoice: systemTtsVoice ?? this.systemTtsVoice,
       keepScreenOnWhileReading:
           keepScreenOnWhileReading ?? this.keepScreenOnWhileReading,
     );
@@ -223,8 +265,34 @@ class StandaloneConfigController extends StateNotifier<StandaloneConfig> {
   Future<void> setDefaultTtsSpeed(double speed) =>
       _commit(state.copyWith(defaultTtsSpeed: speed.clamp(0.5, 2.5)));
 
+  Future<void> setTtsDownloadMirror(String mirrorId) =>
+      _commit(state.copyWith(ttsDownloadMirror: mirrorId.trim()));
+
+  Future<void> setCustomTtsMirrorPrefix(String prefix) =>
+      _commit(state.copyWith(customTtsMirrorPrefix: prefix.trim()));
+
+  Future<void> setZipvoiceReference({
+    required String audioPath,
+    required String text,
+  }) => _commit(
+    state.copyWith(
+      zipvoiceRefAudioPath: audioPath.trim(),
+      zipvoiceRefText: text.trim(),
+    ),
+  );
+
+  Future<void> setSystemTtsSelection({
+    required String enginePackage,
+    String? voiceName,
+  }) => _commit(
+    state.copyWith(
+      systemTtsEngine: enginePackage.trim(),
+      systemTtsVoice: voiceName?.trim() ?? state.systemTtsVoice,
+    ),
+  );
+
   Future<void> setPreferCnMirror(bool prefer) =>
-      _commit(state.copyWith(preferCnMirror: prefer));
+      setTtsDownloadMirror(prefer ? 'ghfast' : 'github');
 
   Future<void> setKeepScreenOnWhileReading(bool enabled) =>
       _commit(state.copyWith(keepScreenOnWhileReading: enabled));
