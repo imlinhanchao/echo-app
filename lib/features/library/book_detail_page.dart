@@ -349,6 +349,29 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                 ),
                 child: Row(
                   children: [
+                    if (readyAudio.isNotEmpty && isEpub) ...[
+                      EchoSquareIconButton(
+                        key: const Key('detail_read'),
+                        tooltip: '阅读原文',
+                        onPressed: () => _openReader(),
+                        icon: Icons.menu_book_outlined,
+                      ),
+                      const SizedBox(width: EchoMetrics.space1),
+                    ],
+                    if (isEpub) ...[
+                      EchoSecondaryButton(
+                        key: const Key('detail_convert'),
+                        onPressed: () => showModalBottomSheet<void>(
+                          context: context,
+                          isScrollControlled: true,
+                          useSafeArea: true,
+                          builder: (_) => ConvertSheet(book: book),
+                        ),
+                        icon: Icons.graphic_eq,
+                        label: readyAudio.isEmpty ? '转有声书' : '再转一版',
+                      ),
+                      const SizedBox(width: EchoMetrics.space1),
+                    ],
                     if (readyAudio.isNotEmpty)
                       Expanded(
                         child: EchoPrimaryButton(
@@ -368,29 +391,6 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                           onPressed: () => _openReader(),
                         ),
                       ),
-                    if (readyAudio.isNotEmpty && isEpub) ...[
-                      const SizedBox(width: EchoMetrics.space1),
-                      EchoSquareIconButton(
-                        key: const Key('detail_read'),
-                        tooltip: '阅读原文',
-                        onPressed: () => _openReader(),
-                        icon: Icons.menu_book_outlined,
-                      ),
-                    ],
-                    if (isEpub) ...[
-                      const SizedBox(width: EchoMetrics.space1),
-                      EchoSecondaryButton(
-                        key: const Key('detail_convert'),
-                        onPressed: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          useSafeArea: true,
-                          builder: (_) => ConvertSheet(book: book),
-                        ),
-                        icon: Icons.graphic_eq,
-                        label: readyAudio.isEmpty ? '转有声书' : '再转一版',
-                      ),
-                    ],
                   ],
                 ),
               ),

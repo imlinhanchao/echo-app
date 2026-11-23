@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/settings/server_address_store.dart';
 import '../../design/echo_ambient.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../settings/server_address_page.dart';
@@ -305,65 +306,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               ),
                             ],
                             const SizedBox(height: EchoMetrics.space3),
-                            // 靛蓝紫渐变主登录按钮
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(
-                                  EchoMetrics.radiusControl,
-                                ),
-                                gradient: LinearGradient(
-                                  colors: _busy
-                                      ? [
-                                          tokens.primary.withValues(alpha: 0.5),
-                                          const Color(0xFF8B5CF6)
-                                              .withValues(alpha: 0.5),
-                                        ]
-                                      : [
-                                          tokens.primary,
-                                          const Color(0xFF7C3AED),
-                                        ],
-                                ),
-                                boxShadow: _busy
-                                    ? null
-                                    : [
-                                        BoxShadow(
-                                          color: tokens.primary
-                                              .withValues(alpha: 0.36),
-                                          blurRadius: 18,
-                                          offset: const Offset(0, 6),
-                                        ),
-                                      ],
-                              ),
-                              child: FilledButton(
-                                key: const Key('login_submit'),
-                                onPressed: _busy ? null : _submit,
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.transparent,
-                                  shadowColor: Colors.transparent,
-                                  minimumSize: const Size.fromHeight(48),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(
-                                      EchoMetrics.radiusControl,
-                                    ),
-                                  ),
-                                ),
-                                child: _busy
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Text(
-                                        '登录',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                              ),
+                            // 靛蓝紫渐变主登录按钮（与全站 EchoPrimaryButton 一致）
+                            EchoPrimaryButton(
+                              key: const Key('login_submit'),
+                              label: '登录',
+                              busy: _busy,
+                              onPressed: _busy ? null : _submit,
                             ),
                             const SizedBox(height: EchoMetrics.space1),
                             TextButton(

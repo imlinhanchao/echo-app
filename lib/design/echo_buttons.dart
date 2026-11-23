@@ -40,15 +40,9 @@ class EchoPrimaryButton extends StatelessWidget {
                 ]
               : <Color>[tokens.primary, const Color(0xFF7C3AED)],
         ),
-        boxShadow: disabled
-            ? null
-            : <BoxShadow>[
-                BoxShadow(
-                  color: tokens.primary.withValues(alpha: 0.34),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+        border: Border.all(
+          color: Colors.white.withValues(alpha: disabled ? 0.08 : 0.18),
+        ),
       ),
       child: Material(
         color: Colors.transparent,
