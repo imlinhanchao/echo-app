@@ -46,6 +46,8 @@ class ProvidersController extends StateNotifier<ProvidersState> {
       );
     } on ApiException catch (e) {
       state = state.copyWith(isLoading: false, error: e.message);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: '加载失败：$e');
     }
   }
 
@@ -74,6 +76,8 @@ class ProvidersController extends StateNotifier<ProvidersState> {
       return null;
     } on ApiException catch (e) {
       return e.message;
+    } catch (e) {
+      return '保存失败：$e';
     }
   }
 
@@ -85,6 +89,9 @@ class ProvidersController extends StateNotifier<ProvidersState> {
     } on ApiException catch (e) {
       await refresh();
       return e.message;
+    } catch (e) {
+      await refresh();
+      return '验证失败：$e';
     }
   }
 
@@ -95,6 +102,8 @@ class ProvidersController extends StateNotifier<ProvidersState> {
       return null;
     } on ApiException catch (e) {
       return e.message;
+    } catch (e) {
+      return '删除失败：$e';
     }
   }
 }

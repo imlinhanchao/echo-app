@@ -110,11 +110,23 @@ class EbookApiClient {
   Future<T> _guard<T>(Future<T> Function() action) async {
     try {
       return await action();
+    } on ApiException {
+      rethrow;
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
         throw const ApiException(code: 'CANCELLED', message: '下载已取消');
       }
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        throw const ApiException(
+          code: 'TIMEOUT',
+          message: '请求超时，书源镜像响应过慢或网络不可达，请重试或切换镜像',
+        );
+      }
       throw ApiException.fromResponse(e.response);
+    } catch (e) {
+      throw ApiException(code: 'CLIENT_ERROR', message: '请求处理失败：$e');
     }
   }
 
@@ -164,7 +176,7 @@ class EbookApiClient {
             email: '服务端默认凭据',
           );
         } else {
-          account = const ProviderAccountInfo(configured: false);
+          account = null;
         }
         return ProviderInfo(
           id: id,
@@ -202,7 +214,10 @@ class EbookApiClient {
           'email': email.trim(),
           'password': password,
         },
-        options: Options(headers: _authHeaders()),
+        options: Options(
+          headers: _authHeaders(),
+          receiveTimeout: const Duration(seconds: 95),
+        ),
       );
       return _parseSealResult(providerId, resp.data);
     });
@@ -219,7 +234,10 @@ class EbookApiClient {
       final resp = await _dio.post<Map<String, dynamic>>(
         '/v1/providers/$providerId/seal',
         data: <String, dynamic>{'credentials': credentials, 'verify': verify},
-        options: Options(headers: _authHeaders()),
+        options: Options(
+          headers: _authHeaders(),
+          receiveTimeout: const Duration(seconds: 95),
+        ),
       );
       return _parseSealResult(providerId, resp.data);
     });
@@ -238,7 +256,10 @@ class EbookApiClient {
       final resp = await _dio.post<Map<String, dynamic>>(
         '/v1/providers/$providerId/verify',
         data: const <String, dynamic>{},
-        options: Options(headers: _authHeaders(providerToken: token)),
+        options: Options(
+          headers: _authHeaders(providerToken: token),
+          receiveTimeout: const Duration(seconds: 95),
+        ),
       );
       final data = resp.data ?? const <String, dynamic>{};
       final accJson = data['account'];
@@ -291,7 +312,10 @@ class EbookApiClient {
       final resp = await _dio.get<Map<String, dynamic>>(
         '/v1/search',
         queryParameters: qp,
-        options: Options(headers: _authHeaders(providerToken: token)),
+        options: Options(
+          headers: _authHeaders(providerToken: token),
+          receiveTimeout: const Duration(seconds: 95),
+        ),
       );
       return SearchPageInfo.fromJson(resp.data ?? const <String, dynamic>{});
     });
@@ -360,11 +384,10 @@ class EbookApiClient {
   }
 
   ProviderAccountInfo _parseAccountInfo(Map<String, dynamic> json) {
+    final rawStatus = (json['status'] as String?)?.trim() ?? '';
     return ProviderAccountInfo(
       configured: true,
-      status: (json['status'] as String? ?? 'ok').isEmpty
-          ? 'ok'
-          : (json['status'] as String),
+      status: rawStatus.isEmpty ? 'ok' : rawStatus,
       email: json['email'] as String? ?? '',
       dailyUsed: (json['daily_used'] as num?)?.toInt() ?? 0,
       dailyLimit: (json['daily_limit'] as num?)?.toInt() ?? 0,

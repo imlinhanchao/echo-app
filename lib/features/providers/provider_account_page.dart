@@ -41,19 +41,27 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
   ) async {
     if (_saving) return;
     setState(() => _saving = true);
-    final error = await ref
-        .read(providersControllerProvider.notifier)
-        .saveAccount(
-          providerId: providerId,
-          mode: _mode,
-          domain: _selectedDomain ?? defaultDomain,
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
-          remixUserId: _remixUserIdController.text.trim(),
-          remixUserKey: _remixUserKeyController.text.trim(),
-        );
+    String? error;
+    try {
+      error = await ref
+          .read(providersControllerProvider.notifier)
+          .saveAccount(
+            providerId: providerId,
+            mode: _mode,
+            domain: _selectedDomain ?? defaultDomain,
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+            remixUserId: _remixUserIdController.text.trim(),
+            remixUserKey: _remixUserKeyController.text.trim(),
+          );
+    } catch (e) {
+      error = '保存失败：$e';
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
     if (!mounted) return;
-    setState(() => _saving = false);
     if (error != null) {
       ScaffoldMessenger.maybeOf(
         context,
@@ -129,7 +137,7 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
   }
 }
 
-class _AccountStatusCard extends StatelessWidget {
+class _AccountStatusCard extends StatefulWidget {
   const _AccountStatusCard({
     required this.provider,
     required this.onVerify,
@@ -141,10 +149,19 @@ class _AccountStatusCard extends StatelessWidget {
   final Future<String?> Function(String providerId) onRemove;
 
   @override
+  State<_AccountStatusCard> createState() => _AccountStatusCardState();
+}
+
+class _AccountStatusCardState extends State<_AccountStatusCard> {
+  bool _verifying = false;
+
+  @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
+    final provider = widget.provider;
     final account = provider.account;
+    final hasAccount = account != null && account.configured;
     final providerId = provider.id;
 
     return Card(
@@ -165,7 +182,7 @@ class _AccountStatusCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                if (account == null)
+                if (!hasAccount)
                   Text(
                     '未配置',
                     key: Key('provider_${provider.id}_unconfigured'),
@@ -197,7 +214,7 @@ class _AccountStatusCard extends StatelessWidget {
                   ),
               ],
             ),
-            if (account != null) ...[
+            if (hasAccount) ...[
               const SizedBox(height: EchoMetrics.space1),
               if (account.email.isNotEmpty)
                 Text(
@@ -227,16 +244,34 @@ class _AccountStatusCard extends StatelessWidget {
                 children: [
                   TextButton.icon(
                     key: Key('provider_${providerId}_verify'),
-                    onPressed: () async {
-                      final error = await onVerify(providerId);
-                      if (error != null && context.mounted) {
-                        ScaffoldMessenger.maybeOf(
-                          context,
-                        )?.showSnackBar(SnackBar(content: Text(error)));
-                      }
-                    },
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('重新验证'),
+                    onPressed: _verifying
+                        ? null
+                        : () async {
+                            final messenger = ScaffoldMessenger.maybeOf(context);
+                            setState(() => _verifying = true);
+                            String? error;
+                            try {
+                              error = await widget.onVerify(providerId);
+                            } catch (e) {
+                              error = '验证失败：$e';
+                            } finally {
+                              if (mounted) setState(() => _verifying = false);
+                            }
+                            if (!mounted) return;
+                            messenger?.showSnackBar(
+                              SnackBar(
+                                content: Text(error ?? '账号验证通过'),
+                              ),
+                            );
+                          },
+                    icon: _verifying
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh, size: 18),
+                    label: Text(_verifying ? '验证中...' : '重新验证'),
                   ),
                   TextButton.icon(
                     key: Key('provider_${providerId}_delete'),
@@ -261,7 +296,7 @@ class _AccountStatusCard extends StatelessWidget {
                         ),
                       );
                       if (confirmed == true) {
-                        await onRemove(providerId);
+                        await widget.onRemove(providerId);
                       }
                     },
                     icon: const Icon(Icons.delete_outline, size: 18),
@@ -346,6 +381,7 @@ class _AccountFormCard extends StatelessWidget {
             if (domains.isNotEmpty)
               DropdownButtonFormField<String>(
                 key: const Key('account_domain_dropdown'),
+                isExpanded: true,
                 initialValue: selectedDomain ?? domains.first,
                 decoration: const InputDecoration(
                   labelText: '镜像域名',
@@ -353,7 +389,10 @@ class _AccountFormCard extends StatelessWidget {
                 ),
                 items: [
                   for (final d in domains)
-                    DropdownMenuItem(value: d, child: Text(d)),
+                    DropdownMenuItem(
+                      value: d,
+                      child: Text(d, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: onDomainChanged,
               ),
