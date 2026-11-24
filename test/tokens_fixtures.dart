@@ -1,35 +1,35 @@
 /// 测试夹具：与 assets/design-tokens.json 的 light/dark 段一一对应。
 /// 用于验证 Token 解析与主题构建，不依赖资产 I/O 的用例使用此处常量。
 const Map<String, dynamic> darkColors = <String, dynamic>{
-  'primary': {'base': '#6366F1', 'hover': '#818CF8', 'active': '#4F46E5'},
-  'accent': {'base': '#FB923C'},
-  'surface': {'base': '#020617', 'elevated': '#0F172A', 'subtle': '#1E293B'},
+  'primary': {'base': '#D4AE74', 'hover': '#E2C28F', 'active': '#B89055'},
+  'accent': {'base': '#B08B5A'},
+  'surface': {'base': '#0D0E10', 'elevated': '#16171B', 'subtle': '#24262B'},
   'text': {
-    'primary': '#F1F5F9',
-    'secondary': '#94A3B8',
-    'disabled': '#475569',
-    'on-primary': '#FFFFFF',
+    'primary': '#F3EFE8',
+    'secondary': '#9E9890',
+    'disabled': '#5E5A54',
+    'on-primary': '#14120F',
   },
-  'status': {'success': '#4ADE80', 'error': '#F87171', 'warning': '#FBBF24'},
-  'focus': {'ring': '#818CF8'},
+  'status': {'success': '#6CC08E', 'error': '#E07373', 'warning': '#E0B462'},
+  'focus': {'ring': '#D4AE74'},
   'reading': {
-    'highlight-sentence': 'rgba(99, 102, 241, 0.24)',
-    'paper-warm': '#0B1220',
-    'paper-text': '#E8E3D8',
+    'highlight-sentence': 'rgba(212, 174, 116, 0.20)',
+    'paper-warm': '#12110F',
+    'paper-text': '#EAE4D8',
   },
 };
 
 const Map<String, dynamic> lightColors = <String, dynamic>{
-  'primary': {'base': '#4F46E5', 'hover': '#4338CA', 'active': '#3730A3'},
-  'accent': {'base': '#F97316'},
-  'surface': {'base': '#F8FAFC', 'elevated': '#FFFFFF', 'subtle': '#E2E8F0'},
+  'primary': {'base': '#8F6836', 'hover': '#7A572C', 'active': '#634622'},
+  'accent': {'base': '#A67C46'},
+  'surface': {'base': '#F8F5F0', 'elevated': '#FFFFFF', 'subtle': '#E8E2D9'},
   'text': {
-    'primary': '#0F172A',
-    'secondary': '#475569',
-    'disabled': '#94A3B8',
-    'on-primary': '#FFFFFF',
+    'primary': '#181613',
+    'secondary': '#6B655D',
+    'disabled': '#A59E94',
+    'on-primary': '#FDFBF7',
   },
-  'status': {'success': '#16A34A', 'error': '#DC2626', 'warning': '#D97706'},
-  'focus': {'ring': '#4F46E5'},
+  'status': {'success': '#2E7D52', 'error': '#C2413B', 'warning': '#B87B22'},
+  'focus': {'ring': '#8F6836'},
   // 注意：light 模式无 reading 节，验证降级默认值。
 };

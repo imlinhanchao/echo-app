@@ -14,10 +14,14 @@ abstract final class EchoMetrics {
   static const double space4 = 32;
   static const double space5 = 48;
 
-  static const double radiusCard = 12;
-  static const double radiusControl = 8;
-  static const double radiusInput = 8;
-  static const double radiusSheet = 16;
+  /// 页面水平统一留白（20dp）
+  static const double pagePadding = 20;
+
+  static const double radiusCard = 16;
+  static const double radiusControl = 12;
+  static const double radiusInput = 12;
+  static const double radiusSheet = 24;
+  static const double radiusPill = 999;
 
   static const Duration motionFast = Duration(milliseconds: 150);
   static const Duration motionBase = Duration(milliseconds: 250);

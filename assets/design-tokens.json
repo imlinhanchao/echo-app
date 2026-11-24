@@ -2,98 +2,109 @@
   "$meta": {
     "app": "Echo",
     "appNameZh": "回声",
-    "version": "1.0.0",
-    "updated": "2026-11-20",
+    "version": "2.0.0",
+    "updated": "2026-11-24",
     "mode": "dark-first",
+    "aesthetic": "editorial-minimalism",
     "grid": "8pt (4pt for micro-adjustments)",
-    "notes": "三层 Token 模型：primitive(原始色板) → semantic(语义层, light/dark 双值) → component(组件层)。组件代码中禁止出现裸色值与魔法数字，一律引用语义 Token。"
+    "notes": "极简书房（暖墨黑 & 羊皮纸白）三层 Token 模型：primitive(原始色板) → semantic(语义层, light/dark 双值) → component(组件层)。组件代码中禁止出现裸色值，一律引用语义 Token。"
   },
   "primitive": {
-    "indigo": {
-      "600": "#4F46E5",
-      "500": "#6366F1",
-      "400": "#818CF8"
+    "gold": {
+      "400": "#E2C28F",
+      "500": "#D4AE74",
+      "600": "#B89055",
+      "700": "#8F6836",
+      "800": "#7A572C",
+      "900": "#634622"
     },
-    "orange": {
-      "500": "#F97316",
-      "400": "#FB923C"
+    "bronze": {
+      "500": "#B08B5A",
+      "600": "#A67C46"
     },
-    "slate": {
-      "50": "#F8FAFC",
-      "100": "#E2E8F0",
-      "200": "#E2E8F0",
-      "700": "#334155",
-      "800": "#1E293B",
-      "900": "#0F172A",
-      "950": "#020617"
+    "obsidian": {
+      "950": "#0D0E10",
+      "900": "#16171B",
+      "800": "#24262B",
+      "600": "#5E5A54",
+      "400": "#9E9890",
+      "100": "#F3EFE8"
+    },
+    "parchment": {
+      "50": "#FFFFFF",
+      "100": "#F8F5F0",
+      "200": "#E8E2D9",
+      "400": "#A59E94",
+      "600": "#6B655D",
+      "900": "#181613"
     }
   },
   "light": {
     "colors": {
       "primary": {
-        "base": "#4F46E5",
-        "hover": "#4338CA",
-        "active": "#3730A3"
+        "base": "#8F6836",
+        "hover": "#7A572C",
+        "active": "#634622"
       },
       "accent": {
-        "base": "#F97316",
-        "usage": "封面氛围点缀、正在播放动效；不用于可交互状态"
+        "base": "#A67C46",
+        "usage": "书籍装帧、阅读徽章、细腻分隔强调"
       },
       "surface": {
-        "base": "#F8FAFC",
+        "base": "#F8F5F0",
         "elevated": "#FFFFFF",
-        "subtle": "#E2E8F0"
+        "subtle": "#E8E2D9"
       },
       "text": {
-        "primary": "#0F172A",
-        "secondary": "#475569",
-        "disabled": "#94A3B8",
-        "on-primary": "#FFFFFF"
+        "primary": "#181613",
+        "secondary": "#6B655D",
+        "disabled": "#A59E94",
+        "on-primary": "#FDFBF7"
       },
       "status": {
-        "success": "#16A34A",
-        "error": "#DC2626",
-        "warning": "#D97706"
+        "success": "#2E7D52",
+        "error": "#C2413B",
+        "warning": "#B87B22"
       },
       "focus": {
-        "ring": "#4F46E5"
+        "ring": "#8F6836"
       }
     }
   },
   "dark": {
     "colors": {
       "primary": {
-        "base": "#6366F1",
-        "hover": "#818CF8",
-        "active": "#4F46E5"
+        "base": "#D4AE74",
+        "hover": "#E2C28F",
+        "active": "#B89055"
       },
       "accent": {
-        "base": "#FB923C",
-        "usage": "封面氛围点缀、正在播放动效；不用于可交互状态"
+        "base": "#B08B5A",
+        "usage": "书籍装帧、正在朗读细微点缀"
       },
       "surface": {
-        "base": "#020617",
-        "elevated": "#0F172A",
-        "subtle": "#1E293B"
+        "base": "#0D0E10",
+        "elevated": "#16171B",
+        "subtle": "#24262B"
       },
       "text": {
-        "primary": "#F1F5F9",
-        "secondary": "#94A3B8",
-        "disabled": "#475569",
-        "on-primary": "#FFFFFF"
+        "primary": "#F3EFE8",
+        "secondary": "#9E9890",
+        "disabled": "#5E5A54",
+        "on-primary": "#14120F"
       },
       "status": {
-        "success": "#4ADE80",
-        "error": "#F87171",
-        "warning": "#FBBF24"
+        "success": "#6CC08E",
+        "error": "#E07373",
+        "warning": "#E0B462"
       },
       "focus": {
-        "ring": "#818CF8"
+        "ring": "#D4AE74"
       },
       "reading": {
-        "highlight-sentence": "rgba(99, 102, 241, 0.24)",
-        "paper-warm": "#0B1220",
-        "paper-text": "#E8E3D8"
+        "highlight-sentence": "rgba(212, 174, 116, 0.20)",
+        "paper-warm": "#12110F",
+        "paper-text": "#EAE4D8"
       }
     }
   },
@@ -101,7 +112,7 @@
     "unit": "rem",
     "bodyMinPx": 14,
     "scale": {
-      "hero": { "desktop": "2rem", "mobile": "1.5rem" },
+      "hero": { "desktop": "2rem", "mobile": "1.625rem" },
       "h2": "1.25rem",
       "h3": "1.0625rem",
       "body": { "size": "1rem", "lineHeight": "1.6" },
@@ -119,20 +130,20 @@
     "scale": [4, 8, 16, 24, 32, 48]
   },
   "radius": {
-    "card": "12px",
-    "control": "8px",
+    "card": "16px",
+    "control": "12px",
     "pill": "999px",
-    "sheet": "16px"
+    "sheet": "24px"
   },
   "elevation": {
-    "dark": "以 surface 层级色区分，不依赖阴影",
-    "glassmorphism": "backdrop-filter: blur(20px) + surface 70% 透明度，用于桌面侧边栏、锁屏播控卡、迷你播放条"
+    "dark": "以暖墨黑层级色与 0.6-0.8px 极细描边区分，避免高饱和阴影与强光晕",
+    "glassmorphism": "backdrop-filter: blur(20px) + surface 82% 透明度，用于桌面侧边栏与浮动迷你播控条"
   },
   "motion": {
     "duration": { "fast": "150ms", "base": "250ms", "sheet": "300ms" },
     "easing": { "enter": "ease-out", "exit": "ease-in" },
     "rules": "仅动画 transform/opacity；遵循 prefers-reduced-motion",
-    "signature": "迷你播放条 → 全屏播放器的 Hero 展开；句子高亮呼吸"
+    "signature": "迷你播放条 → 全屏播放器的 Hero 展开；句子高亮柔和过渡"
   },
   "a11y": {
     "touchTarget": "44pt (iOS) / 48dp (Android) / 24px (WCAG 2.2 最低)",

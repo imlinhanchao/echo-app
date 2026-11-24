@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'echo_tokens.dart';
 
-/// 全局深空靛蓝氛围背景（对齐 `generated/` 视觉设计稿）：
-/// 深色模式下在 `surfaceBase` 之上叠加柔和的深靛蓝径向微光渐变，消除纯黑平面的沉闷感；
-/// 亮色模式下保持纯净 `surfaceBase`。
+/// 极简书房背景容器：
+/// - 深色模式：暖墨黑 `surfaceBase` 搭配极克制的顶部垂向明暗过渡，零圆环色带光晕；
+/// - 亮色模式：纯净羊皮纸白 `surfaceBase`。
 class EchoAmbientBackground extends StatelessWidget {
   const EchoAmbientBackground({super.key, required this.child});
 
@@ -20,15 +20,14 @@ class EchoAmbientBackground extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: tokens.surfaceBase,
-        gradient: RadialGradient(
-          center: const Alignment(0.0, -0.55),
-          radius: 1.15,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
           colors: <Color>[
-            tokens.primary.withValues(alpha: 0.22),
-            tokens.surfaceElevated.withValues(alpha: 0.65),
+            Color.lerp(tokens.surfaceElevated, tokens.surfaceBase, 0.35)!,
             tokens.surfaceBase,
           ],
-          stops: const <double>[0.0, 0.48, 1.0],
+          stops: const <double>[0.0, 0.28],
         ),
       ),
       child: child,
@@ -36,21 +35,27 @@ class EchoAmbientBackground extends StatelessWidget {
   }
 }
 
-/// 设计稿高光细描边卡片装饰（暗模式下提供微妙玻璃边界层次）。
+/// 统一的 0.7–0.8px 极细分割描边色。
+Color echoHairlineColor(BuildContext context, {double darkAlpha = 0.07}) {
+  final tokens = Theme.of(context).extension<EchoTokens>()!;
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return isDark ? Colors.white.withValues(alpha: darkAlpha) : tokens.surfaceSubtle;
+}
+
+/// 极简浮层/卡片装饰：平实表面色 + 0.8px 细描边，克制不靠浓重阴影。
 BoxDecoration echoElevatedCardDecoration(
   BuildContext context, {
   double radius = 16,
   Color? color,
+  Color? borderColor,
 }) {
   final tokens = Theme.of(context).extension<EchoTokens>()!;
-  final isDark = Theme.of(context).brightness == Brightness.dark;
   return BoxDecoration(
-    color: color ?? tokens.surfaceElevated.withValues(alpha: isDark ? 0.82 : 1),
+    color: color ?? tokens.surfaceElevated,
     borderRadius: BorderRadius.circular(radius),
     border: Border.all(
-      color: isDark
-          ? Colors.white.withValues(alpha: 0.09)
-          : tokens.surfaceSubtle,
+      color: borderColor ?? echoHairlineColor(context),
+      width: 0.8,
     ),
   );
 }

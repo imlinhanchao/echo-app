@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
+import 'echo_ambient.dart';
+import 'echo_metrics.dart';
 import 'echo_tokens.dart';
 
-/// Echo 全站统一按钮尺寸规范：48dp 高 + 14dp 圆角。
+/// Echo 全站统一按钮尺寸规范：46dp 高 + 12dp 圆角。
 abstract final class EchoButtonMetrics {
-  static const double height = 48;
-  static const double radius = 14;
+  static const double height = 46;
+  static const double radius = EchoMetrics.radiusControl;
 }
 
-/// 靛蓝紫渐变主按钮（全站主 CTA 统一 48dp 高 + 14dp 圆角）。
+/// 克制高对比纯色主按钮（去除浓烈紫渐变，凸显温润香槟金质感）。
 class EchoPrimaryButton extends StatelessWidget {
   const EchoPrimaryButton({
     super.key,
@@ -32,17 +34,9 @@ class EchoPrimaryButton extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: radius,
-        gradient: LinearGradient(
-          colors: disabled
-              ? <Color>[
-                  tokens.primary.withValues(alpha: 0.45),
-                  const Color(0xFF7C3AED).withValues(alpha: 0.45),
-                ]
-              : <Color>[tokens.primary, const Color(0xFF7C3AED)],
-        ),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: disabled ? 0.08 : 0.18),
-        ),
+        color: disabled
+            ? tokens.primary.withValues(alpha: 0.42)
+            : tokens.primary,
       ),
       child: Material(
         color: Colors.transparent,
@@ -55,12 +49,12 @@ class EchoPrimaryButton extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Center(
                 child: busy
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: tokens.textOnPrimary,
                         ),
                       )
                     : Row(
@@ -68,7 +62,7 @@ class EchoPrimaryButton extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           if (icon != null) ...[
-                            Icon(icon, color: tokens.textOnPrimary, size: 19),
+                            Icon(icon, color: tokens.textOnPrimary, size: 18),
                             const SizedBox(width: 6),
                           ],
                           Flexible(
@@ -79,7 +73,7 @@ class EchoPrimaryButton extends StatelessWidget {
                               style: Theme.of(context).textTheme.labelLarge
                                   ?.copyWith(
                                     color: tokens.textOnPrimary,
-                                    fontWeight: FontWeight.w700,
+                                    fontWeight: FontWeight.w600,
                                   ),
                             ),
                           ),
@@ -94,7 +88,7 @@ class EchoPrimaryButton extends StatelessWidget {
   }
 }
 
-/// 深色半透明描边次按钮（48dp 高 + 14dp 圆角，与主按钮完全齐平且主次分明）。
+/// 极细描边次按钮（46dp 高 + 12dp 圆角，与主按钮完全齐平且层次分明）。
 class EchoSecondaryButton extends StatelessWidget {
   const EchoSecondaryButton({
     super.key,
@@ -110,20 +104,15 @@ class EchoSecondaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final radius = BorderRadius.circular(EchoButtonMetrics.radius);
+    final disabled = onPressed == null;
 
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.06)
-            : tokens.surfaceSubtle,
-        borderRadius: radius,
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.14)
-              : tokens.textDisabled.withValues(alpha: 0.35),
-        ),
+      decoration: echoElevatedCardDecoration(
+        context,
+        radius: EchoButtonMetrics.radius,
+        color: tokens.surfaceElevated,
+        borderColor: echoHairlineColor(context, darkAlpha: 0.10),
       ),
       child: Material(
         color: Colors.transparent,
@@ -140,7 +129,13 @@ class EchoSecondaryButton extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (icon != null) ...[
-                      Icon(icon, color: tokens.textPrimary, size: 18),
+                      Icon(
+                        icon,
+                        color: disabled
+                            ? tokens.textDisabled
+                            : tokens.textPrimary,
+                        size: 18,
+                      ),
                       const SizedBox(width: 6),
                     ],
                     Flexible(
@@ -149,7 +144,9 @@ class EchoSecondaryButton extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: tokens.textPrimary,
+                          color: disabled
+                              ? tokens.textDisabled
+                              : tokens.textPrimary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -165,7 +162,7 @@ class EchoSecondaryButton extends StatelessWidget {
   }
 }
 
-/// 48×48 圆角矩形图标按钮（14dp 圆角 + 半透明描边，与左右 48dp 主次按钮完全齐平）。
+/// 46×46 圆角矩形图标按钮（12dp 圆角 + 极细描边，与左右 46dp 主次按钮完全齐平）。
 class EchoSquareIconButton extends StatelessWidget {
   const EchoSquareIconButton({
     super.key,
@@ -181,22 +178,16 @@ class EchoSquareIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final radius = BorderRadius.circular(EchoButtonMetrics.radius);
 
     return Tooltip(
       message: tooltip,
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.06)
-              : tokens.surfaceSubtle,
-          borderRadius: radius,
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.14)
-                : tokens.textDisabled.withValues(alpha: 0.35),
-          ),
+        decoration: echoElevatedCardDecoration(
+          context,
+          radius: EchoButtonMetrics.radius,
+          color: tokens.surfaceElevated,
+          borderColor: echoHairlineColor(context, darkAlpha: 0.10),
         ),
         child: Material(
           color: Colors.transparent,
@@ -206,7 +197,13 @@ class EchoSquareIconButton extends StatelessWidget {
             child: SizedBox(
               width: EchoButtonMetrics.height,
               height: EchoButtonMetrics.height,
-              child: Icon(icon, color: tokens.textPrimary, size: 21),
+              child: Icon(
+                icon,
+                color: onPressed == null
+                    ? tokens.textDisabled
+                    : tokens.textPrimary,
+                size: 20,
+              ),
             ),
           ),
         ),

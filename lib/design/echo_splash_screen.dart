@@ -6,8 +6,8 @@ import 'echo_ambient.dart';
 import 'echo_metrics.dart';
 import 'echo_tokens.dart';
 
-/// Echo（回声）特色启动/加载页：
-/// 深靛蓝氛围光晕 + 三重扩散声波涟漪（可视化「回声」）+ 呼吸律动 5 柱声纹徽章 + 精致品牌字标。
+/// Echo（回声）特色启动/加载页（极简书房 Editorial Minimalism）：
+/// 温润暖墨黑底色 + 细腻香槟金三重扩散声波涟漪 + 律动 5 柱声纹徽章 + 精致品牌字标。
 class EchoSplashScreen extends StatefulWidget {
   const EchoSplashScreen({
     super.key,
@@ -65,7 +65,6 @@ class _EchoSplashScreenState extends State<EchoSplashScreen>
           child: Column(
             children: [
               const Spacer(flex: 5),
-              // 核心视觉：声波涟漪 + 律动声纹徽章
               SizedBox(
                 width: 240,
                 height: 240,
@@ -73,7 +72,7 @@ class _EchoSplashScreenState extends State<EchoSplashScreen>
                   animation: _controller,
                   builder: (context, child) {
                     final t = _controller.value;
-                    final breathe = 1.0 + 0.025 * math.sin(t * 2 * math.pi);
+                    final breathe = 1.0 + 0.02 * math.sin(t * 2 * math.pi);
                     return Stack(
                       alignment: Alignment.center,
                       children: [
@@ -89,7 +88,7 @@ class _EchoSplashScreenState extends State<EchoSplashScreen>
                           scale: breathe,
                           child: _BrandWaveformEmblem(
                             progress: t,
-                            primary: tokens.primary,
+                            tokens: tokens,
                             isDark: isDark,
                           ),
                         ),
@@ -100,14 +99,14 @@ class _EchoSplashScreenState extends State<EchoSplashScreen>
               ),
               const SizedBox(height: EchoMetrics.space3),
 
-              // 品牌字标：渐变「回 声」
+              // 品牌字标：象牙米白与温润香槟金过渡「回 声」
               ShaderMask(
                 shaderCallback: (bounds) => LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: isDark
-                      ? [Colors.white, const Color(0xFFC7D2FE)]
-                      : [const Color(0xFF0F172A), tokens.primary],
+                      ? [tokens.textPrimary, tokens.primary]
+                      : [tokens.textPrimary, tokens.primary],
                 ).createShader(bounds),
                 child: Text(
                   '回 声',
@@ -130,7 +129,6 @@ class _EchoSplashScreenState extends State<EchoSplashScreen>
 
               const Spacer(flex: 6),
 
-              // 底部状态提示 + 声波脉动点
               Semantics(
                 container: true,
                 liveRegion: true,
@@ -168,7 +166,7 @@ class _EchoSplashScreenState extends State<EchoSplashScreen>
   }
 }
 
-/// 三重同心声波涟漪：错相扩散、柔和淡出，呼应品牌名「回声」。
+/// 三重同心声波涟漪：错相扩散、柔和淡出。
 class _EchoRipplePainter extends CustomPainter {
   const _EchoRipplePainter({
     required this.progress,
@@ -186,26 +184,24 @@ class _EchoRipplePainter extends CustomPainter {
     final maxRadius = size.width / 2;
     const minRadius = 44.0;
 
-    // 柔和中心光晕
     final glowPaint = Paint()
       ..shader = RadialGradient(
         colors: [
-          primary.withValues(alpha: isDark ? 0.24 : 0.16),
+          primary.withValues(alpha: isDark ? 0.14 : 0.10),
           primary.withValues(alpha: 0.0),
         ],
-      ).createShader(Rect.fromCircle(center: center, radius: maxRadius * 0.85));
-    canvas.drawCircle(center, maxRadius * 0.85, glowPaint);
+      ).createShader(Rect.fromCircle(center: center, radius: maxRadius * 0.8));
+    canvas.drawCircle(center, maxRadius * 0.8, glowPaint);
 
-    // 3 圈错相声波环
     for (var i = 0; i < 3; i++) {
       final phase = (progress + i / 3.0) % 1.0;
       final eased = Curves.easeOutCubic.transform(phase);
       final radius = minRadius + (maxRadius - minRadius) * eased;
-      final opacity = (1.0 - phase) * (isDark ? 0.42 : 0.30);
+      final opacity = (1.0 - phase) * (isDark ? 0.34 : 0.25);
 
       final ringPaint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6 - 0.8 * phase
+        ..strokeWidth = 1.4 - 0.7 * phase
         ..color = primary.withValues(alpha: opacity.clamp(0.0, 1.0));
       canvas.drawCircle(center, radius, ringPaint);
     }
@@ -218,49 +214,49 @@ class _EchoRipplePainter extends CustomPainter {
       oldDelegate.isDark != isDark;
 }
 
-/// 中心玻璃质感声纹徽章：靛蓝紫渐变圆角矩形 + 5 根错相律动声波柱。
+/// 中心沉稳香槟金声纹徽章。
 class _BrandWaveformEmblem extends StatelessWidget {
   const _BrandWaveformEmblem({
     required this.progress,
-    required this.primary,
+    required this.tokens,
     required this.isDark,
   });
 
   final double progress;
-  final Color primary;
+  final EchoTokens tokens;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 88,
-      height: 88,
+      width: 84,
+      height: 84,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            primary,
-            const Color(0xFF8B5CF6),
-          ],
+          colors: [tokens.primary, tokens.primaryActive],
         ),
         border: Border.all(
-          color: Colors.white.withValues(alpha: isDark ? 0.28 : 0.45),
-          width: 1.2,
+          color: Colors.white.withValues(alpha: isDark ? 0.18 : 0.35),
+          width: 0.8,
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: isDark ? 0.45 : 0.32),
-            blurRadius: 32,
+            color: Colors.black.withValues(alpha: isDark ? 0.38 : 0.16),
+            blurRadius: 24,
             offset: const Offset(0, 10),
           ),
         ],
       ),
       child: Center(
         child: CustomPaint(
-          size: const Size(44, 38),
-          painter: _WaveformBarsPainter(progress: progress),
+          size: const Size(42, 36),
+          painter: _WaveformBarsPainter(
+            progress: progress,
+            barColor: tokens.textOnPrimary,
+          ),
         ),
       ),
     );
@@ -268,9 +264,13 @@ class _BrandWaveformEmblem extends StatelessWidget {
 }
 
 class _WaveformBarsPainter extends CustomPainter {
-  const _WaveformBarsPainter({required this.progress});
+  const _WaveformBarsPainter({
+    required this.progress,
+    required this.barColor,
+  });
 
   final double progress;
+  final Color barColor;
 
   static const _baseHeights = <double>[0.36, 0.72, 1.0, 0.68, 0.40];
   static const _phaseOffsets = <double>[0.0, 0.22, 0.45, 0.68, 0.90];
@@ -278,18 +278,20 @@ class _WaveformBarsPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     const barCount = 5;
-    const barWidth = 4.5;
+    const barWidth = 4.2;
     final totalWidth = size.width;
     final gap = (totalWidth - barCount * barWidth) / (barCount - 1);
     final centerY = size.height / 2;
 
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.96)
+      ..color = barColor.withValues(alpha: 0.95)
       ..style = PaintingStyle.fill;
 
     for (var i = 0; i < barCount; i++) {
-      final wave = 0.5 +
-          0.5 * math.sin((progress * 2 * math.pi * 2) + _phaseOffsets[i] * math.pi);
+      final wave =
+          0.5 +
+          0.5 *
+              math.sin((progress * 2 * math.pi * 2) + _phaseOffsets[i] * math.pi);
       final ratio = (_baseHeights[i] * (0.48 + 0.52 * wave)).clamp(0.24, 1.0);
       final h = size.height * ratio;
       final left = i * (barWidth + gap);
@@ -303,7 +305,7 @@ class _WaveformBarsPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_WaveformBarsPainter oldDelegate) =>
-      oldDelegate.progress != progress;
+      oldDelegate.progress != progress || oldDelegate.barColor != barColor;
 }
 
 class _PulseDots extends StatelessWidget {
@@ -317,8 +319,8 @@ class _PulseDots extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(3, (i) {
-        final wave = 0.5 +
-            0.5 * math.sin((progress * 2 * math.pi * 2) - i * 0.85);
+        final wave =
+            0.5 + 0.5 * math.sin((progress * 2 * math.pi * 2) - i * 0.85);
         final scale = 0.72 + 0.42 * wave;
         final alpha = 0.35 + 0.65 * wave;
         return Padding(
@@ -326,8 +328,8 @@ class _PulseDots extends StatelessWidget {
           child: Transform.scale(
             scale: scale,
             child: Container(
-              width: 6,
-              height: 6,
+              width: 5,
+              height: 5,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: color.withValues(alpha: alpha),
