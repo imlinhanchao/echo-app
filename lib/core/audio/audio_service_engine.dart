@@ -27,6 +27,8 @@ class EchoAudioHandler extends BaseAudioHandler {
   final StreamController<void> _rewind = StreamController<void>.broadcast();
 
   AudioPlayer get player => _player;
+  bool _switchingSource = false;
+  bool _keepPlayingAcrossSwitch = false;
   Stream<void> get skipNextRequests => _skipNext.stream;
   Stream<void> get skipPrevRequests => _skipPrev.stream;
   Stream<void> get fastForwardRequests => _fastForward.stream;
@@ -42,8 +44,10 @@ class EchoAudioHandler extends BaseAudioHandler {
     String artist = '',
     Uri? artUri,
   }) async {
-    mediaItem.add(
-      MediaItem(
+    _keepPlayingAcrossSwitch = _player.playing || _keepPlayingAcrossSwitch;
+    _switchingSource = true;
+    try {
+      final baseItem = MediaItem(
         id: uri.toString(),
         album: 'Echo · 回声',
         title: title.isEmpty ? 'Echo · 回声' : title,
@@ -51,20 +55,34 @@ class EchoAudioHandler extends BaseAudioHandler {
         duration: duration,
         // 锁屏 / 通知栏上部"小组件"的封面图
         artUri: artUri,
-      ),
-    );
-    await _player.setAudioSource(
-      AudioSource.uri(uri, headers: headers.isEmpty ? null : headers),
-      initialPosition: initialPosition,
-    );
+      );
+      mediaItem.add(baseItem);
+      final loadedDuration = await _player.setAudioSource(
+        AudioSource.uri(uri, headers: headers.isEmpty ? null : headers),
+        initialPosition: initialPosition,
+      );
+      if (duration == null &&
+          loadedDuration != null &&
+          loadedDuration > Duration.zero) {
+        mediaItem.add(baseItem.copyWith(duration: loadedDuration));
+      }
+    } finally {
+      _switchingSource = false;
+    }
     _broadcast();
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() {
+    _keepPlayingAcrossSwitch = true;
+    return _player.play();
+  }
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() {
+    _keepPlayingAcrossSwitch = false;
+    return _player.pause();
+  }
 
   @override
   Future<void> seek(Duration position) => _player.seek(position);
@@ -77,6 +95,8 @@ class EchoAudioHandler extends BaseAudioHandler {
 
   @override
   Future<void> stop() async {
+    _switchingSource = false;
+    _keepPlayingAcrossSwitch = false;
     await _player.stop();
     mediaItem.add(null);
     playbackState.add(
@@ -112,7 +132,10 @@ class EchoAudioHandler extends BaseAudioHandler {
 
   void _broadcast() {
     final procState = _player.processingState;
-    if (procState == ProcessingState.idle) {
+    if (_switchingSource && procState == ProcessingState.idle) {
+      return;
+    }
+    if (!_switchingSource && procState == ProcessingState.idle) {
       playbackState.add(
         PlaybackState(
           processingState: AudioProcessingState.idle,
@@ -121,12 +144,23 @@ class EchoAudioHandler extends BaseAudioHandler {
       );
       return;
     }
+    final effectivePlaying =
+        _player.playing || (_switchingSource && _keepPlayingAcrossSwitch);
+    final effectiveProcState = (_switchingSource && procState == ProcessingState.idle)
+        ? AudioProcessingState.buffering
+        : (_processingStateMap[procState] ?? AudioProcessingState.idle);
+    if (!_switchingSource &&
+        !_player.playing &&
+        procState != ProcessingState.loading &&
+        procState != ProcessingState.buffering) {
+      _keepPlayingAcrossSwitch = false;
+    }
     playbackState.add(
       PlaybackState(
         controls: <MediaControl>[
           MediaControl.skipToPrevious,
           MediaControl.rewind,
-          if (_player.playing) MediaControl.pause else MediaControl.play,
+          if (effectivePlaying) MediaControl.pause else MediaControl.play,
           MediaControl.fastForward,
           MediaControl.skipToNext,
         ],
@@ -139,9 +173,8 @@ class EchoAudioHandler extends BaseAudioHandler {
         },
         // 紧凑通知栏优先展示：-15s / 播放暂停 / +15s（对齐设计 §4.1 锁屏播控卡）
         androidCompactActionIndices: const <int>[1, 2, 3],
-        processingState:
-            _processingStateMap[procState] ?? AudioProcessingState.idle,
-        playing: _player.playing,
+        processingState: effectiveProcState,
+        playing: effectivePlaying,
         updatePosition: _player.position,
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
@@ -164,6 +197,40 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
   final EchoAudioHandler _handler;
   bool _pausedByInterruption = false;
 
+  @visibleForTesting
+  static const AudioServiceConfig audioServiceConfig = AudioServiceConfig(
+    androidNotificationChannelId: 'org.hancel.echo.playback',
+    androidNotificationChannelName: 'Echo 播放',
+    androidNotificationIcon: 'drawable/ic_stat_echo',
+    // 暂停后允许划掉通知，终止播放时先退出前台状态再彻底撤除通知栏卡片，
+    // 同时保持 androidResumeOnClick 为 true 确保锁屏/蓝牙媒体控件会话激活。
+    androidNotificationOngoing: false,
+    androidStopForegroundOnPause: true,
+    androidResumeOnClick: true,
+    rewindInterval: Duration(seconds: 15),
+    fastForwardInterval: Duration(seconds: 15),
+  );
+
+  @visibleForTesting
+  static Uri? parseArtUri(String? raw) {
+    final trimmed = raw?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    if (trimmed.startsWith('/')) {
+      return Uri.file(trimmed);
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) return null;
+    if (const <String>{
+      'http',
+      'https',
+      'file',
+      'content',
+    }.contains(uri.scheme.toLowerCase())) {
+      return uri;
+    }
+    return null;
+  }
+
   /// 在 main() 中初始化后台媒体会话与音频焦点（来电/耳机拔出自动暂停）；
   /// 非 Android/iOS 平台（桌面/测试）自动跳过并回退 just_audio。
   static Future<void> tryInit() async {
@@ -172,17 +239,7 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     try {
       final handler = await AudioService.init(
         builder: () => EchoAudioHandler(),
-        config: const AudioServiceConfig(
-          androidNotificationChannelId: 'org.hancel.echo.playback',
-          androidNotificationChannelName: 'Echo 播放',
-          androidNotificationIcon: 'drawable/ic_stat_echo',
-          // 暂停后允许划掉通知，终止播放时先退出前台状态再彻底撤除通知栏卡片。
-          androidNotificationOngoing: false,
-          androidStopForegroundOnPause: true,
-          androidResumeOnClick: false,
-          rewindInterval: Duration(seconds: 15),
-          fastForwardInterval: Duration(seconds: 15),
-        ),
+        config: audioServiceConfig,
       );
       final engine = AudioServiceEngine._(handler);
       await engine._initAudioSession();
@@ -261,14 +318,18 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     duration: mediaDuration,
     title: mediaTitle ?? '',
     artist: mediaArtist ?? '',
-    // 本地缓存文件（file://）或远端地址都可；本地文件在 HarmonyOS/华为上更稳
-    artUri: (mediaArtUrl != null && mediaArtUrl.isNotEmpty)
-        ? Uri.tryParse(mediaArtUrl)
-        : null,
+    // 本地缓存文件（file://）或远端地址都可；本地绝对路径自动补全 file://。
+    artUri: parseArtUri(mediaArtUrl),
   );
 
   @override
-  Future<void> play() => _handler.play();
+  Future<void> play() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+    } catch (_) {}
+    await _handler.play();
+  }
 
   @override
   Future<void> pause() => _handler.pause();
