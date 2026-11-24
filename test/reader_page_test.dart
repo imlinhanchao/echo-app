@@ -23,6 +23,8 @@ import 'package:echo/design/echo_metrics.dart';
 import 'package:echo/design/echo_theme.dart';
 import 'package:echo/design/echo_tokens.dart';
 import 'package:echo/features/auth/auth_controller.dart';
+import 'package:echo/features/player/live_tts_mini_bar.dart';
+import 'package:echo/features/player/playback_speed_sheet.dart';
 import 'package:echo/features/reader/reader_page.dart';
 
 import 'tokens_fixtures.dart';
@@ -485,10 +487,44 @@ void main() {
       expect(find.byKey(const Key('reader_page_indicator')), findsOneWidget);
       expect(find.byKey(const Key('reader_global_indicator')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_control_bar')), findsOneWidget);
+      expect(find.byKey(const Key('reader_live_speed_button')), findsOneWidget);
+      expect(find.text('1.0x'), findsOneWidget);
       expect(find.byKey(const Key('reader_live_prev_sentence')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_toggle_play')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_next_sentence')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_stop')), findsOneWidget);
+
+      // 3. 底栏直接打开语速面板并实时调节语速，不溢出且即时生效
+      await tester.tap(find.byKey(const Key('reader_live_speed_button')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('speed_sheet_value')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('speed_preset_1.5x')));
+      await tester.pumpAndSettle();
+      expect(liveCtrl.state.speed, 1.5);
+      expect(fakeAudio.speed, 1.5);
+
+      await tester.tap(find.byKey(const Key('speed_sheet_increase')));
+      await tester.pumpAndSettle();
+      expect(liveCtrl.state.speed, 1.55);
+      expect(fakeAudio.speed, 1.55);
+
+      await tester.tap(find.byKey(const Key('speed_sheet_reset')));
+      await tester.pumpAndSettle();
+      expect(liveCtrl.state.speed, 1.0);
+      expect(fakeAudio.speed, 1.0);
+
+      await tester.tap(find.byKey(const Key('speed_preset_1.25x')));
+      await tester.pumpAndSettle();
+      Navigator.of(
+        tester.element(find.byKey(const Key('speed_sheet_slider'))),
+      ).pop();
+      await tester.pumpAndSettle();
+      expect(find.text('1.25x'), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('reader_bottom_bar'))).height,
+        lessThanOrEqualTo(64.0),
+      );
 
       Icon playButtonIcon() => tester.widget<Icon>(
         find.descendant(
@@ -520,6 +556,86 @@ void main() {
         find.byKey(const Key('reader_bottom_bar')),
       );
       expect(barSizeAfterStop.height, equals(barSizeWithLive.height));
+    });
+
+    test('formatPlaybackSpeed 正确格式化常用及 0.05 步进倍速', () {
+      expect(formatPlaybackSpeed(0.5), '0.5x');
+      expect(formatPlaybackSpeed(0.75), '0.75x');
+      expect(formatPlaybackSpeed(1.0), '1.0x');
+      expect(formatPlaybackSpeed(1.25), '1.25x');
+      expect(formatPlaybackSpeed(1.5), '1.5x');
+      expect(formatPlaybackSpeed(1.05), '1.05x');
+      expect(formatPlaybackSpeed(2.0), '2.0x');
+      expect(formatPlaybackSpeed(2.5), '2.5x');
+    });
+
+    testWidgets('LiveTtsMiniBar 360dp 宽展示调速胶囊且交互正常不溢出', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 720);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final libDir = Directory.systemTemp.createTempSync('echo_mini_spd_lib_');
+      final cacheDir = Directory.systemTemp.createTempSync(
+        'echo_mini_spd_cache_',
+      );
+      addTearDown(() {
+        if (libDir.existsSync()) libDir.deleteSync(recursive: true);
+        if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
+      });
+
+      final libStore = LocalLibraryStore(rootDir: libDir);
+      final localBook = await tester.runAsync(
+        () => libStore.importBytes(
+          Uint8List.fromList(utf8.encode('第一章\n这是迷你朗读条调速测试。')),
+          filename: 'mini_speed.txt',
+        ),
+      );
+      final fakeTts = FakeOnDeviceTtsEngine();
+      final fakeAudio = FakeAudioEngine();
+      addTearDown(fakeAudio.dispose);
+      const fakeModel = ResolvedTtsModelPaths(
+        spec: TtsModelCatalog.meloTtsZhEn,
+        rootDir: '/tmp/fake_melo',
+        modelPath: '/tmp/fake_melo/model.onnx',
+        tokensPath: '/tmp/fake_melo/tokens.txt',
+      );
+      final liveCtrl = LiveTtsPlayerController(
+        libraryStore: libStore,
+        ttsEngine: fakeTts,
+        audioEngine: fakeAudio,
+        resolveActiveModel: () => fakeModel,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          defaultTtsSpeed: 1.0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      await tester.runAsync(() => liveCtrl.playBookChapter(localBook!));
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            liveTtsPlayerProvider.overrideWith((_) => liveCtrl),
+            audioEngineProvider.overrideWithValue(FakeAudioEngine()),
+          ],
+          child: MaterialApp(
+            theme: buildEchoTheme(Brightness.dark, darkTokens),
+            home: const Scaffold(bottomNavigationBar: LiveTtsMiniBar()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('live_tts_mini_speed')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('live_tts_mini_speed')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('speed_preset_1.75x')));
+      await tester.pumpAndSettle();
+      expect(liveCtrl.state.speed, 1.75);
+      expect(fakeAudio.speed, 1.75);
     });
   });
 }

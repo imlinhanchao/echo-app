@@ -860,8 +860,9 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
   }
 
   Future<void> setSpeed(double speed) async {
-    await _engine.setSpeed(speed);
-    state = state.copyWith(speed: speed);
+    final clamped = (speed.clamp(0.5, 2.5) * 20).round() / 20.0;
+    await _engine.setSpeed(clamped);
+    state = state.copyWith(speed: clamped);
   }
 
   Future<void> setVolume(double volume) async {

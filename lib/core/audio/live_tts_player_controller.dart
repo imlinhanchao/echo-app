@@ -117,6 +117,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     required ResolvedTtsModelPaths? Function() resolveActiveModel,
     required StandaloneConfig Function() readConfig,
     ReadingStore? readingStore,
+    Future<void> Function(double speed)? onSpeedChanged,
     Directory? cacheDirOverride,
     int maxCacheBytes = 100 * 1024 * 1024,
     SentenceSplitter? splitter,
@@ -126,6 +127,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
        _resolveActiveModel = resolveActiveModel,
        _readConfig = readConfig,
        _readingStore = readingStore,
+       _onSpeedChanged = onSpeedChanged,
        _cacheDirOverride = cacheDirOverride,
        _maxCacheBytes = maxCacheBytes,
        _splitter = splitter ?? const SentenceSplitter(),
@@ -168,6 +170,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
   final ResolvedTtsModelPaths? Function() _resolveActiveModel;
   final StandaloneConfig Function() _readConfig;
   final ReadingStore? _readingStore;
+  final Future<void> Function(double speed)? _onSpeedChanged;
   final Directory? _cacheDirOverride;
   final int _maxCacheBytes;
   final SentenceSplitter _splitter;
@@ -296,6 +299,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     _transitioningSentence = true;
     _sentenceAudioReady = false;
     _sentenceCache.clear();
+    final rawSpeed = state.hasBook ? state.speed : cfg.defaultTtsSpeed;
+    final activeSpeed = (rawSpeed.clamp(0.5, 2.5) * 20).round() / 20.0;
 
     state = LiveTtsState(
       book: book,
@@ -305,7 +310,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       sentenceIndex: startSentenceIdx,
       isPlaying: true,
       isSynthesizing: true,
-      speed: cfg.defaultTtsSpeed,
+      speed: activeSpeed,
       speakerId: speakerId,
       modelId: resolvedModel.spec.id,
       modelVariantTag: _fnv1aHex(resolvedModel.cacheKey),
@@ -383,6 +388,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
             : null,
       );
       if (!mounted || expectedGen != _generation) return;
+      await _audioEngine.setSpeed(state.speed);
+      if (!mounted || expectedGen != _generation) return;
       _sentenceAudioReady = true;
       _sentenceStartAt = DateTime.now();
       state = state.copyWith(isSynthesizing: false, isPlaying: true);
@@ -418,7 +425,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
         ? '_${state.modelVariantTag}'
         : '';
     final key =
-        'b${bookId}_c${state.chapterIndex}_s${index}_${state.modelId}${variant}_sp${state.speakerId}_v${(state.speed * 100).round()}.wav';
+        'b${bookId}_c${state.chapterIndex}_s${index}_${state.modelId}${variant}_sp${state.speakerId}_v100.wav';
     final outFile = File(p.join(cacheDir.path, key));
     if (await outFile.exists() && await outFile.length() > 44) {
       // 刷新 mtime 用于 LRU
@@ -428,10 +435,11 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       return outFile;
     }
 
+    // 统一按 1.0x 合成标准音频，播放倍速实时交由底层 AudioEngine.setSpeed 变速不变调处理。
     final result = await _ttsEngine.synthesize(
       sentence.text,
       speakerId: state.speakerId,
-      speed: state.speed,
+      speed: 1.0,
     );
     if (expectedGen != _generation) return outFile;
 
@@ -578,14 +586,14 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
   }
 
   Future<void> setSpeed(double speed) async {
-    final clamped = speed.clamp(0.5, 2.5);
+    final clamped = (speed.clamp(0.5, 2.5) * 20).round() / 20.0;
     if ((clamped - state.speed).abs() < 0.01) return;
-    _generation++;
-    _sentenceAudioReady = false;
-    _sentenceCache.clear();
     state = state.copyWith(speed: clamped);
-    if (state.hasBook && state.isPlaying) {
-      await _playSentenceAt(state.sentenceIndex, expectedGen: _generation);
+    if (state.hasBook) {
+      await _audioEngine.setSpeed(clamped);
+    }
+    if (_onSpeedChanged != null) {
+      unawaited(_onSpeedChanged(clamped).catchError((Object _) {}));
     }
   }
 
@@ -642,6 +650,9 @@ liveTtsPlayerProvider =
         ttsEngine: ref.watch(onDeviceTtsEngineProvider),
         audioEngine: engine,
         readingStore: ref.watch(readingStoreProvider),
+        onSpeedChanged: (speed) => ref
+            .read(standaloneConfigProvider.notifier)
+            .setDefaultTtsSpeed(speed),
         resolveActiveModel: () =>
             ref.read(ttsModelManagerProvider.notifier).activeModelPaths,
         readConfig: () => ref.read(standaloneConfigProvider),

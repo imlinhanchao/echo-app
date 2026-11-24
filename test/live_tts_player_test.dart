@@ -389,5 +389,72 @@ void main() {
       expect(controller.state.isPlaying, isTrue);
       expect(controller.state.isSynthesizing, isFalse);
     });
+
+    test(
+      'applies defaultTtsSpeed, updates speed immediately without re-synthesis, persists, and preserves across chapters',
+      () async {
+        const sampleTxt =
+            '第一章 启程\n\n第一句测试实时调速内容。第二句紧接出现用于预合成。\n\n第二章 抵达\n\n这是第二章的测试句子。';
+        final book = await libraryStore.importBytes(
+          Uint8List.fromList(utf8.encode(sampleTxt)),
+          filename: 'speed_control.txt',
+        );
+        final persistedSpeeds = <double>[];
+        final controller = LiveTtsPlayerController(
+          libraryStore: libraryStore,
+          ttsEngine: ttsEngine,
+          audioEngine: audioEngine,
+          resolveActiveModel: () => fakeModelPaths,
+          readConfig: () => const StandaloneConfig(
+            activeTtsModelId: 'vits-melo-tts-zh_en',
+            activeTtsSpeakerId: 0,
+            defaultTtsSpeed: 1.25,
+          ),
+          onSpeedChanged: (speed) async => persistedSpeeds.add(speed),
+          cacheDirOverride: cacheDir,
+        );
+        addTearDown(controller.dispose);
+
+        await controller.playBookChapter(book, chapterIndex: 0);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(controller.state.speed, 1.25);
+        expect(audioEngine.speed, 1.25);
+        final cachedFiles = cacheDir.listSync().whereType<File>().toList();
+        expect(cachedFiles, isNotEmpty);
+        expect(
+          cachedFiles.every((f) => f.path.endsWith('_v100.wav')),
+          isTrue,
+          reason: '缓存 WAV 应统一按 1.0x 生成，由底层播放器实时变速',
+        );
+
+        final synthCountBefore = ttsEngine.synthesizedTexts.length;
+        await controller.setSpeed(1.5);
+        expect(controller.state.speed, 1.5);
+        expect(audioEngine.speed, 1.5);
+        expect(controller.state.isPlaying, isTrue);
+        expect(controller.state.sentenceIndex, 0);
+        expect(
+          ttsEngine.synthesizedTexts.length,
+          synthCountBefore,
+          reason: '调速不应中断当前句或清空缓存重新合成',
+        );
+        expect(persistedSpeeds, <double>[1.5]);
+
+        await controller.setSpeed(9.9);
+        expect(controller.state.speed, 2.5);
+        expect(audioEngine.speed, 2.5);
+
+        await controller.setSpeed(0.1);
+        expect(controller.state.speed, 0.5);
+        expect(audioEngine.speed, 0.5);
+
+        await controller.setSpeed(1.75);
+        await controller.nextChapter();
+        expect(controller.state.chapterIndex, 1);
+        expect(controller.state.speed, 1.75);
+        expect(audioEngine.speed, 1.75);
+      },
+    );
   });
 }

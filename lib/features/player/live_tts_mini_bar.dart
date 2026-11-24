@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +11,7 @@ import '../../design/echo_glass.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../reader/reader_page.dart';
+import 'playback_speed_sheet.dart';
 
 /// 端侧「边听边生成」悬浮迷你播控条：
 /// 当实时 TTS 正在朗读且离线分块播放器未激活时显示，点击可直达阅读器定位到当前句。
@@ -34,9 +37,9 @@ class LiveTtsMiniBar extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        EchoMetrics.space2,
+        12,
         0,
-        EchoMetrics.space2,
+        12,
         EchoMetrics.space1,
       ),
       child: Material(
@@ -135,11 +138,30 @@ class LiveTtsMiniBar extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 4),
+                  buildCompactSpeedPill(
+                    key: const Key('live_tts_mini_speed'),
+                    speed: state.speed,
+                    accentColor: tokens.primary,
+                    textColor: tokens.textPrimary,
+                    borderColor: echoHairlineColor(context, darkAlpha: 0.16),
+                    onTap: () => showPlaybackSpeedSheet(
+                      context,
+                      initialSpeed: state.speed,
+                      title: '朗读语速',
+                      onChanged: (s) => unawaited(ctrl.setSpeed(s)),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
                   IconButton(
                     tooltip: state.isPlaying ? '暂停' : '继续朗读',
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: EdgeInsets.zero,
+                    ),
                     constraints: const BoxConstraints.tightFor(
-                      width: 38,
-                      height: 38,
+                      width: 36,
+                      height: 36,
                     ),
                     onPressed: ctrl.togglePlayPause,
                     icon: state.isSynthesizing
@@ -161,9 +183,13 @@ class LiveTtsMiniBar extends ConsumerWidget {
                   ),
                   IconButton(
                     tooltip: '下一句',
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: EdgeInsets.zero,
+                    ),
                     constraints: const BoxConstraints.tightFor(
-                      width: 36,
-                      height: 36,
+                      width: 34,
+                      height: 34,
                     ),
                     onPressed: ctrl.nextSentence,
                     icon: Icon(
@@ -174,9 +200,13 @@ class LiveTtsMiniBar extends ConsumerWidget {
                   ),
                   IconButton(
                     tooltip: '停止朗读',
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: EdgeInsets.zero,
+                    ),
                     constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
+                      width: 32,
+                      height: 32,
                     ),
                     onPressed: ctrl.stop,
                     icon: Icon(

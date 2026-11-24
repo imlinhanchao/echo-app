@@ -23,6 +23,7 @@ import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../library/library_controller.dart';
+import '../player/playback_speed_sheet.dart';
 import '../player/player_sheet.dart' show openPlayer;
 import '../tts/tts_model_manager_page.dart';
 import 'reader_annotation_sheets.dart';
@@ -1063,17 +1064,48 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
   }
 
+  void _openSpeedSheet({
+    required double initialSpeed,
+    required String title,
+    required ({Color bg, Color fg, Color secondary}) palette,
+    required ValueChanged<double> onChanged,
+  }) {
+    showPlaybackSpeedSheet(
+      context,
+      initialSpeed: initialSpeed,
+      title: title,
+      backgroundColor: palette.bg,
+      foregroundColor: palette.fg,
+      secondaryColor: palette.secondary,
+      onChanged: onChanged,
+    );
+  }
+
   Widget _buildCompactLiveControls(
     EchoTokens tokens,
     ({Color bg, Color fg, Color secondary}) palette,
     LiveTtsState liveState,
   ) {
     final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
-    const btnConstraints = BoxConstraints.tightFor(width: 34, height: 34);
+    const btnConstraints = BoxConstraints.tightFor(width: 32, height: 32);
     return Row(
       key: const Key('reader_live_control_bar'),
       mainAxisSize: MainAxisSize.min,
       children: [
+        buildCompactSpeedPill(
+          key: const Key('reader_live_speed_button'),
+          speed: liveState.speed,
+          accentColor: tokens.primary,
+          textColor: palette.fg,
+          borderColor: palette.secondary.withValues(alpha: 0.28),
+          onTap: () => _openSpeedSheet(
+            initialSpeed: liveState.speed,
+            title: '朗读语速',
+            palette: palette,
+            onChanged: (s) => unawaited(liveCtrl.setSpeed(s)),
+          ),
+        ),
+        const SizedBox(width: 2),
         IconButton(
           key: const Key('reader_live_prev_sentence'),
           tooltip: '上一句',
@@ -1140,6 +1172,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     required LiveTtsState liveState,
     required bool isThisBookLoaded,
     required bool isPlayingThisBook,
+    required double chunkedSpeed,
     required bool hasAudio,
   }) {
     final compactLabelStyle = textTheme.labelSmall?.copyWith(
@@ -1158,7 +1191,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         child: SizedBox(
           height: 48,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space2),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 Expanded(
@@ -1174,7 +1207,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                           style: compactLabelStyle,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       Text(
                         '全书 $bookPct%',
                         key: const Key('reader_global_indicator'),
@@ -1187,21 +1220,44 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                 if (isLiveThisBook)
                   _buildCompactLiveControls(tokens, palette, liveState)
                 else if (isThisBookLoaded)
-                  TextButton.icon(
-                    key: const Key('reader_open_player'),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      minimumSize: const Size(0, 36),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: () => openPlayer(context),
-                    icon: Icon(
-                      isPlayingThisBook
-                          ? Icons.graphic_eq
-                          : Icons.play_circle_outline,
-                      size: 16,
-                    ),
-                    label: const Text('全屏播放器'),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      buildCompactSpeedPill(
+                        key: const Key('reader_chunked_speed_button'),
+                        speed: chunkedSpeed,
+                        accentColor: tokens.primary,
+                        textColor: palette.fg,
+                        borderColor: palette.secondary.withValues(alpha: 0.28),
+                        onTap: () => _openSpeedSheet(
+                          initialSpeed: chunkedSpeed,
+                          title: '播放倍速',
+                          palette: palette,
+                          onChanged: (s) => unawaited(
+                            ref
+                                .read(chunkedPlayerProvider.notifier)
+                                .setSpeed(s),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        key: const Key('reader_open_player'),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          minimumSize: const Size(0, 36),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => openPlayer(context),
+                        icon: Icon(
+                          isPlayingThisBook
+                              ? Icons.graphic_eq
+                              : Icons.play_circle_outline,
+                          size: 16,
+                        ),
+                        label: const Text('全屏播放器'),
+                      ),
+                    ],
                   )
                 else if (hasAudio)
                   TextButton.icon(
@@ -1480,6 +1536,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
               liveState: liveState,
               isThisBookLoaded: isThisBookLoaded,
               isPlayingThisBook: isPlayingThisBook,
+              chunkedSpeed: playerState.speed,
               hasAudio: hasAudio,
             ),
     );
