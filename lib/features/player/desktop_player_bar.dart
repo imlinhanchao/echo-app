@@ -3,12 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/audio/chunked_player_controller.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../library/library_controller.dart';
 import 'player_sheet.dart' show formatDurationMs, openPlayer;
 
-/// 桌面端全宽底部专业播控台（对齐设计图 ui-desktop-main）。
+/// 桌面端全宽底部专业播控台（极简书房 Editorial Minimalism）。
 class DesktopPlayerBar extends ConsumerStatefulWidget {
   const DesktopPlayerBar({
     super.key,
@@ -43,6 +44,7 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
 
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
+    final hairline = echoHairlineColor(context, darkAlpha: 0.08);
     final libState = ref.watch(libraryControllerProvider);
     final bookId = state.audiobook?.bookId ?? 0;
     final cover = libState.books
@@ -73,30 +75,29 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
       key: const Key('desktop_player_bar'),
       height: 76,
       decoration: BoxDecoration(
-        color: tokens.surfaceElevated.withValues(alpha: 0.98),
-        border: Border(top: BorderSide(color: tokens.surfaceSubtle)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
-          ),
-        ],
+        color: tokens.surfaceElevated,
+        border: Border(top: BorderSide(color: hairline, width: 0.7)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space3),
       child: Row(
         children: [
-          // 左侧：封面 + 书名/章节（点击打开全屏跟读）
+          // 左侧：封面 + 书名/章节
           InkWell(
-            borderRadius: BorderRadius.circular(EchoMetrics.radiusInput),
+            borderRadius: BorderRadius.circular(EchoMetrics.radiusControl),
             onTap: () => openPlayer(context),
             child: Padding(
               padding: const EdgeInsets.all(4.0),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  BookCover(url: cover, width: 48, height: 48),
-                  const SizedBox(width: EchoMetrics.space2),
+                  BookCover(
+                    url: cover,
+                    title: title,
+                    width: 38,
+                    height: 54,
+                    borderRadius: 6,
+                  ),
+                  const SizedBox(width: 12),
                   SizedBox(
                     width: 180,
                     child: Column(
@@ -112,11 +113,12 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: textTheme.bodySmall?.copyWith(
+                          style: textTheme.labelSmall?.copyWith(
                             color: tokens.textSecondary,
                           ),
                         ),
@@ -135,22 +137,23 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 控件行
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      iconSize: 22,
+                      iconSize: 20,
                       tooltip: '上一章',
-                      icon: const Icon(Icons.skip_previous),
+                      color: tokens.textSecondary,
+                      icon: const Icon(Icons.skip_previous_rounded),
                       onPressed: () => ref
                           .read(chunkedPlayerProvider.notifier)
                           .previousChunk(),
                     ),
                     IconButton(
-                      iconSize: 22,
+                      iconSize: 20,
                       tooltip: '快退 15 秒',
-                      icon: const Icon(Icons.fast_rewind),
+                      color: tokens.textSecondary,
+                      icon: const Icon(Icons.replay_10_rounded),
                       onPressed: () => ref
                           .read(chunkedPlayerProvider.notifier)
                           .seekByRelativeMs(-15000),
@@ -162,10 +165,12 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
                       child: IconButton(
                         iconSize: 20,
                         padding: EdgeInsets.zero,
-                        color: Colors.white,
+                        color: tokens.textOnPrimary,
                         tooltip: state.isPlaying ? '暂停' : '播放',
                         icon: Icon(
-                          state.isPlaying ? Icons.pause : Icons.play_arrow,
+                          state.isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
                         ),
                         onPressed: () => ref
                             .read(chunkedPlayerProvider.notifier)
@@ -174,46 +179,46 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
                     ),
                     const SizedBox(width: EchoMetrics.space1),
                     IconButton(
-                      iconSize: 22,
+                      iconSize: 20,
                       tooltip: '快进 15 秒',
-                      icon: const Icon(Icons.fast_forward),
+                      color: tokens.textSecondary,
+                      icon: const Icon(Icons.forward_10_rounded),
                       onPressed: () => ref
                           .read(chunkedPlayerProvider.notifier)
                           .seekByRelativeMs(15000),
                     ),
                     IconButton(
-                      iconSize: 22,
+                      iconSize: 20,
                       tooltip: '下一章',
-                      icon: const Icon(Icons.skip_next),
+                      color: tokens.textSecondary,
+                      icon: const Icon(Icons.skip_next_rounded),
                       onPressed: () =>
                           ref.read(chunkedPlayerProvider.notifier).nextChunk(),
                     ),
                   ],
                 ),
 
-                // 进度滑块行
                 Row(
                   children: [
                     Text(
                       formatDurationMs(posMs),
                       style: textTheme.labelSmall?.copyWith(
                         color: tokens.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                     Expanded(
                       child: SliderTheme(
                         data: SliderTheme.of(context).copyWith(
-                          trackHeight: 3,
+                          trackHeight: 2.5,
                           thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 5,
+                            enabledThumbRadius: 4.5,
                           ),
                           overlayShape: const RoundSliderOverlayShape(
                             overlayRadius: 10,
                           ),
                           activeTrackColor: tokens.primary,
-                          inactiveTrackColor: tokens.surfaceSubtle.withValues(
-                            alpha: 0.8,
-                          ),
+                          inactiveTrackColor: tokens.surfaceSubtle,
                           thumbColor: tokens.primary,
                         ),
                         child: Slider(
@@ -233,6 +238,7 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
                       formatDurationMs(chunkDurationMs),
                       style: textTheme.labelSmall?.copyWith(
                         color: tokens.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
@@ -243,23 +249,27 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
 
           const SizedBox(width: EchoMetrics.space2),
 
-          // 右侧：次级功能区（倍速、全屏、笔记切换、音量滑块）
+          // 右侧：倍速、全屏、笔记切换、音量
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 倍速按钮
               PopupMenuButton<double>(
                 tooltip: '播放倍速',
-                child: Padding(
+                child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
+                    horizontal: 8,
                     vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: tokens.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     '${state.speed.toStringAsFixed(state.speed == state.speed.toInt() ? 1 : 2)}x',
                     style: textTheme.labelSmall?.copyWith(
                       color: tokens.primary,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ),
@@ -274,25 +284,25 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
                     ref.read(chunkedPlayerProvider.notifier).setSpeed(s),
               ),
 
-              // 全屏展开按钮
               IconButton(
                 iconSize: 20,
                 tooltip: '全屏跟读视图',
-                icon: const Icon(Icons.fullscreen),
+                color: tokens.textSecondary,
+                icon: const Icon(Icons.open_in_full_rounded),
                 onPressed: () => openPlayer(context),
               ),
 
-              // 笔记侧栏切换
               if (widget.onToggleNotes != null)
                 IconButton(
                   iconSize: 20,
                   tooltip: widget.isNotesOpen ? '关闭笔记面板' : '展开笔记面板',
-                  color: widget.isNotesOpen ? tokens.primary : null,
-                  icon: const Icon(Icons.edit_note),
+                  color: widget.isNotesOpen
+                      ? tokens.primary
+                      : tokens.textSecondary,
+                  icon: const Icon(Icons.edit_note_rounded),
                   onPressed: widget.onToggleNotes,
                 ),
 
-              // 静音切换 + 音量滑块（直连 ChunkedPlayerController.setVolume）
               const SizedBox(width: 4),
               IconButton(
                 key: const Key('desktop_volume_mute'),
@@ -301,10 +311,10 @@ class _DesktopPlayerBarState extends ConsumerState<DesktopPlayerBar> {
                 color: tokens.textSecondary,
                 icon: Icon(
                   volume == 0
-                      ? Icons.volume_off
+                      ? Icons.volume_off_rounded
                       : volume < 0.5
-                      ? Icons.volume_down
-                      : Icons.volume_up,
+                      ? Icons.volume_down_rounded
+                      : Icons.volume_up_rounded,
                 ),
                 onPressed: () => _toggleMute(volume),
               ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/audio/live_tts_player_controller.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_glass.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -28,118 +29,165 @@ class LiveTtsMiniBar extends ConsumerWidget {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
     final book = state.book!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(EchoMetrics.radiusCard);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         EchoMetrics.space2,
         0,
         EchoMetrics.space2,
-        EchoMetrics.space2,
+        EchoMetrics.space1,
       ),
-      child: EchoGlassSurface(
-        borderRadius: BorderRadius.circular(18),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: InkWell(
-          key: const Key('live_tts_mini_bar'),
-          borderRadius: BorderRadius.circular(14),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => ReaderPageView(
-                  book: book,
-                  initialChapterIndex: state.chapterIndex,
-                  initialCharOffset: state.currentSentence?.startOffset ?? 0,
+      child: Material(
+        color: Colors.transparent,
+        child: EchoGlassSurface(
+          borderRadius: radius,
+          opacity: isDark ? 0.86 : 0.92,
+          border: Border.all(
+            color: echoHairlineColor(context, darkAlpha: 0.10),
+            width: 0.8,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.36 : 0.10),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+          child: InkWell(
+            key: const Key('live_tts_mini_bar'),
+            borderRadius: radius,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ReaderPageView(
+                    book: book,
+                    initialChapterIndex: state.chapterIndex,
+                    initialCharOffset: state.currentSentence?.startOffset ?? 0,
+                  ),
                 ),
-              ),
-            );
-          },
-          child: Row(
-            children: [
-              BookCover(url: book.coverUrl, width: 38, height: 50),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  BookCover(
+                    url: book.coverUrl,
+                    title: book.title,
+                    width: 34,
+                    height: 48,
+                    borderRadius: 6,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: tokens.primary.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            state.isSynthesizing ? '合成中' : '实时朗读',
-                            style: textTheme.labelSmall?.copyWith(
-                              color: tokens.primary,
-                              fontWeight: FontWeight.w600,
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: tokens.primary.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                state.isSynthesizing ? '合成中' : '朗读',
+                                style: textTheme.labelSmall?.copyWith(
+                                  fontSize: 10.5,
+                                  color: tokens.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                book.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.labelLarge?.copyWith(
+                                  fontSize: 13.5,
+                                  color: tokens.textPrimary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            book.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: textTheme.labelLarge?.copyWith(
-                              color: tokens.textPrimary,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        const SizedBox(height: 2),
+                        Text(
+                          state.currentCueText.isNotEmpty
+                              ? state.currentCueText
+                              : state.chapterTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.labelSmall?.copyWith(
+                            color: tokens.textSecondary,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      state.currentCueText.isNotEmpty
-                          ? state.currentCueText
-                          : state.chapterTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textTheme.bodySmall?.copyWith(
-                        color: tokens.textSecondary,
-                      ),
+                  ),
+                  IconButton(
+                    tooltip: state.isPlaying ? '暂停' : '继续朗读',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 38,
+                      height: 38,
                     ),
-                  ],
-                ),
+                    onPressed: ctrl.togglePlayPause,
+                    icon: state.isSynthesizing
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: tokens.primary,
+                            ),
+                          )
+                        : Icon(
+                            state.isPlaying
+                                ? Icons.pause_circle_filled_rounded
+                                : Icons.play_circle_filled_rounded,
+                            color: tokens.primary,
+                            size: 28,
+                          ),
+                  ),
+                  IconButton(
+                    tooltip: '下一句',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                    onPressed: ctrl.nextSentence,
+                    icon: Icon(
+                      Icons.skip_next_rounded,
+                      size: 20,
+                      color: tokens.textPrimary,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '停止朗读',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 34,
+                      height: 34,
+                    ),
+                    onPressed: ctrl.stop,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: tokens.textSecondary,
+                      size: 18,
+                    ),
+                  ),
+                ],
               ),
-              IconButton(
-                tooltip: state.isPlaying ? '暂停' : '继续朗读',
-                onPressed: ctrl.togglePlayPause,
-                icon: state.isSynthesizing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        state.isPlaying
-                            ? Icons.pause_circle_filled
-                            : Icons.play_circle_filled,
-                        color: tokens.primary,
-                        size: 30,
-                      ),
-              ),
-              IconButton(
-                tooltip: '下一句',
-                onPressed: ctrl.nextSentence,
-                icon: Icon(
-                  Icons.skip_next_rounded,
-                  color: tokens.textPrimary,
-                ),
-              ),
-              IconButton(
-                tooltip: '停止朗读',
-                onPressed: ctrl.stop,
-                icon: Icon(Icons.close, color: tokens.textSecondary, size: 20),
-              ),
-            ],
+            ),
           ),
         ),
       ),

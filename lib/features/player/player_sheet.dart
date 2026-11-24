@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/notes/note_store.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_glass.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
@@ -78,12 +79,13 @@ class MiniPlayerBar extends ConsumerWidget {
         (chunk?.title.isNotEmpty == true
             ? chunk!.title
             : '第 ${state.currentChunkIndex + 1} 章');
-    final radius = BorderRadius.circular(EchoMetrics.radiusSheet);
+    final radius = BorderRadius.circular(EchoMetrics.radiusCard);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         EchoMetrics.space2,
-        EchoMetrics.space1,
+        0,
         EchoMetrics.space2,
         EchoMetrics.space1,
       ),
@@ -92,10 +94,14 @@ class MiniPlayerBar extends ConsumerWidget {
         color: Colors.transparent,
         child: EchoGlassSurface(
           borderRadius: radius,
-          border: Border.all(color: tokens.surfaceSubtle),
+          opacity: isDark ? 0.86 : 0.94,
+          border: Border.all(
+            color: echoHairlineColor(context, darkAlpha: 0.10),
+            width: 0.8,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
+              color: Colors.black.withValues(alpha: isDark ? 0.36 : 0.10),
               blurRadius: 18,
               offset: const Offset(0, 6),
             ),
@@ -105,71 +111,103 @@ class MiniPlayerBar extends ConsumerWidget {
             onTap: () => openPlayer(context),
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: EchoMetrics.space1,
-                vertical: EchoMetrics.space1,
+                horizontal: 10,
+                vertical: 8,
               ),
               child: Row(
                 children: [
                   Hero(
                     tag: _kPlayerCoverHeroTag,
-                    child: BookCover(url: cover, width: 40, height: 40),
+                    child: BookCover(
+                      url: cover,
+                      title: title,
+                      width: 34,
+                      height: 48,
+                      borderRadius: 6,
+                    ),
                   ),
-                const SizedBox(width: EchoMetrics.space1),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.labelLarge?.copyWith(
-                          color: tokens.textPrimary,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.labelLarge?.copyWith(
+                            fontSize: 13.5,
+                            color: tokens.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      Text(
-                        subtitle,
-                        key: const Key('mini_player_subtitle'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodySmall?.copyWith(
-                          color: tokens.textSecondary,
+                        const SizedBox(height: 1),
+                        Text(
+                          subtitle,
+                          key: const Key('mini_player_subtitle'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.labelSmall?.copyWith(
+                            color: tokens.textSecondary,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  key: const Key('mini_player_prev_chunk'),
-                  tooltip: '上一章',
-                  onPressed: () =>
-                      ref.read(chunkedPlayerProvider.notifier).previousChunk(),
-                  icon: Icon(Icons.skip_previous, color: tokens.primary),
-                ),
-                IconButton(
-                  key: const Key('mini_player_toggle'),
-                  tooltip: state.isPlaying ? '暂停' : '播放',
-                  onPressed: () => ref
-                      .read(chunkedPlayerProvider.notifier)
-                      .togglePlayPause(),
-                  icon: Icon(
-                    state.isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: tokens.primary,
-                    size: 30,
+                  IconButton(
+                    key: const Key('mini_player_prev_chunk'),
+                    tooltip: '上一章',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                    onPressed: () => ref
+                        .read(chunkedPlayerProvider.notifier)
+                        .previousChunk(),
+                    icon: Icon(
+                      Icons.skip_previous_rounded,
+                      size: 20,
+                      color: tokens.textSecondary,
+                    ),
                   ),
-                ),
-                IconButton(
-                  key: const Key('mini_player_forward_15'),
-                  tooltip: '下一章',
-                  onPressed: () =>
-                      ref.read(chunkedPlayerProvider.notifier).nextChunk(),
-                  icon: Icon(Icons.skip_next, color: tokens.primary),
-                ),
-              ],
+                  IconButton(
+                    key: const Key('mini_player_toggle'),
+                    tooltip: state.isPlaying ? '暂停' : '播放',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 40,
+                      height: 40,
+                    ),
+                    onPressed: () => ref
+                        .read(chunkedPlayerProvider.notifier)
+                        .togglePlayPause(),
+                    icon: Icon(
+                      state.isPlaying
+                          ? Icons.pause_circle_filled_rounded
+                          : Icons.play_circle_filled_rounded,
+                      color: tokens.primary,
+                      size: 30,
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('mini_player_forward_15'),
+                    tooltip: '下一章',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                    onPressed: () =>
+                        ref.read(chunkedPlayerProvider.notifier).nextChunk(),
+                    icon: Icon(
+                      Icons.skip_next_rounded,
+                      size: 20,
+                      color: tokens.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
         ),
       ),
     );
@@ -279,23 +317,11 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
     return Scaffold(
       key: const Key('player_sheet'),
       backgroundColor: tokens.surfaceBase,
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: <Color>[
-              tokens.primary.withValues(alpha: 0.16),
-              tokens.surfaceBase,
-              tokens.surfaceBase,
-            ],
-            stops: const <double>[0.0, 0.42, 1.0],
-          ),
-        ),
+      body: EchoAmbientBackground(
         child: SafeArea(
           child: Column(
             children: [
-              // ---- 顶栏：封面 + 书名/章节 + 收起/上下章 ----
+              // ---- 顶栏：收起 + 2:3 封面 + 书名/章节 + 笔记/上下章 ----
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   EchoMetrics.space1,
@@ -309,7 +335,7 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                       key: const Key('player_collapse'),
                       tooltip: '收起播放器',
                       icon: Icon(
-                        Icons.keyboard_arrow_down,
+                        Icons.keyboard_arrow_down_rounded,
                         color: tokens.textPrimary,
                       ),
                       onPressed: () => Navigator.of(context).maybePop(),
@@ -318,9 +344,7 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                       message: '切换到阅读器',
                       child: InkWell(
                         key: const Key('player_open_reader'),
-                        borderRadius: BorderRadius.circular(
-                          EchoMetrics.radiusControl,
-                        ),
+                        borderRadius: BorderRadius.circular(8),
                         onTap: () {
                           final bookId = state.audiobook?.bookId ?? 0;
                           final book = libState.books
@@ -347,11 +371,17 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                         },
                         child: Hero(
                           tag: _kPlayerCoverHeroTag,
-                          child: BookCover(url: cover, width: 52, height: 52),
+                          child: BookCover(
+                            url: cover,
+                            title: bookTitle,
+                            width: 38,
+                            height: 54,
+                            borderRadius: 6,
+                          ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: EchoMetrics.space2),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -360,8 +390,9 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                             bookTitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: textTheme.titleMedium?.copyWith(
+                            style: textTheme.titleSmall?.copyWith(
                               color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           Text(
@@ -369,8 +400,11 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                             key: const Key('player_chapter_label'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: textTheme.bodySmall?.copyWith(
+                            style: textTheme.labelSmall?.copyWith(
                               color: tokens.textSecondary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ],
@@ -382,21 +416,22 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                       onPressed: () => _showNotes(context, state),
                       icon: Icon(
                         Icons.sticky_note_2_outlined,
+                        size: 20,
                         color: tokens.textPrimary,
                       ),
                     ),
                     _CircleAction(
                       key: const Key('player_top_prev_chapter'),
-                      icon: Icons.chevron_left,
+                      icon: Icons.chevron_left_rounded,
                       tooltip: '上一章',
                       onPressed: state.hasPreviousChunk
                           ? controller.previousChunk
                           : null,
                     ),
-                    const SizedBox(width: EchoMetrics.space1),
+                    const SizedBox(width: 4),
                     _CircleAction(
                       key: const Key('player_top_next_chapter'),
-                      icon: Icons.chevron_right,
+                      icon: Icons.chevron_right_rounded,
                       tooltip: '下一章',
                       onPressed: state.hasNextChunk
                           ? controller.nextChunk
@@ -505,22 +540,22 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Padding(
-                                padding: const EdgeInsets.only(left: 2),
+                                padding: const EdgeInsets.only(left: 4),
                                 child: Icon(
-                                  Icons.chevron_left,
-                                  size: 20,
+                                  Icons.chevron_left_rounded,
+                                  size: 18,
                                   color: tokens.textSecondary.withValues(
-                                    alpha: 0.5,
+                                    alpha: 0.20,
                                   ),
                                 ),
                               ),
                               Padding(
-                                padding: const EdgeInsets.only(right: 2),
+                                padding: const EdgeInsets.only(right: 4),
                                 child: Icon(
-                                  Icons.chevron_right,
-                                  size: 20,
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
                                   color: tokens.textSecondary.withValues(
-                                    alpha: 0.5,
+                                    alpha: 0.20,
                                   ),
                                 ),
                               ),
@@ -546,18 +581,7 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                   EchoMetrics.space2,
                   EchoMetrics.space1,
                 ),
-                decoration: BoxDecoration(
-                  color: tokens.surfaceElevated,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: tokens.surfaceSubtle),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 24,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
+                decoration: echoElevatedCardDecoration(context, radius: 22),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -565,12 +589,15 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                     Row(
                       children: [
                         SizedBox(
-                          width: 44,
+                          width: 48,
                           child: Text(
                             formatDurationMs(state.positionMs),
                             key: const Key('player_position_text'),
                             style: textTheme.labelSmall?.copyWith(
                               color: tokens.textSecondary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ),
@@ -600,13 +627,16 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                           ),
                         ),
                         SizedBox(
-                          width: 44,
+                          width: 48,
                           child: Text(
                             formatDurationMs(durationMs),
                             key: const Key('player_duration_text'),
                             textAlign: TextAlign.right,
                             style: textTheme.labelSmall?.copyWith(
                               color: tokens.textSecondary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ),
@@ -630,8 +660,8 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                               controller.skipBy(const Duration(seconds: -15)),
                         ),
                         SizedBox(
-                          width: 64,
-                          height: 64,
+                          width: 60,
+                          height: 60,
                           child: FilledButton(
                             key: const Key('player_toggle_play'),
                             style: FilledButton.styleFrom(
@@ -641,8 +671,10 @@ class _PlayerSheetState extends ConsumerState<PlayerSheet> {
                             ),
                             onPressed: controller.togglePlayPause,
                             child: Icon(
-                              state.isPlaying ? Icons.pause : Icons.play_arrow,
-                              size: 34,
+                              state.isPlaying
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                              size: 32,
                               color: tokens.textOnPrimary,
                             ),
                           ),
@@ -1157,6 +1189,7 @@ class TabletCapsulePlayerBar extends ConsumerWidget {
     final progress = state.totalDurationMs > 0
         ? (state.globalPositionMs / state.totalDurationMs).clamp(0.0, 1.0)
         : 0.0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final radius = BorderRadius.circular(999);
 
     return Center(
@@ -1174,11 +1207,15 @@ class TabletCapsulePlayerBar extends ConsumerWidget {
             color: Colors.transparent,
             child: EchoGlassSurface(
               borderRadius: radius,
-              border: Border.all(color: tokens.surfaceSubtle),
+              opacity: isDark ? 0.86 : 0.94,
+              border: Border.all(
+                color: echoHairlineColor(context, darkAlpha: 0.10),
+                width: 0.8,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 20,
+                  color: Colors.black.withValues(alpha: isDark ? 0.34 : 0.10),
+                  blurRadius: 18,
                   offset: const Offset(0, 6),
                 ),
               ],
@@ -1198,7 +1235,12 @@ class TabletCapsulePlayerBar extends ConsumerWidget {
                           Hero(
                             tag: _kPlayerCoverHeroTag,
                             child: ClipOval(
-                              child: BookCover(url: cover, width: 42, height: 42),
+                              child: BookCover(
+                                url: cover,
+                                title: title,
+                                width: 42,
+                                height: 42,
+                              ),
                             ),
                           ),
                           const SizedBox(width: EchoMetrics.space2),
@@ -1554,7 +1596,7 @@ class _CoverFallbackView extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            BookCover(url: cover, width: 168, height: 168),
+            BookCover(url: cover, title: bookTitle, width: 136, height: 196),
             const SizedBox(height: EchoMetrics.space3),
             Text(
               bookTitle,

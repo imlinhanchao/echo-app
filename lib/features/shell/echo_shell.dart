@@ -18,10 +18,10 @@ import '../search/search_page.dart';
 import 'desktop_shortcuts.dart';
 import 'desktop_sidebar.dart';
 
-/// 已登录主壳（对齐设计规划 §2.1 三断点响应式与 §4 界面规范）：
-/// - Compact (< 600dp): 底部纯图标导航 + Stack 悬浮磨砂迷你播放条（列表从背后透出模糊）；
-/// - Medium (600–1024dp): 左侧 NavigationRail + Stack 悬浮胶囊播放条（含快捷打点）；
-/// - Expanded (> 1024dp): 左侧完整 DesktopSidebar + 右侧笔记抽屉 + 底部全宽专业播控台。
+/// 主壳（三断点响应式）：
+/// - Compact (< 600dp): 极简细分割底栏 + 悬浮磨砂迷你播放条；
+/// - Medium (600–1024dp): 左侧精简 NavigationRail + 悬浮胶囊播放条；
+/// - Expanded (> 1024dp): 左侧 DesktopSidebar + 可选右侧笔记抽屉 + 底部桌面播控台。
 class EchoShell extends ConsumerStatefulWidget {
   const EchoShell({super.key, required this.user});
 
@@ -68,6 +68,7 @@ class EchoShellState extends ConsumerState<EchoShell> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final hairline = echoHairlineColor(context, darkAlpha: 0.08);
 
     return DesktopShortcutsWrapper(
       onAddNotePrompt: () {
@@ -128,7 +129,7 @@ class EchoShellState extends ConsumerState<EchoShell> {
             );
           }
 
-          // 2. 平板中屏模式 (600–1024dp)：Stack 悬浮胶囊播放条，列表滚过背后产生真磨砂
+          // 2. 平板中屏模式 (600–1024dp)
           if (screenType == EchoScreenType.medium) {
             return Scaffold(
               key: const Key('echo_home'),
@@ -140,32 +141,32 @@ class EchoShellState extends ConsumerState<EchoShell> {
                       selectedIndex: _currentIndex,
                       onDestinationSelected: select,
                       labelType: NavigationRailLabelType.all,
-                      backgroundColor: Colors.transparent,
-                      indicatorColor: tokens.primary.withValues(alpha: 0.18),
+                      backgroundColor: tokens.surfaceElevated,
+                      indicatorColor: tokens.primary.withValues(alpha: 0.16),
                       destinations: const [
                         NavigationRailDestination(
-                          icon: Icon(Icons.home_outlined),
-                          selectedIcon: Icon(Icons.home),
+                          icon: Icon(Icons.auto_stories_outlined),
+                          selectedIcon: Icon(Icons.auto_stories),
                           label: Text('书架'),
                         ),
                         NavigationRailDestination(
-                          icon: Icon(Icons.search),
-                          selectedIcon: Icon(Icons.manage_search),
+                          icon: Icon(Icons.search_rounded),
+                          selectedIcon: Icon(Icons.manage_search_rounded),
                           label: Text('发现'),
                         ),
                         NavigationRailDestination(
-                          icon: Icon(Icons.grid_view_outlined),
-                          selectedIcon: Icon(Icons.grid_view),
+                          icon: Icon(Icons.checklist_rounded),
+                          selectedIcon: Icon(Icons.checklist_rtl_rounded),
                           label: Text('任务'),
                         ),
                         NavigationRailDestination(
-                          icon: Icon(Icons.person_outline),
-                          selectedIcon: Icon(Icons.person),
+                          icon: Icon(Icons.person_outline_rounded),
+                          selectedIcon: Icon(Icons.person_rounded),
                           label: Text('我的'),
                         ),
                       ],
                     ),
-                    const VerticalDivider(width: 1, thickness: 1),
+                    VerticalDivider(width: 1, thickness: 0.6, color: hairline),
                     Expanded(
                       child: Stack(
                         children: [
@@ -191,7 +192,7 @@ class EchoShellState extends ConsumerState<EchoShell> {
             );
           }
 
-          // 3. 手机紧凑模式 (< 600dp)：Stack 悬浮玻璃拟态迷你播放条
+          // 3. 手机紧凑模式 (< 600dp)：细顶线极简底栏 + 悬浮迷你播控条
           return Scaffold(
             key: const Key('echo_home'),
             body: EchoAmbientBackground(
@@ -219,41 +220,47 @@ class EchoShellState extends ConsumerState<EchoShell> {
                 ],
               ),
             ),
-            bottomNavigationBar: NavigationBar(
-              key: const Key('echo_nav_bar'),
-              selectedIndex: _currentIndex,
-              height: 64,
-              backgroundColor: tokens.surfaceBase,
-              surfaceTintColor: Colors.transparent,
-              indicatorColor: tokens.primary.withValues(alpha: 0.18),
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-              onDestinationSelected: select,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home),
-                  label: '书架',
-                  tooltip: '书架',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.search),
-                  selectedIcon: Icon(Icons.manage_search),
-                  label: '发现',
-                  tooltip: '发现',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.grid_view_outlined),
-                  selectedIcon: Icon(Icons.grid_view),
-                  label: '任务',
-                  tooltip: '任务',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.person_outline),
-                  selectedIcon: Icon(Icons.person),
-                  label: '我的',
-                  tooltip: '我的',
-                ),
-              ],
+            bottomNavigationBar: DecoratedBox(
+              decoration: BoxDecoration(
+                color: tokens.surfaceElevated,
+                border: Border(top: BorderSide(color: hairline, width: 0.6)),
+              ),
+              child: NavigationBar(
+                key: const Key('echo_nav_bar'),
+                selectedIndex: _currentIndex,
+                height: 62,
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                indicatorColor: tokens.primary.withValues(alpha: 0.14),
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                onDestinationSelected: select,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.auto_stories_outlined),
+                    selectedIcon: Icon(Icons.auto_stories),
+                    label: '书架',
+                    tooltip: '书架',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.search_rounded),
+                    selectedIcon: Icon(Icons.manage_search_rounded),
+                    label: '发现',
+                    tooltip: '发现',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.checklist_rounded),
+                    selectedIcon: Icon(Icons.checklist_rtl_rounded),
+                    label: '任务',
+                    tooltip: '任务',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.person_outline_rounded),
+                    selectedIcon: Icon(Icons.person_rounded),
+                    label: '我的',
+                    tooltip: '我的',
+                  ),
+                ],
+              ),
             ),
           );
         },
