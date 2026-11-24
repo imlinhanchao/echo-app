@@ -1237,7 +1237,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         liveState.hasBook && liveState.book?.id == widget.book.id;
     final isPlayingThisBook =
         (isThisBookLoaded && playerState.isPlaying) ||
-        (isLiveThisBook && liveState.isPlaying);
+        (isLiveThisBook && (liveState.isPlaying || liveState.isSynthesizing));
     final activeCueText = isLiveThisBook
         ? liveState.currentCueText
         : (isThisBookLoaded ? playerState.activeCue?.text : null);

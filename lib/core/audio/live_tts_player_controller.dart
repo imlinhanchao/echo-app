@@ -135,6 +135,9 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     });
     _playingSub = _audioEngine.playingStream.listen((playing) {
       if (!mounted || !state.hasBook) return;
+      if (!playing && (_transitioningSentence || state.isSynthesizing)) {
+        return;
+      }
       if (state.isPlaying != playing) {
         state = state.copyWith(isPlaying: playing);
       }
@@ -168,6 +171,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
   StreamSubscription<void>? _rwSub;
 
   int _generation = 0;
+  bool _transitioningSentence = false;
+  bool _sentenceAudioReady = false;
   final Map<int, Future<File>> _sentenceCache = <int, Future<File>>{};
   DateTime? _sentenceStartAt;
 
@@ -274,6 +279,9 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
         : resolvedModel.spec.speakers.first.id;
 
     _generation++;
+    final callGen = _generation;
+    _transitioningSentence = true;
+    _sentenceAudioReady = false;
     _sentenceCache.clear();
 
     state = LiveTtsState(
@@ -282,7 +290,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       chapterIndex: safeChapterIdx,
       sentences: sentences,
       sentenceIndex: startSentenceIdx,
-      isPlaying: false,
+      isPlaying: true,
       isSynthesizing: true,
       speed: cfg.defaultTtsSpeed,
       speakerId: speakerId,
@@ -293,20 +301,28 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     try {
       await _ttsEngine.loadModel(resolvedModel);
     } catch (e) {
-      if (!mounted) return;
-      state = state.copyWith(isSynthesizing: false, error: '加载语音模型失败：$e');
+      if (!mounted || callGen != _generation) return;
+      _transitioningSentence = false;
+      state = state.copyWith(
+        isPlaying: false,
+        isSynthesizing: false,
+        error: '加载语音模型失败：$e',
+      );
       return;
     }
 
-    await _playSentenceAt(startSentenceIdx, expectedGen: _generation);
+    await _playSentenceAt(startSentenceIdx, expectedGen: callGen);
   }
 
   Future<void> _playSentenceAt(int index, {required int expectedGen}) async {
     if (!mounted || expectedGen != _generation) return;
     if (index < 0 || index >= state.sentences.length) return;
 
+    _transitioningSentence = true;
+    _sentenceAudioReady = false;
     state = state.copyWith(
       sentenceIndex: index,
+      isPlaying: true,
       isSynthesizing: true,
       clearError: true,
     );
@@ -340,7 +356,10 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     try {
       final wavFile = await currentFuture;
       if (!mounted || expectedGen != _generation) return;
-      if (!wavFile.existsSync()) return;
+      if (!wavFile.existsSync()) {
+        state = state.copyWith(isSynthesizing: false, isPlaying: false);
+        return;
+      }
 
       await _audioEngine.setSource(
         wavFile.uri,
@@ -351,6 +370,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
             : null,
       );
       if (!mounted || expectedGen != _generation) return;
+      _sentenceAudioReady = true;
       _sentenceStartAt = DateTime.now();
       state = state.copyWith(isSynthesizing: false, isPlaying: true);
       await _audioEngine.play();
@@ -361,6 +381,10 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
         isPlaying: false,
         error: '朗读合成失败：$e',
       );
+    } finally {
+      if (expectedGen == _generation) {
+        _transitioningSentence = false;
+      }
     }
   }
 
@@ -454,14 +478,23 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
 
   Future<void> togglePlayPause() async {
     if (!state.hasBook) return;
-    if (state.isPlaying) {
+    if (state.isPlaying || state.isSynthesizing) {
+      if (_transitioningSentence || state.isSynthesizing) {
+        _generation++;
+        _transitioningSentence = false;
+        _sentenceCache.clear();
+      }
       _recordListeningDelta();
       await _audioEngine.pause();
-      state = state.copyWith(isPlaying: false);
+      state = state.copyWith(isPlaying: false, isSynthesizing: false);
     } else {
-      _sentenceStartAt = DateTime.now();
-      await _audioEngine.play();
-      state = state.copyWith(isPlaying: true);
+      if (_sentenceAudioReady) {
+        _sentenceStartAt = DateTime.now();
+        state = state.copyWith(isPlaying: true);
+        await _audioEngine.play();
+      } else {
+        await _playSentenceAt(state.sentenceIndex, expectedGen: ++_generation);
+      }
     }
   }
 
@@ -509,6 +542,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     final clamped = speed.clamp(0.5, 2.5);
     if ((clamped - state.speed).abs() < 0.01) return;
     _generation++;
+    _sentenceAudioReady = false;
     _sentenceCache.clear();
     state = state.copyWith(speed: clamped);
     if (state.hasBook && state.isPlaying) {
@@ -519,6 +553,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
   Future<void> setSpeaker(int speakerId) async {
     if (speakerId == state.speakerId) return;
     _generation++;
+    _sentenceAudioReady = false;
     _sentenceCache.clear();
     state = state.copyWith(speakerId: speakerId);
     if (state.hasBook && state.isPlaying) {
@@ -528,6 +563,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
 
   Future<void> stop() async {
     _generation++;
+    _transitioningSentence = false;
+    _sentenceAudioReady = false;
     _recordListeningDelta();
     _sentenceCache.clear();
     state = const LiveTtsState();

@@ -223,7 +223,9 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     final canReadOrConvert = fmt == 'epub' || fmt == 'txt';
     final liveState = ref.watch(liveTtsPlayerProvider);
     final isLivePlaying =
-        liveState.hasBook && liveState.book?.id == book.id && liveState.isPlaying;
+        liveState.hasBook &&
+        liveState.book?.id == book.id &&
+        (liveState.isPlaying || liveState.isSynthesizing);
     final annotations = ref.watch(bookAnnotationsProvider(book.id));
     final authorText = book.authors.isNotEmpty
         ? book.authors.join(', ')

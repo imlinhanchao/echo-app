@@ -490,6 +490,28 @@ void main() {
       expect(find.byKey(const Key('reader_live_next_sentence')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_stop')), findsOneWidget);
 
+      Icon playButtonIcon() => tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const Key('reader_play_button')),
+          matching: find.byType(Icon),
+        ),
+      );
+
+      // 朗读及切句过渡期间右上角保持暂停态，绝不闪烁回耳机图标；仅主动暂停时才切回耳机图标
+      expect(playButtonIcon().icon, Icons.pause_circle_filled);
+      await tester.tap(find.byKey(const Key('reader_live_next_sentence')));
+      await tester.pump();
+      expect(playButtonIcon().icon, Icons.pause_circle_filled);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      expect(playButtonIcon().icon, Icons.pause_circle_filled);
+
+      await tester.tap(find.byKey(const Key('reader_live_toggle_play')));
+      await tester.pumpAndSettle();
+      expect(playButtonIcon().icon, Icons.headphones);
+
       // 点击停止后底栏高度保持一致（无布局跳变）
       await tester.tap(find.byKey(const Key('reader_live_stop')));
       await tester.pumpAndSettle();

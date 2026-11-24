@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -10,6 +11,31 @@ import 'package:echo/core/tts/sherpa_tts_engine.dart';
 import 'package:echo/core/tts/tts_model_catalog.dart';
 import 'package:echo/core/tts/tts_model_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _FlickeringFakeAudioEngine extends FakeAudioEngine {
+  @override
+  Future<void> setSource(
+    Uri uri, {
+    Map<String, String> headers = const <String, String>{},
+    Duration initialPosition = Duration.zero,
+    String? mediaTitle,
+    String? mediaArtist,
+    Duration? mediaDuration,
+    String? mediaArtUrl,
+  }) async {
+    await pause();
+    await Future<void>.delayed(Duration.zero);
+    await super.setSource(
+      uri,
+      headers: headers,
+      initialPosition: initialPosition,
+      mediaTitle: mediaTitle,
+      mediaArtist: mediaArtist,
+      mediaDuration: mediaDuration,
+      mediaArtUrl: mediaArtUrl,
+    );
+  }
+}
 
 void main() {
   group('LiveTtsPlayerController', () {
@@ -192,6 +218,95 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(controller.state.hasBook, isFalse);
       expect(controller.state.isPlaying, isFalse);
+    });
+
+    test(
+      'keeps isPlaying steady across sentence transitions and only pauses on explicit togglePlayPause',
+      () async {
+        final flickerEngine = _FlickeringFakeAudioEngine();
+        addTearDown(flickerEngine.dispose);
+        final book = await libraryStore.importBytes(
+          Uint8List.fromList(utf8.encode('第一章\n第一句开始朗读。第二句紧密衔接。')),
+          filename: 'steady_state.txt',
+        );
+        final controller = LiveTtsPlayerController(
+          libraryStore: libraryStore,
+          ttsEngine: ttsEngine,
+          audioEngine: flickerEngine,
+          resolveActiveModel: () => fakeModelPaths,
+          readConfig: () => const StandaloneConfig(
+            activeTtsModelId: 'vits-melo-tts-zh_en',
+            activeTtsSpeakerId: 0,
+          ),
+          cacheDirOverride: cacheDir,
+        );
+        addTearDown(controller.dispose);
+
+        final playingHistory = <bool>[];
+        final removeListener = controller.addListener((s) {
+          if (s.hasBook) {
+            playingHistory.add(s.isPlaying);
+          }
+        }, fireImmediately: false);
+        addTearDown(removeListener);
+
+        await controller.playBookChapter(book, chapterIndex: 0);
+        flickerEngine.emitCompleted();
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+
+        expect(controller.state.sentenceIndex, 1);
+        expect(controller.state.isPlaying, isTrue);
+        expect(
+          playingHistory.every((v) => v),
+          isTrue,
+          reason: '切句过渡期间 isPlaying 不应抖动为 false：$playingHistory',
+        );
+
+        await controller.togglePlayPause();
+        expect(controller.state.isPlaying, isFalse);
+        await controller.togglePlayPause();
+        expect(controller.state.isPlaying, isTrue);
+      },
+    );
+
+    test('pausing mid-synthesis stays paused and resumes cleanly', () async {
+      final slowTts = FakeOnDeviceTtsEngine(
+        syntheticDelay: const Duration(milliseconds: 60),
+      );
+      addTearDown(slowTts.dispose);
+      final book = await libraryStore.importBytes(
+        Uint8List.fromList(utf8.encode('第一章\n合成耗时期间测试主动暂停。第二句紧接出现。')),
+        filename: 'mid_synth_pause.txt',
+      );
+      final controller = LiveTtsPlayerController(
+        libraryStore: libraryStore,
+        ttsEngine: slowTts,
+        audioEngine: audioEngine,
+        resolveActiveModel: () => fakeModelPaths,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          activeTtsSpeakerId: 0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      addTearDown(controller.dispose);
+
+      unawaited(controller.playBookChapter(book, chapterIndex: 0));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controller.state.isSynthesizing, isTrue);
+      expect(controller.state.isPlaying, isTrue);
+
+      await controller.togglePlayPause();
+      expect(controller.state.isPlaying, isFalse);
+      expect(controller.state.isSynthesizing, isFalse);
+
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(controller.state.isPlaying, isFalse);
+      expect(controller.state.isSynthesizing, isFalse);
+
+      await controller.togglePlayPause();
+      expect(controller.state.isPlaying, isTrue);
+      expect(controller.state.isSynthesizing, isFalse);
     });
   });
 }
