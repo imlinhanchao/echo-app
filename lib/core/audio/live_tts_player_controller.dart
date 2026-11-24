@@ -138,6 +138,13 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       if (!playing && (_transitioningSentence || state.isSynthesizing)) {
         return;
       }
+      if (playing) {
+        if (_sentenceAudioReady) {
+          _sentenceStartAt ??= DateTime.now();
+        }
+      } else {
+        _recordListeningDelta();
+      }
       if (state.isPlaying != playing) {
         state = state.copyWith(isPlaying: playing);
       }
@@ -148,6 +155,10 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       _prevSub = controls.skipToPreviousRequests.listen((_) => prevChapter());
       _ffSub = controls.fastForwardRequests.listen((_) => nextSentence());
       _rwSub = controls.rewindRequests.listen((_) => prevSentence());
+      _playReqSub = controls.playRequests.listen((_) => _onExternalPlayRequest());
+      _pauseReqSub = controls.pauseRequests.listen(
+        (_) => _onExternalPauseRequest(),
+      );
     }
   }
 
@@ -169,6 +180,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
   StreamSubscription<void>? _prevSub;
   StreamSubscription<void>? _ffSub;
   StreamSubscription<void>? _rwSub;
+  StreamSubscription<void>? _playReqSub;
+  StreamSubscription<void>? _pauseReqSub;
 
   int _generation = 0;
   bool _transitioningSentence = false;
@@ -476,17 +489,43 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     }
   }
 
+  void _cancelPendingAndMarkPaused() {
+    if (_transitioningSentence || state.isSynthesizing) {
+      _generation++;
+      _transitioningSentence = false;
+      _sentenceCache.clear();
+    }
+    _recordListeningDelta();
+    if (state.isPlaying || state.isSynthesizing) {
+      state = state.copyWith(isPlaying: false, isSynthesizing: false);
+    }
+  }
+
+  void _onExternalPauseRequest() {
+    if (!mounted || !state.hasBook) return;
+    _cancelPendingAndMarkPaused();
+  }
+
+  void _onExternalPlayRequest() {
+    if (!mounted || !state.hasBook || state.isPlaying || state.isSynthesizing) {
+      return;
+    }
+    if (!_sentenceAudioReady) {
+      // 暂停前底层播放器可能仍停在上一句（如 completed），先暂停旧源再重新合成当前句，
+      // 防止旧源播完再次触发 completedStream 意外跳过当前句。
+      unawaited(_audioEngine.pause().catchError((Object _) {}));
+      unawaited(_playSentenceAt(state.sentenceIndex, expectedGen: ++_generation));
+    } else {
+      _sentenceStartAt ??= DateTime.now();
+      state = state.copyWith(isPlaying: true);
+    }
+  }
+
   Future<void> togglePlayPause() async {
     if (!state.hasBook) return;
     if (state.isPlaying || state.isSynthesizing) {
-      if (_transitioningSentence || state.isSynthesizing) {
-        _generation++;
-        _transitioningSentence = false;
-        _sentenceCache.clear();
-      }
-      _recordListeningDelta();
+      _cancelPendingAndMarkPaused();
       await _audioEngine.pause();
-      state = state.copyWith(isPlaying: false, isSynthesizing: false);
     } else {
       if (_sentenceAudioReady) {
         _sentenceStartAt = DateTime.now();
@@ -579,6 +618,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     _prevSub?.cancel();
     _ffSub?.cancel();
     _rwSub?.cancel();
+    _playReqSub?.cancel();
+    _pauseReqSub?.cancel();
     super.dispose();
   }
 

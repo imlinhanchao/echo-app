@@ -46,13 +46,16 @@ abstract class AudioEngine {
   Future<void> dispose();
 }
 
-/// 系统播控（锁屏/通知栏）请求流：由支持后台媒体的引擎实现。
-/// 控制器把"上一首/下一首"映射为章节切换，把快进/快退映射为 ±15s（支持跨块边界）。
+/// 系统播控（锁屏/通知栏/耳机按键）请求流：由支持后台媒体的引擎实现。
+/// 控制器把"上一首/下一首"映射为章节切换，把快进/快退映射为 ±15s（支持跨块边界），
+/// 并感知系统或耳机主动发起的播放/暂停指令。
 abstract class LockScreenControls {
   Stream<void> get skipToNextRequests;
   Stream<void> get skipToPreviousRequests;
   Stream<void> get fastForwardRequests;
   Stream<void> get rewindRequests;
+  Stream<void> get playRequests;
+  Stream<void> get pauseRequests;
 }
 
 /// 基于 just_audio 的生产音频引擎（支持携带 Bearer Authorization 头）。
@@ -90,7 +93,9 @@ class JustAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {
+    unawaited(_player.play().catchError((Object _) {}));
+  }
 
   @override
   Future<void> pause() => _player.pause();
@@ -128,6 +133,10 @@ class FakeAudioEngine implements AudioEngine, LockScreenControls {
       StreamController<void>.broadcast();
   final StreamController<void> _rewindController =
       StreamController<void>.broadcast();
+  final StreamController<void> _playController =
+      StreamController<void>.broadcast();
+  final StreamController<void> _pauseController =
+      StreamController<void>.broadcast();
 
   Uri? lastUri;
   Map<String, String> lastHeaders = const <String, String>{};
@@ -161,6 +170,12 @@ class FakeAudioEngine implements AudioEngine, LockScreenControls {
 
   @override
   Stream<void> get rewindRequests => _rewindController.stream;
+
+  @override
+  Stream<void> get playRequests => _playController.stream;
+
+  @override
+  Stream<void> get pauseRequests => _pauseController.stream;
 
   @override
   Future<void> setSource(
@@ -233,6 +248,8 @@ class FakeAudioEngine implements AudioEngine, LockScreenControls {
   void emitRewind() => _rewindController.add(null);
   void emitSkipNext() => _skipNextController.add(null);
   void emitSkipPrevious() => _skipPrevController.add(null);
+  void emitExternalPlay() => _playController.add(null);
+  void emitExternalPause() => _pauseController.add(null);
 
   @override
   Future<void> dispose() async {
@@ -243,6 +260,8 @@ class FakeAudioEngine implements AudioEngine, LockScreenControls {
     await _skipPrevController.close();
     await _fastForwardController.close();
     await _rewindController.close();
+    await _playController.close();
+    await _pauseController.close();
   }
 }
 
@@ -389,6 +408,13 @@ class ChunkedPlayerController extends StateNotifier<ChunkedPlayerState> {
         controls.rewindRequests.listen(
           (_) => unawaited(skipBy(const Duration(seconds: -15))),
         ),
+      );
+      _lockScreenSubs.add(
+        controls.pauseRequests.listen((_) {
+          if (state.hasBook) {
+            unawaited(_saveProgress());
+          }
+        }),
       );
     }
   }

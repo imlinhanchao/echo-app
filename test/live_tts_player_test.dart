@@ -308,5 +308,86 @@ void main() {
       expect(controller.state.isPlaying, isTrue);
       expect(controller.state.isSynthesizing, isFalse);
     });
+
+    test('headphone pause and resume mid-sentence updates state cleanly', () async {
+      final book = await libraryStore.importBytes(
+        Uint8List.fromList(utf8.encode('第一章\n第一句正常播放期间按耳机暂停，再按耳机恢复。')),
+        filename: 'headset_mid_sentence.txt',
+      );
+      final controller = LiveTtsPlayerController(
+        libraryStore: libraryStore,
+        ttsEngine: ttsEngine,
+        audioEngine: audioEngine,
+        resolveActiveModel: () => fakeModelPaths,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          activeTtsSpeakerId: 0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.playBookChapter(book, chapterIndex: 0);
+      expect(controller.state.isPlaying, isTrue);
+      expect(controller.state.isSynthesizing, isFalse);
+
+      // 模拟耳机按键暂停（仅作用于底层 handler，不经过 UI togglePlayPause）
+      await audioEngine.pause();
+      audioEngine.emitExternalPause();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.isPlaying, isFalse);
+
+      // 模拟再次按耳机按键恢复播放
+      await audioEngine.play();
+      audioEngine.emitExternalPlay();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.isPlaying, isTrue);
+    });
+
+    test('headphone pause mid-synthesis cancels synthesis and headphone resume re-synthesizes cleanly', () async {
+      final slowTts = FakeOnDeviceTtsEngine(
+        syntheticDelay: const Duration(milliseconds: 60),
+      );
+      addTearDown(slowTts.dispose);
+      final book = await libraryStore.importBytes(
+        Uint8List.fromList(utf8.encode('第一章\n耳机按键测试合成中暂停与恢复朗读。第二句紧接出现。')),
+        filename: 'headset_mid_synth.txt',
+      );
+      final controller = LiveTtsPlayerController(
+        libraryStore: libraryStore,
+        ttsEngine: slowTts,
+        audioEngine: audioEngine,
+        resolveActiveModel: () => fakeModelPaths,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          activeTtsSpeakerId: 0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      addTearDown(controller.dispose);
+
+      unawaited(controller.playBookChapter(book, chapterIndex: 0));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controller.state.isSynthesizing, isTrue);
+      expect(controller.state.isPlaying, isTrue);
+
+      // 耳机按键在合成尚未结束时暂停
+      await audioEngine.pause();
+      audioEngine.emitExternalPause();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.isPlaying, isFalse);
+      expect(controller.state.isSynthesizing, isFalse);
+
+      // 等待旧合成回调落盘完毕，不应重新自动播放
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(controller.state.isPlaying, isFalse);
+      expect(controller.state.isSynthesizing, isFalse);
+
+      // 再次按耳机恢复播放，应触发重新合成并正常进入播放状态
+      audioEngine.emitExternalPlay();
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      expect(controller.state.isPlaying, isTrue);
+      expect(controller.state.isSynthesizing, isFalse);
+    });
   });
 }

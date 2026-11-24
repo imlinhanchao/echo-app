@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
 import com.ryanheise.audioservice.AudioServiceActivity
+import com.ryanheise.audioservice.EchoAudioServiceBridge
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
@@ -167,12 +168,18 @@ class MainActivity : AudioServiceActivity() {
             "org.hancel.echo/media_notification"
         ).setMethodCallHandler { call, result ->
             if (call.method == "cancelPlaybackNotification") {
-                try {
-                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                    manager?.cancel(1124)
-                } catch (_: Exception) {
+                mainHandler.post {
+                    try {
+                        EchoAudioServiceBridge.stopForegroundAndRemoveNotification()
+                    } catch (_: Exception) {
+                    }
+                    try {
+                        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        manager?.cancel(1124)
+                    } catch (_: Exception) {
+                    }
+                    result.success(null)
                 }
-                result.success(null)
             } else {
                 result.notImplemented()
             }

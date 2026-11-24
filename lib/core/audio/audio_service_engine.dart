@@ -9,30 +9,138 @@ import 'package:just_audio/just_audio.dart';
 
 import 'chunked_player_controller.dart' show AudioEngine, LockScreenControls;
 
+/// 播放器适配器抽象：把 [AudioPlayer] 的事件流与控制接口暴露给 [EchoAudioHandler]，
+/// 便于在单元测试中注入假播放器直接验证耳机按键暂停与恢复行为。
+@visibleForTesting
+abstract class EchoPlayerAdapter {
+  Stream<bool> get playingStream;
+  Stream<Duration> get positionStream;
+  Stream<ProcessingState> get processingStateStream;
+  Stream<double> get speedStream;
+
+  bool get playing;
+  ProcessingState get processingState;
+  Duration get position;
+  Duration get bufferedPosition;
+  double get speed;
+
+  Future<Duration?> setAudioSource(
+    AudioSource source, {
+    Duration? initialPosition,
+  });
+
+  Future<void> play();
+  Future<void> pause();
+  Future<void> stop();
+  Future<void> seek(Duration? position);
+  Future<void> setSpeed(double speed);
+  Future<void> setVolume(double volume);
+}
+
+class _JustAudioPlayerAdapter implements EchoPlayerAdapter {
+  // 音频焦点与中断已由 AudioServiceEngine 统一接管，关闭 just_audio 内部重复监听，
+  // 避免两者同时响应中断或抢占 AudioSession 状态。
+  final AudioPlayer _player = AudioPlayer(
+    handleInterruptions: false,
+    handleAudioSessionActivation: false,
+  );
+
+  @override
+  Stream<bool> get playingStream => _player.playingStream;
+
+  @override
+  Stream<Duration> get positionStream => _player.positionStream;
+
+  @override
+  Stream<ProcessingState> get processingStateStream =>
+      _player.processingStateStream;
+
+  @override
+  Stream<double> get speedStream => _player.speedStream;
+
+  @override
+  bool get playing => _player.playing;
+
+  @override
+  ProcessingState get processingState => _player.processingState;
+
+  @override
+  Duration get position => _player.position;
+
+  @override
+  Duration get bufferedPosition => _player.bufferedPosition;
+
+  @override
+  double get speed => _player.speed;
+
+  @override
+  Future<Duration?> setAudioSource(
+    AudioSource source, {
+    Duration? initialPosition,
+  }) => _player.setAudioSource(source, initialPosition: initialPosition);
+
+  @override
+  Future<void> play() => _player.play();
+
+  @override
+  Future<void> pause() => _player.pause();
+
+  @override
+  Future<void> stop() => _player.stop();
+
+  @override
+  Future<void> seek(Duration? position) => _player.seek(position);
+
+  @override
+  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+
+  @override
+  Future<void> setVolume(double volume) => _player.setVolume(volume);
+}
+
 /// audio_service 后台处理器：把 just_audio 会话桥接到系统媒体控制
 /// （锁屏/通知栏：书名 + 章节名 + 进度条 + 上一章/-15s/播放/+15s/下一章）。
 class EchoAudioHandler extends BaseAudioHandler {
-  EchoAudioHandler() {
+  EchoAudioHandler({
+    @visibleForTesting EchoPlayerAdapter? player,
+    Future<bool> Function()? activateAudioSession,
+    Future<void> Function()? onStopped,
+  }) : _player = player ?? _JustAudioPlayerAdapter(),
+       _activateAudioSession = activateAudioSession,
+       _onStopped = onStopped {
     _player.playingStream.listen((_) => _broadcast());
     _player.positionStream.listen((_) => _broadcast());
     _player.processingStateStream.listen((_) => _broadcast());
     _player.speedStream.listen((_) => _broadcast());
   }
 
-  final AudioPlayer _player = AudioPlayer();
+  final EchoPlayerAdapter _player;
+  final Future<bool> Function()? _activateAudioSession;
+  final Future<void> Function()? _onStopped;
   final StreamController<void> _skipNext = StreamController<void>.broadcast();
   final StreamController<void> _skipPrev = StreamController<void>.broadcast();
   final StreamController<void> _fastForward =
       StreamController<void>.broadcast();
   final StreamController<void> _rewind = StreamController<void>.broadcast();
+  final StreamController<void> _playRequests =
+      StreamController<void>.broadcast();
+  final StreamController<void> _pauseRequests =
+      StreamController<void>.broadcast();
 
-  AudioPlayer get player => _player;
+  EchoPlayerAdapter get player => _player;
   bool _switchingSource = false;
   bool _keepPlayingAcrossSwitch = false;
+  int _playbackOpToken = 0;
+
+  bool get isEffectivelyPlaying =>
+      _player.playing || (_switchingSource && _keepPlayingAcrossSwitch);
+
   Stream<void> get skipNextRequests => _skipNext.stream;
   Stream<void> get skipPrevRequests => _skipPrev.stream;
   Stream<void> get fastForwardRequests => _fastForward.stream;
   Stream<void> get rewindRequests => _rewind.stream;
+  Stream<void> get playRequests => _playRequests.stream;
+  Stream<void> get pauseRequests => _pauseRequests.stream;
 
   /// 载入一个分块音源并广播媒体元数据（锁屏显示书名/章节/时长）。
   Future<void> setChunkSource(
@@ -44,7 +152,7 @@ class EchoAudioHandler extends BaseAudioHandler {
     String artist = '',
     Uri? artUri,
   }) async {
-    _keepPlayingAcrossSwitch = _player.playing || _keepPlayingAcrossSwitch;
+    _keepPlayingAcrossSwitch = isEffectivelyPlaying;
     _switchingSource = true;
     try {
       final baseItem = MediaItem(
@@ -73,15 +181,73 @@ class EchoAudioHandler extends BaseAudioHandler {
   }
 
   @override
-  Future<void> play() {
+  Future<void> click([MediaButton button = MediaButton.media]) async {
+    switch (button) {
+      case MediaButton.media:
+        if (isEffectivelyPlaying) {
+          await pause();
+        } else {
+          await play();
+        }
+      case MediaButton.next:
+        await skipToNext();
+      case MediaButton.previous:
+        await skipToPrevious();
+    }
+  }
+
+  /// App 内部发起的播放（UI 按钮 / 自动续句 / 切章）。
+  Future<void> playFromApp() => _startPlayback(external: false);
+
+  /// App 内部发起的暂停。
+  Future<void> pauseFromApp() async {
+    _playbackOpToken++;
+    _keepPlayingAcrossSwitch = false;
+    await _player.pause();
+    _broadcast();
+  }
+
+  Future<void> _startPlayback({required bool external}) async {
+    final token = ++_playbackOpToken;
+    if (_activateAudioSession != null) {
+      try {
+        final granted = await _activateAudioSession();
+        if (token != _playbackOpToken) return;
+        if (!granted) {
+          _keepPlayingAcrossSwitch = false;
+          _broadcast();
+          return;
+        }
+      } catch (_) {}
+    }
+    if (token != _playbackOpToken) return;
+    final procState = _player.processingState;
+    if (procState == ProcessingState.idle) {
+      if (external) {
+        _playRequests.add(null);
+      }
+      return;
+    }
+    if (procState == ProcessingState.completed) {
+      await _player.seek(Duration.zero);
+      if (token != _playbackOpToken) return;
+    }
     _keepPlayingAcrossSwitch = true;
-    return _player.play();
+    // just_audio 的 play() 在暂停或播完前不会返回，不能阻塞媒体按键回调与切句过渡状态。
+    unawaited(_player.play().catchError((Object _) {}));
+    _broadcast();
+    if (external) {
+      _playRequests.add(null);
+    }
   }
 
   @override
-  Future<void> pause() {
-    _keepPlayingAcrossSwitch = false;
-    return _player.pause();
+  Future<void> play() => _startPlayback(external: true);
+
+  @override
+  Future<void> pause() async {
+    await pauseFromApp();
+    _pauseRequests.add(null);
   }
 
   @override
@@ -95,6 +261,7 @@ class EchoAudioHandler extends BaseAudioHandler {
 
   @override
   Future<void> stop() async {
+    _playbackOpToken++;
     _switchingSource = false;
     _keepPlayingAcrossSwitch = false;
     await _player.stop();
@@ -106,6 +273,7 @@ class EchoAudioHandler extends BaseAudioHandler {
       ),
     );
     await super.stop();
+    await _onStopped?.call();
   }
 
   /// 锁屏"上一首/下一首"按设计映射为章节切换请求，
@@ -144,9 +312,9 @@ class EchoAudioHandler extends BaseAudioHandler {
       );
       return;
     }
-    final effectivePlaying =
-        _player.playing || (_switchingSource && _keepPlayingAcrossSwitch);
-    final effectiveProcState = (_switchingSource && procState == ProcessingState.idle)
+    final effectivePlaying = isEffectivelyPlaying;
+    final effectiveProcState =
+        (_switchingSource && procState == ProcessingState.idle)
         ? AudioProcessingState.buffering
         : (_processingStateMap[procState] ?? AudioProcessingState.idle);
     if (!_switchingSource &&
@@ -165,6 +333,9 @@ class EchoAudioHandler extends BaseAudioHandler {
           MediaControl.skipToNext,
         ],
         systemActions: const <MediaAction>{
+          MediaAction.play,
+          MediaAction.pause,
+          MediaAction.playPause,
           MediaAction.seek,
           MediaAction.rewind,
           MediaAction.fastForward,
@@ -202,10 +373,10 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     androidNotificationChannelId: 'org.hancel.echo.playback',
     androidNotificationChannelName: 'Echo 播放',
     androidNotificationIcon: 'drawable/ic_stat_echo',
-    // 暂停后允许划掉通知，终止播放时先退出前台状态再彻底撤除通知栏卡片，
-    // 同时保持 androidResumeOnClick 为 true 确保锁屏/蓝牙媒体控件会话激活。
+    // 暂停后保持前台服务保活，避免 Android 12+ / 鸿蒙在锁屏后台按耳机恢复播放时被系统拦截；
+    // 显式 stop() 时通过原生 EchoAudioServiceBridge 退出前台并撤除通知栏卡片。
     androidNotificationOngoing: false,
-    androidStopForegroundOnPause: true,
+    androidStopForegroundOnPause: false,
     androidResumeOnClick: true,
     rewindInterval: Duration(seconds: 15),
     fastForwardInterval: Duration(seconds: 15),
@@ -231,6 +402,29 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     return null;
   }
 
+  static Future<bool> _activateAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      return await session.setActive(true);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> _cleanupOnStop() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await _mediaNotifChannel.invokeMethod<void>(
+          'cancelPlaybackNotification',
+        );
+      } catch (_) {}
+    }
+  }
+
   /// 在 main() 中初始化后台媒体会话与音频焦点（来电/耳机拔出自动暂停）；
   /// 非 Android/iOS 平台（桌面/测试）自动跳过并回退 just_audio。
   static Future<void> tryInit() async {
@@ -238,7 +432,10 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
     if (!(Platform.isAndroid || Platform.isIOS)) return;
     try {
       final handler = await AudioService.init(
-        builder: () => EchoAudioHandler(),
+        builder: () => EchoAudioHandler(
+          activateAudioSession: _activateAudioSession,
+          onStopped: _cleanupOnStop,
+        ),
         config: audioServiceConfig,
       );
       final engine = AudioServiceEngine._(handler);
@@ -261,7 +458,7 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
               _handler.setVolume(0.35);
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
-              if (_handler.player.playing) {
+              if (_handler.isEffectivelyPlaying) {
                 _pausedByInterruption = true;
                 unawaited(_handler.pause());
               }
@@ -282,7 +479,7 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
       });
       // 拔出耳机 / 蓝牙断开时自动暂停，防止公放尴尬
       session.becomingNoisyEventStream.listen((_) {
-        if (_handler.player.playing) {
+        if (_handler.isEffectivelyPlaying) {
           unawaited(_handler.pause());
         }
       });
@@ -323,36 +520,17 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
   );
 
   @override
-  Future<void> play() async {
-    try {
-      final session = await AudioSession.instance;
-      await session.setActive(true);
-    } catch (_) {}
-    await _handler.play();
-  }
+  Future<void> play() => _handler.playFromApp();
 
   @override
-  Future<void> pause() => _handler.pause();
+  Future<void> pause() => _handler.pauseFromApp();
 
   static const MethodChannel _mediaNotifChannel = MethodChannel(
     'org.hancel.echo/media_notification',
   );
 
   @override
-  Future<void> stop() async {
-    await _handler.stop();
-    try {
-      final session = await AudioSession.instance;
-      await session.setActive(false);
-    } catch (_) {}
-    if (!kIsWeb && Platform.isAndroid) {
-      try {
-        await _mediaNotifChannel.invokeMethod<void>(
-          'cancelPlaybackNotification',
-        );
-      } catch (_) {}
-    }
-  }
+  Future<void> stop() => _handler.stop();
 
   @override
   Future<void> seek(Duration position) => _handler.seek(position);
@@ -378,4 +556,10 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
 
   @override
   Stream<void> get rewindRequests => _handler.rewindRequests;
+
+  @override
+  Stream<void> get playRequests => _handler.playRequests;
+
+  @override
+  Stream<void> get pauseRequests => _handler.pauseRequests;
 }
