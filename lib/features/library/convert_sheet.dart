@@ -10,8 +10,10 @@ import '../../core/api/models.dart';
 import '../../core/tts/sherpa_tts_engine.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../core/tts/wav_encoder.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
+import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../jobs/jobs_controller.dart';
@@ -300,32 +302,27 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
       minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (context, scrollController) => Scaffold(
-        backgroundColor: tokens.surfaceBase,
+        backgroundColor: tokens.surfaceElevated,
         body: ListView(
           controller: scrollController,
           key: const Key('convert_sheet'),
-          padding: const EdgeInsets.all(EchoMetrics.space3),
+          padding: const EdgeInsets.fromLTRB(
+            EchoMetrics.pagePadding,
+            4,
+            EchoMetrics.pagePadding,
+            EchoMetrics.space3,
+          ),
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: EchoMetrics.space2),
-                decoration: BoxDecoration(
-                  color: tokens.surfaceSubtle,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-            ),
+            const EchoSheetDragHandle(),
             Text(
-              '转有声书',
+              '制作有声书',
               key: const Key('convert_sheet_title'),
               style: textTheme.titleLarge?.copyWith(color: tokens.textPrimary),
             ),
             const SizedBox(height: EchoMetrics.spaceHalf),
             Text(
               widget.book.title,
-              style: textTheme.bodyMedium?.copyWith(
+              style: textTheme.bodySmall?.copyWith(
                 color: tokens.textSecondary,
               ),
             ),
@@ -345,7 +342,7 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                   style: textTheme.bodyMedium?.copyWith(color: tokens.error),
                 ),
                 const SizedBox(height: EchoMetrics.space2),
-                FilledButton(onPressed: _load, child: const Text('重试')),
+                EchoPrimaryButton(label: '重试', onPressed: _load),
               ] else ...[
                 Text(
                   _error!,
@@ -357,12 +354,10 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
               Container(
                 key: const Key('convert_no_local_models'),
                 padding: const EdgeInsets.all(EchoMetrics.space3),
-                decoration: BoxDecoration(
-                  color: tokens.surfaceElevated,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: tokens.primary.withValues(alpha: 0.25),
-                  ),
+                decoration: echoElevatedCardDecoration(
+                  context,
+                  radius: 16,
+                  color: tokens.surfaceBase,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,7 +374,7 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                             '尚未安装离线语音模型',
                             style: textTheme.titleSmall?.copyWith(
                               color: tokens.textPrimary,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
@@ -387,7 +382,7 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '单机版所有语音合成都在手机本地完成。请先前往「离线语音模型管理」下载一款模型（Kokoro / Matcha / Piper）后再提交转换。',
+                      '单机版所有语音合成都在手机本地完成。请先前往「语音模型与引擎管理」配置系统语音或下载离线模型（ZipVoice / MeloTTS / Matcha）后再提交转换。',
                       style: textTheme.bodySmall?.copyWith(
                         color: tokens.textSecondary,
                       ),
@@ -395,20 +390,22 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
                     const SizedBox(height: EchoMetrics.space2),
                     Row(
                       children: [
-                        FilledButton.icon(
-                          key: const Key('convert_goto_models_button'),
-                          onPressed: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const TtsModelManagerPage(),
-                              ),
-                            );
-                            if (mounted) _load();
-                          },
-                          icon: const Icon(Icons.download_outlined, size: 18),
-                          label: const Text('去下载语音模型'),
+                        Expanded(
+                          child: EchoPrimaryButton(
+                            key: const Key('convert_goto_models_button'),
+                            onPressed: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const TtsModelManagerPage(),
+                                ),
+                              );
+                              if (mounted) _load();
+                            },
+                            icon: Icons.download_outlined,
+                            label: '去配置语音模型',
+                          ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 10),
                         TextButton(
                           onPressed: _load,
                           child: const Text('刷新'),

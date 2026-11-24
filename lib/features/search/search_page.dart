@@ -5,8 +5,10 @@ import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/settings/standalone_config_store.dart';
 import '../../design/book_cover.dart';
+import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
+import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../jobs/jobs_controller.dart';
@@ -17,7 +19,8 @@ import 'search_controller.dart';
 // flutter/material 自带同名 SearchController，这里显式指向本项目的控制器类型
 typedef Record = void;
 
-/// 发现 Tab：跨书源搜索（zlib）→ 搜索历史 / 结果列表 → 详情弹层 / 一键下载与转有声书。
+/// 发现 Tab（极简书房 Editorial Minimalism）：
+/// 留白标题栏 + 书源状态入口 → 圆角搜索条 & 轻描边筛选 → 细线分隔结果行 → 详情弹层。
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key});
 
@@ -114,23 +117,30 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       builder: (sheetCtx) => StatefulBuilder(
         builder: (sheetCtx, setSheetState) => SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(EchoMetrics.space3),
+            padding: const EdgeInsets.fromLTRB(
+              EchoMetrics.pagePadding,
+              4,
+              EchoMetrics.pagePadding,
+              EchoMetrics.space3,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const EchoSheetDragHandle(),
                 Text(
-                  '筛选',
-                  style: Theme.of(
-                    sheetCtx,
-                  ).textTheme.titleMedium?.copyWith(color: tokens.textPrimary),
+                  '筛选条件',
+                  style: Theme.of(sheetCtx).textTheme.titleMedium?.copyWith(
+                    color: tokens.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: EchoMetrics.space2),
                 Text(
                   '语言',
-                  style: Theme.of(
-                    sheetCtx,
-                  ).textTheme.labelLarge?.copyWith(color: tokens.textSecondary),
+                  style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: EchoMetrics.space1),
                 Wrap(
@@ -153,9 +163,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 const SizedBox(height: EchoMetrics.space2),
                 Text(
                   '出版年份',
-                  style: Theme.of(
-                    sheetCtx,
-                  ).textTheme.labelLarge?.copyWith(color: tokens.textSecondary),
+                  style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: EchoMetrics.space1),
                 Row(
@@ -184,9 +194,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 const SizedBox(height: EchoMetrics.space2),
                 Text(
                   '排序',
-                  style: Theme.of(
-                    sheetCtx,
-                  ).textTheme.labelLarge?.copyWith(color: tokens.textSecondary),
+                  style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: EchoMetrics.space1),
                 Wrap(
@@ -247,7 +257,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  /// 搜索结果详情弹层（设计图 ui-mobile-search：行点击看简介 → 直接下载 / 下载并转有声书）。
+  /// 搜索结果详情弹层。
   Future<void> _showDetail(SearchBook book) {
     return showModalBottomSheet<void>(
       context: context,
@@ -274,14 +284,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final state = ref.watch(searchControllerProvider);
     final controller = ref.read(searchControllerProvider.notifier);
     final standaloneCfg = ref.watch(standaloneConfigProvider);
+    final hairline = echoHairlineColor(context, darkAlpha: 0.06);
 
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
+            EchoMetrics.pagePadding,
             EchoMetrics.space2,
-            EchoMetrics.space2,
-            EchoMetrics.space2,
+            EchoMetrics.pagePadding,
             0,
           ),
           child: Row(
@@ -290,18 +301,53 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 '发现',
                 key: const Key('search_title'),
                 style: textTheme.headlineSmall?.copyWith(
+                  fontSize: 25,
                   color: tokens.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
                 ),
               ),
               const Spacer(),
-              TextButton.icon(
-                onPressed: () => Navigator.of(context).push(
+              InkWell(
+                borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
+                onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const EbookApiSettingsPage(),
                   ),
                 ),
-                icon: const Icon(Icons.dns_outlined, size: 16),
-                label: Text(standaloneCfg.hasEbookApi ? '书源服务' : '配置服务'),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: echoElevatedCardDecoration(
+                    context,
+                    radius: EchoMetrics.radiusPill,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: standaloneCfg.hasEbookApi
+                              ? tokens.success
+                              : tokens.warning,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        standaloneCfg.hasEbookApi ? '书源服务' : '配置服务',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: tokens.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -310,32 +356,30 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           Container(
             key: const Key('search_ebook_api_banner'),
             margin: const EdgeInsets.fromLTRB(
-              EchoMetrics.space2,
-              EchoMetrics.space1,
-              EchoMetrics.space2,
+              EchoMetrics.pagePadding,
+              12,
+              EchoMetrics.pagePadding,
               0,
             ),
-            padding: const EdgeInsets.all(EchoMetrics.space2),
-            decoration: BoxDecoration(
-              color: tokens.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: tokens.primary.withValues(alpha: 0.28),
-              ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: echoElevatedCardDecoration(
+              context,
+              radius: 14,
+              borderColor: tokens.primary.withValues(alpha: 0.28),
             ),
             child: Row(
               children: [
-                Icon(Icons.info_outline, color: tokens.primary, size: 20),
+                Icon(Icons.info_outline, color: tokens.primary, size: 18),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    '尚未配置 ebook-api 服务地址，配置后即可在线搜书下载',
+                    '尚未配置 ebook-api 服务地址，配置后即可在线搜书',
                     style: textTheme.bodySmall?.copyWith(
                       color: tokens.textPrimary,
                     ),
                   ),
                 ),
-                FilledButton.tonal(
+                TextButton(
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => const EbookApiSettingsPage(),
@@ -347,7 +391,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ),
           ),
         Padding(
-          padding: const EdgeInsets.all(EchoMetrics.space2),
+          padding: const EdgeInsets.fromLTRB(
+            EchoMetrics.pagePadding,
+            14,
+            EchoMetrics.pagePadding,
+            10,
+          ),
           child: TextField(
             key: const Key('search_field'),
             controller: _controller,
@@ -355,25 +404,30 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             onSubmitted: (_) => _submit(),
             decoration: InputDecoration(
               hintText: '搜索书名、作者（zlib 书源）',
-              prefixIcon: const Icon(Icons.search),
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
               suffixIcon: state.isLoading
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
+                  ? Padding(
+                      padding: const EdgeInsets.all(12),
                       child: SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: tokens.primary,
+                        ),
                       ),
                     )
                   : IconButton(
-                      icon: const Icon(Icons.arrow_forward),
+                      icon: const Icon(Icons.arrow_forward_rounded, size: 19),
                       onPressed: _submit,
                     ),
             ),
           ),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: EchoMetrics.pagePadding,
+          ),
           child: Row(
             children: [
               FilterChip(
@@ -389,10 +443,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   );
                 },
               ),
-              const SizedBox(width: EchoMetrics.space1),
+              const SizedBox(width: 8),
               ActionChip(
                 key: const Key('search_filter_button'),
-                avatar: const Icon(Icons.tune, size: 16),
+                avatar: Icon(
+                  Icons.tune_rounded,
+                  size: 16,
+                  color: controller.filters.activeCount > 0
+                      ? tokens.primary
+                      : tokens.textSecondary,
+                ),
                 label: Text(
                   controller.filters.activeCount == 0
                       ? '筛选'
@@ -404,38 +464,50 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           ),
         ),
         if (state.error != null)
-          Padding(
-            padding: const EdgeInsets.all(EchoMetrics.space2),
-            child: Card(
-              key: const Key('search_error_banner'),
-              child: Padding(
-                padding: const EdgeInsets.all(EchoMetrics.space2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        state.error!,
-                        style: textTheme.bodySmall?.copyWith(
-                          color: tokens.error,
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                      key: const Key('search_go_configure'),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const ProviderAccountPage(),
-                        ),
-                      ),
-                      child: const Text('去配置账号'),
-                    ),
-                  ],
+          Container(
+            key: const Key('search_error_banner'),
+            margin: const EdgeInsets.fromLTRB(
+              EchoMetrics.pagePadding,
+              10,
+              EchoMetrics.pagePadding,
+              0,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: echoElevatedCardDecoration(
+              context,
+              radius: 14,
+              color: tokens.error.withValues(alpha: 0.08),
+              borderColor: tokens.error.withValues(alpha: 0.25),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    state.error!,
+                    style: textTheme.bodySmall?.copyWith(color: tokens.error),
+                  ),
                 ),
-              ),
+                TextButton(
+                  key: const Key('search_go_configure'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ProviderAccountPage(),
+                    ),
+                  ),
+                  child: const Text('去配置账号'),
+                ),
+              ],
             ),
           ),
         if (state.isLoading && state.books.isNotEmpty)
-          const LinearProgressIndicator(minHeight: 2),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: LinearProgressIndicator(
+              minHeight: 2,
+              color: tokens.primary,
+              backgroundColor: tokens.surfaceSubtle,
+            ),
+          ),
         Expanded(
           child: state.books.isEmpty && !state.isLoading
               ? _EmptyOrHistory(
@@ -448,34 +520,38 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   onRemove: controller.removeHistory,
                 )
               : state.books.isEmpty && state.isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: tokens.primary,
+                  ),
+                )
               : ListView.separated(
                   key: const Key('search_results'),
                   padding: EdgeInsets.fromLTRB(
-                    EchoMetrics.space2,
-                    EchoMetrics.space2,
-                    EchoMetrics.space2,
-                    ref.watch(chunkedPlayerProvider).hasBook
-                        ? 104
-                        : EchoMetrics.space2,
+                    EchoMetrics.pagePadding,
+                    12,
+                    EchoMetrics.pagePadding,
+                    ref.watch(chunkedPlayerProvider).hasBook ? 112 : 24,
                   ),
                   itemCount: state.books.length + (state.hasMore ? 1 : 0),
-                  separatorBuilder: (_, _) =>
-                      const SizedBox(height: EchoMetrics.space1),
+                  separatorBuilder: (_, _) => Divider(
+                    height: 1,
+                    thickness: 0.6,
+                    color: hairline,
+                  ),
                   itemBuilder: (context, index) {
                     if (index >= state.books.length) {
                       return Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: EchoMetrics.space1,
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         child: Center(
-                          child: FilledButton.tonalIcon(
+                          child: EchoSecondaryButton(
                             key: const Key('search_load_more'),
                             onPressed: state.isLoading
                                 ? null
                                 : controller.loadMore,
-                            icon: const Icon(Icons.expand_more),
-                            label: const Text('加载更多'),
+                            icon: Icons.expand_more_rounded,
+                            label: '加载更多',
                           ),
                         ),
                       );
@@ -484,96 +560,105 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     final authorText = book.authors.isNotEmpty
                         ? book.authors.join(', ')
                         : '未知作者';
-                    return Card(
+                    return InkWell(
                       key: Key('search_result_${book.ref}'),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(
-                          EchoMetrics.radiusCard,
-                        ),
-                        onTap: () => _showDetail(book),
-                        child: Padding(
-                          padding: const EdgeInsets.all(EchoMetrics.space2),
-                          child: Row(
-                            children: [
-                              BookCover(
-                                url: book.coverUrl,
-                                width: 48,
-                                height: 64,
-                              ),
-                              const SizedBox(width: EchoMetrics.space2),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      book.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: textTheme.titleMedium?.copyWith(
-                                        color: tokens.textPrimary,
-                                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => _showDetail(book),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Row(
+                          children: [
+                            BookCover(
+                              url: book.coverUrl,
+                              title: book.title,
+                              author: authorText,
+                              width: 50,
+                              height: 70,
+                              borderRadius: 7,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    book.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: textTheme.titleSmall?.copyWith(
+                                      color: tokens.textPrimary,
+                                      fontWeight: FontWeight.w600,
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '$authorText · ${book.year}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: textTheme.bodySmall?.copyWith(
-                                        color: tokens.textSecondary,
-                                      ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    book.year.isNotEmpty
+                                        ? '$authorText · ${book.year}'
+                                        : authorText,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: textTheme.bodySmall?.copyWith(
+                                      fontSize: 13,
+                                      color: tokens.textSecondary,
                                     ),
-                                    const SizedBox(height: EchoMetrics.space1),
-                                    // 来源 / 格式标签胶囊（设计图 ui-mobile-search）。
-                                    Wrap(
-                                      spacing: EchoMetrics.spaceHalf,
-                                      runSpacing: EchoMetrics.spaceHalf,
-                                      children: [
-                                        if (book.provider.isNotEmpty)
-                                          _MetaPill(
-                                            key: Key(
-                                              'search_pill_provider_${book.ref}',
-                                            ),
-                                            label: book.provider.toUpperCase(),
-                                            highlighted: true,
-                                          ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    children: [
+                                      if (book.provider.isNotEmpty)
                                         _MetaPill(
                                           key: Key(
-                                            'search_pill_format_${book.ref}',
+                                            'search_pill_provider_${book.ref}',
                                           ),
-                                          label: book.format.toUpperCase(),
+                                          label: book.provider.toUpperCase(),
+                                          highlighted: true,
                                         ),
-                                        if (book.size.isNotEmpty)
-                                          _MetaPill(
-                                            key: Key(
-                                              'search_pill_size_${book.ref}',
-                                            ),
-                                            label: book.size,
+                                      _MetaPill(
+                                        key: Key(
+                                          'search_pill_format_${book.ref}',
+                                        ),
+                                        label: book.format.toUpperCase(),
+                                      ),
+                                      if (book.size.isNotEmpty)
+                                        _MetaPill(
+                                          key: Key(
+                                            'search_pill_size_${book.ref}',
                                           ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+                                          label: book.size,
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                              _pendingRefs.contains(book.ref)
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : IconButton(
-                                      key: Key('search_download_${book.ref}'),
-                                      tooltip: '下载到书库',
-                                      icon: Icon(
-                                        Icons.download,
-                                        color: tokens.primary,
-                                      ),
-                                      onPressed: () =>
-                                          _download(book.ref, book.provider),
+                            ),
+                            const SizedBox(width: 8),
+                            _pendingRefs.contains(book.ref)
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: tokens.primary,
                                     ),
-                            ],
-                          ),
+                                  )
+                                : IconButton(
+                                    key: Key('search_download_${book.ref}'),
+                                    tooltip: '下载到书库',
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: tokens.primary
+                                          .withValues(alpha: 0.12),
+                                      foregroundColor: tokens.primary,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.download_rounded,
+                                      size: 20,
+                                    ),
+                                    onPressed: () =>
+                                        _download(book.ref, book.provider),
+                                  ),
+                          ],
                         ),
                       ),
                     );
@@ -599,29 +684,14 @@ class _MetaPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: EchoMetrics.space1,
-        vertical: 2,
-      ),
-      decoration: BoxDecoration(
-        color: highlighted
-            ? tokens.primary.withValues(alpha: 0.16)
-            : tokens.surfaceSubtle,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: highlighted ? tokens.primary : tokens.textSecondary,
-          fontWeight: highlighted ? FontWeight.w600 : FontWeight.normal,
-        ),
-      ),
+    return EchoPillBadge(
+      label: label,
+      color: highlighted ? tokens.primary : tokens.textSecondary,
     );
   }
 }
 
-/// 空态：未搜索时展示搜索历史（设计图：历史关键词胶囊，可点选、可删除）。
+/// 空态：未搜索时展示搜索历史。
 class _EmptyOrHistory extends StatelessWidget {
   const _EmptyOrHistory({
     required this.hasSearched,
@@ -643,9 +713,25 @@ class _EmptyOrHistory extends StatelessWidget {
     if (!hasSearched && history.isEmpty) {
       return Center(
         key: const Key('search_empty'),
-        child: Text(
-          '输入关键词，搜一本想听的书',
-          style: textTheme.bodyLarge?.copyWith(color: tokens.textSecondary),
+        child: Padding(
+          padding: const EdgeInsets.all(EchoMetrics.space4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.manage_search_rounded,
+                size: 40,
+                color: tokens.textDisabled,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '输入关键词，搜一本想听的书',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: tokens.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -655,23 +741,31 @@ class _EmptyOrHistory extends StatelessWidget {
         key: const Key('search_no_results'),
         child: Text(
           '没有找到相关书籍',
-          style: textTheme.bodyLarge?.copyWith(color: tokens.textSecondary),
+          style: textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
         ),
       );
     }
 
     return ListView(
       key: const Key('search_history'),
-      padding: const EdgeInsets.all(EchoMetrics.space2),
+      padding: const EdgeInsets.fromLTRB(
+        EchoMetrics.pagePadding,
+        14,
+        EchoMetrics.pagePadding,
+        24,
+      ),
       children: [
         Text(
           '搜索历史',
-          style: textTheme.labelLarge?.copyWith(color: tokens.textSecondary),
+          style: textTheme.labelMedium?.copyWith(
+            color: tokens.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: EchoMetrics.space1),
+        const SizedBox(height: 10),
         Wrap(
-          spacing: EchoMetrics.space1,
-          runSpacing: EchoMetrics.space1,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             for (final q in history)
               InputChip(
@@ -680,7 +774,7 @@ class _EmptyOrHistory extends StatelessWidget {
                 onPressed: () => onPick(q),
                 onDeleted: () => onRemove(q),
                 backgroundColor: tokens.surfaceElevated,
-                side: BorderSide(color: tokens.surfaceSubtle),
+                side: BorderSide(color: echoHairlineColor(context), width: 0.8),
               ),
           ],
         ),
@@ -689,7 +783,7 @@ class _EmptyOrHistory extends StatelessWidget {
   }
 }
 
-/// 搜索结果详情弹层：书源侧详情（providerBook）+ 简介 + 直接下载 / 下载并转有声书。
+/// 搜索结果详情弹层。
 class _SearchDetailSheet extends ConsumerStatefulWidget {
   const _SearchDetailSheet({
     required this.book,
@@ -724,11 +818,11 @@ class _SearchDetailSheetState extends ConsumerState<_SearchDetailSheet> {
 
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.7,
+      initialChildSize: 0.72,
       minChildSize: 0.4,
       maxChildSize: 0.92,
       builder: (context, scrollController) => Scaffold(
-        backgroundColor: tokens.surfaceBase,
+        backgroundColor: tokens.surfaceElevated,
         body: FutureBuilder<SearchBook>(
           future: _detail,
           builder: (context, snapshot) {
@@ -741,96 +835,105 @@ class _SearchDetailSheetState extends ConsumerState<_SearchDetailSheet> {
             return ListView(
               controller: scrollController,
               key: const Key('search_detail_sheet'),
-              padding: const EdgeInsets.all(EchoMetrics.space3),
+              padding: const EdgeInsets.fromLTRB(
+                EchoMetrics.pagePadding,
+                4,
+                EchoMetrics.pagePadding,
+                EchoMetrics.space3,
+              ),
               children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: EchoMetrics.space2),
-                    decoration: BoxDecoration(
-                      color: tokens.surfaceSubtle,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: BookCover(url: data.coverUrl, width: 96, height: 128),
-                ),
-                const SizedBox(height: EchoMetrics.space2),
-                Text(
-                  data.title,
-                  key: const Key('search_detail_title'),
-                  style: textTheme.titleLarge?.copyWith(
-                    color: tokens.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: EchoMetrics.spaceHalf),
-                Text(
-                  authorText,
-                  style: textTheme.bodyMedium?.copyWith(
-                    color: tokens.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: EchoMetrics.space2),
-                Wrap(
-                  spacing: EchoMetrics.spaceHalf,
-                  runSpacing: EchoMetrics.spaceHalf,
+                const EchoSheetDragHandle(),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (data.provider.isNotEmpty)
-                      _MetaPill(
-                        label: data.provider.toUpperCase(),
-                        highlighted: true,
+                    BookCover(
+                      url: data.coverUrl,
+                      title: data.title,
+                      author: authorText,
+                      width: 88,
+                      height: 126,
+                      borderRadius: 10,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            data.title,
+                            key: const Key('search_detail_title'),
+                            style: textTheme.titleLarge?.copyWith(
+                              color: tokens.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            authorText,
+                            style: textTheme.bodySmall?.copyWith(
+                              color: tokens.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (data.provider.isNotEmpty)
+                                _MetaPill(
+                                  label: data.provider.toUpperCase(),
+                                  highlighted: true,
+                                ),
+                              if (data.year.isNotEmpty)
+                                _MetaPill(label: data.year),
+                              if (data.publisher.isNotEmpty)
+                                _MetaPill(label: data.publisher),
+                              if (data.language.isNotEmpty)
+                                _MetaPill(label: data.language),
+                              if (data.format.isNotEmpty)
+                                _MetaPill(label: data.format.toUpperCase()),
+                              if (data.size.isNotEmpty)
+                                _MetaPill(label: data.size),
+                            ],
+                          ),
+                        ],
                       ),
-                    if (data.year.isNotEmpty) _MetaPill(label: data.year),
-                    if (data.publisher.isNotEmpty)
-                      _MetaPill(label: data.publisher),
-                    if (data.language.isNotEmpty)
-                      _MetaPill(label: data.language),
-                    if (data.format.isNotEmpty)
-                      _MetaPill(label: data.format.toUpperCase()),
-                    if (data.size.isNotEmpty) _MetaPill(label: data.size),
+                    ),
                   ],
                 ),
-                const SizedBox(height: EchoMetrics.space2),
+                const SizedBox(height: EchoMetrics.space3),
                 if (data.description.isNotEmpty) ...[
-                  Text(
-                    '简介',
-                    style: textTheme.labelLarge?.copyWith(
-                      color: tokens.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: EchoMetrics.space1),
+                  const EchoSectionHeader(title: '内容简介'),
+                  const SizedBox(height: 8),
                   Text(
                     data.description,
                     key: const Key('search_detail_description'),
                     style: textTheme.bodyMedium?.copyWith(
+                      fontSize: 14.5,
                       color: tokens.textPrimary,
                       height: 1.7,
                     ),
                   ),
+                  const SizedBox(height: EchoMetrics.space3),
                 ],
-                const SizedBox(height: EchoMetrics.space3),
                 if (canConvert) ...[
                   EchoPrimaryButton(
                     key: const Key('search_detail_download_convert'),
                     onPressed: widget.onDownloadAndConvert,
-                    icon: Icons.graphic_eq,
+                    icon: Icons.graphic_eq_rounded,
                     label: '下载并转有声书',
                   ),
-                  const SizedBox(height: EchoMetrics.space1),
+                  const SizedBox(height: 10),
                   EchoSecondaryButton(
                     key: const Key('search_detail_download'),
                     onPressed: widget.onDownload,
-                    icon: Icons.download,
+                    icon: Icons.download_rounded,
                     label: '直接下载（可看）',
                   ),
                 ] else
                   EchoPrimaryButton(
                     key: const Key('search_detail_download'),
                     onPressed: widget.onDownload,
-                    icon: Icons.download,
+                    icon: Icons.download_rounded,
                     label: '下载到书库',
                   ),
               ],

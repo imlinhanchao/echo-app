@@ -7,12 +7,13 @@ import '../../core/settings/standalone_config_store.dart';
 import '../../core/tts/tts_model_catalog.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_ambient.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 
-/// 单机版首次启动两步引导页：
-/// Step 1：配置 ebook-api 书源服务地址（不内置写死，支持测试连接与跳过）；
-/// Step 2：下载首个端侧离线 TTS 模型（支持跳过，稍后在「我的」管理）。
+/// 单机版首次启动两步引导页（极简书房 Editorial Minimalism）：
+/// Step 1：配置 ebook-api 书源服务地址；
+/// Step 2：选择系统语音引擎或下载端侧离线 TTS 模型。
 class OnboardingPage extends ConsumerStatefulWidget {
   const OnboardingPage({super.key});
 
@@ -115,34 +116,71 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 480),
               child: ListView(
-                padding: const EdgeInsets.all(EchoMetrics.space4),
+                padding: const EdgeInsets.all(EchoMetrics.space3),
                 children: [
-                  const SizedBox(height: EchoMetrics.space2),
-                  Icon(
-                    Icons.graphic_eq_rounded,
-                    size: 52,
-                    color: tokens.primary,
+                  const SizedBox(height: 12),
+                  // 两段极简步数指示线
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: tokens.primary,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        width: 28,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: _step == 1
+                              ? tokens.primary
+                              : tokens.surfaceSubtle,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: EchoMetrics.space2),
+                  const SizedBox(height: EchoMetrics.space3),
+                  Center(
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: echoElevatedCardDecoration(
+                        context,
+                        radius: 16,
+                        borderColor: tokens.primary.withValues(alpha: 0.35),
+                      ),
+                      child: Icon(
+                        Icons.graphic_eq_rounded,
+                        size: 28,
+                        color: tokens.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   Text(
-                    '欢迎使用回声 · 单机版',
+                    '欢迎使用回声',
                     textAlign: TextAlign.center,
                     style: textTheme.headlineSmall?.copyWith(
                       color: tokens.textPrimary,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     _step == 0
-                        ? '第 1 步 / 共 2 步 · 配置在线书源服务（可选）'
-                        : '第 2 步 / 共 2 步 · 下载端侧离线语音模型（可选）',
+                        ? '第 1 步 · 配置在线书源服务（可选）'
+                        : '第 2 步 · 准备端侧语音模型（可选）',
                     textAlign: TextAlign.center,
-                    style: textTheme.bodyMedium?.copyWith(
+                    style: textTheme.bodySmall?.copyWith(
                       color: tokens.textSecondary,
                     ),
                   ),
-                  const SizedBox(height: EchoMetrics.space4),
+                  const SizedBox(height: EchoMetrics.space3),
                   if (_step == 0)
                     _buildStep1(context, tokens, textTheme)
                   else
@@ -162,8 +200,8 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
     TextTheme textTheme,
   ) {
     return Container(
-      padding: const EdgeInsets.all(EchoMetrics.space3),
-      decoration: echoElevatedCardDecoration(context, radius: 20),
+      padding: const EdgeInsets.all(EchoMetrics.pagePadding),
+      decoration: echoElevatedCardDecoration(context, radius: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -171,7 +209,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
             '连接 ebook-api 搜书服务',
             style: textTheme.titleMedium?.copyWith(
               color: tokens.textPrimary,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 6),
@@ -190,7 +228,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
               prefixIcon: Icon(Icons.dns_outlined),
             ),
           ),
-          const SizedBox(height: EchoMetrics.space2),
+          const SizedBox(height: 12),
           TextField(
             key: const Key('onboarding_key_field'),
             controller: _keyCtrl,
@@ -212,16 +250,16 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
           const SizedBox(height: EchoMetrics.space3),
           Row(
             children: [
-              OutlinedButton(
+              EchoSecondaryButton(
                 onPressed: _testing ? null : _testEbookApi,
-                child: Text(_testing ? '测试中...' : '测试连接'),
+                label: _testing ? '测试中...' : '测试连接',
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: FilledButton(
+                child: EchoPrimaryButton(
                   key: const Key('onboarding_next_button'),
                   onPressed: _saveApiAndNext,
-                  child: const Text('下一步'),
+                  label: '下一步',
                 ),
               ),
             ],
@@ -252,8 +290,8 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
         : TtsModelCatalog.mirrorGhFast;
 
     return Container(
-      padding: const EdgeInsets.all(EchoMetrics.space3),
-      decoration: echoElevatedCardDecoration(context, radius: 20),
+      padding: const EdgeInsets.all(EchoMetrics.pagePadding),
+      decoration: echoElevatedCardDecoration(context, radius: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -261,7 +299,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
             '选择一个离线语音模型',
             style: textTheme.titleMedium?.copyWith(
               color: tokens.textPrimary,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 6),
@@ -269,12 +307,11 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
             '所有语音合成完全在手机本地运行，无需联网。可直接使用 Android 系统语音，或下载离线高质量模型。',
             style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           DropdownButtonHideUnderline(
             child: InputDecorator(
               decoration: const InputDecoration(
                 labelText: '下载镜像源',
-                border: OutlineInputBorder(),
                 isDense: true,
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
@@ -305,12 +342,10 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
             Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: tokens.surfaceElevated.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: tokens.textDisabled.withValues(alpha: 0.28),
-                ),
+              decoration: echoElevatedCardDecoration(
+                context,
+                radius: 14,
+                color: tokens.surfaceBase,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,7 +357,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                           entry.spec.name,
                           style: textTheme.titleSmall?.copyWith(
                             color: tokens.textPrimary,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -332,6 +367,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                             : '~${entry.spec.estimatedSizeMb}MB',
                         style: textTheme.labelSmall?.copyWith(
                           color: tokens.textDisabled,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
@@ -340,6 +376,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                   Text(
                     entry.spec.subtitle,
                     style: textTheme.bodySmall?.copyWith(
+                      fontSize: 12.5,
                       color: tokens.textSecondary,
                     ),
                   ),
@@ -349,7 +386,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                       children: [
                         if (entry.isInstalled) ...[
                           Icon(
-                            Icons.check_circle,
+                            Icons.check_circle_rounded,
                             size: 16,
                             color: tokens.success,
                           ),
@@ -382,10 +419,16 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                       ],
                     )
                   else if (entry.isBusy || entry.isPaused) ...[
-                    LinearProgressIndicator(
-                      value: entry.progress > 0
-                          ? entry.progress
-                          : (entry.isPaused ? 0 : null),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: entry.progress > 0
+                            ? entry.progress
+                            : (entry.isPaused ? 0 : null),
+                        minHeight: 4,
+                        backgroundColor: tokens.surfaceSubtle,
+                        color: tokens.primary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Row(
@@ -422,7 +465,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                     Row(
                       children: [
                         Icon(
-                          Icons.check_circle,
+                          Icons.check_circle_rounded,
                           size: 16,
                           color: tokens.success,
                         ),
@@ -458,12 +501,12 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
             ),
           ],
           const SizedBox(height: EchoMetrics.space2),
-          FilledButton(
+          EchoPrimaryButton(
             key: const Key('onboarding_finish_button'),
             onPressed: _finish,
-            child: Text(
-              modelsState.installedEntries.isNotEmpty ? '开始使用回声' : '先进入书架，稍后下载',
-            ),
+            label: modelsState.installedEntries.isNotEmpty
+                ? '开始使用回声'
+                : '先进入书架，稍后下载',
           ),
           TextButton(
             onPressed: () => setState(() => _step = 0),

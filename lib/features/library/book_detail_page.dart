@@ -10,6 +10,7 @@ import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
+import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../library/convert_sheet.dart';
@@ -18,8 +19,8 @@ import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
 import '../reader/reader_page.dart';
 import '../tts/tts_model_manager_page.dart';
 
-/// 书籍 / 有声书详情页（高保真对齐 ui-mobile-book-detail.png）：
-/// 深靛蓝氛围顶区 + 居中大封面 → 大圆角深色内容板（书名/作者/简介/有声书/章节）→ 固定渐变底栏。
+/// 书籍详情页（极简书房 Editorial Minimalism）：
+/// 真实 2:3 书封主视觉（柔和平影无紫晕） → 暖墨/象牙版心排印 → 实时朗读胶囊 → 有声版本与章节预览 → 固定底栏。
 class BookDetailPage extends ConsumerStatefulWidget {
   const BookDetailPage({super.key, required this.book, this.audiobook});
 
@@ -40,7 +41,6 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
   void initState() {
     super.initState();
     _loadChapters();
-    // 载入后刷新各有声书的离线状态（显示"已下载"角标）
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final audios = ref
           .read(libraryControllerProvider)
@@ -145,6 +145,8 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hairline = echoHairlineColor(context, darkAlpha: 0.08);
     final lib = ref.watch(libraryControllerProvider);
     final book = lib.books.firstWhere(
       (b) => b.id == widget.book.id,
@@ -196,66 +198,67 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            // 顶部居中大封面氛围区（对齐 ui-mobile-book-detail.png）
-            SizedBox(height: MediaQuery.paddingOf(context).top + 48),
+            SizedBox(height: MediaQuery.paddingOf(context).top + 52),
             Center(
-              child: Container(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(EchoMetrics.radiusSheet),
+                  borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: tokens.primary.withValues(alpha: 0.28),
-                      blurRadius: 32,
-                      offset: const Offset(0, 14),
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.44 : 0.16,
+                      ),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
                     ),
                   ],
                 ),
-                child: BookCover(url: book.coverUrl, width: 164, height: 212),
+                child: BookCover(
+                  url: book.coverUrl,
+                  title: book.title,
+                  author: authorText,
+                  width: 144,
+                  height: 204,
+                  borderRadius: 12,
+                ),
               ),
             ),
             const SizedBox(height: EchoMetrics.space3),
 
-            // 下方大圆角深色内容面板
-            Container(
-              padding: const EdgeInsets.fromLTRB(
-                EchoMetrics.space3,
-                EchoMetrics.space3,
-                EchoMetrics.space3,
-                EchoMetrics.space4,
-              ),
-              decoration: BoxDecoration(
-                color: tokens.surfaceElevated.withValues(alpha: 0.92),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(28),
-                ),
-                border: Border(
-                  top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-                ),
+            // 居中书名与元信息
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: EchoMetrics.space3,
               ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
                     book.title,
                     key: const Key('detail_title'),
+                    textAlign: TextAlign.center,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: textTheme.headlineSmall?.copyWith(
+                      fontSize: 22,
                       color: tokens.textPrimary,
                       fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
                     ),
                   ),
-                  const SizedBox(height: EchoMetrics.spaceHalf),
+                  const SizedBox(height: 6),
                   Text(
                     authorText,
-                    style: textTheme.bodyMedium?.copyWith(
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(
                       color: tokens.textSecondary,
                     ),
                   ),
-                  const SizedBox(height: EchoMetrics.space1),
+                  const SizedBox(height: 12),
                   Wrap(
-                    spacing: EchoMetrics.spaceHalf,
-                    runSpacing: EchoMetrics.spaceHalf,
+                    alignment: WrapAlignment.center,
+                    spacing: 6,
+                    runSpacing: 6,
                     children: [
                       if (book.format.isNotEmpty)
                         _pill(book.format.toUpperCase()),
@@ -264,189 +267,301 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                       if (readyAudio.isNotEmpty)
                         _pill(
                           '总时长 ${formatDurationMs((readyAudio.first.durationS * 1000).round())}',
+                          highlight: true,
                         )
                       else if (audiobooks.isNotEmpty)
-                        _pill('转换中'),
+                        _pill('转换中', highlight: true),
                     ],
                   ),
-
-          // 简介
-          if (book.description.isNotEmpty) ...[
-            const SizedBox(height: EchoMetrics.space4),
-            Text(
-              '简介',
-              style: textTheme.titleSmall?.copyWith(color: tokens.textPrimary),
-            ),
-            const SizedBox(height: EchoMetrics.space1),
-            _ExpandableText(text: book.description),
-          ],
-
-          // 有声书
-          if (audiobooks.isNotEmpty) ...[
-            const SizedBox(height: EchoMetrics.space4),
-            Text(
-              '有声书',
-              style: textTheme.titleSmall?.copyWith(color: tokens.textPrimary),
-            ),
-            const SizedBox(height: EchoMetrics.space1),
-            for (final audio in audiobooks)
-              _AudiobookTile(
-                audio: audio,
-                book: book,
-                onPlay: () => _play(audio),
+                ],
               ),
-          ],
+            ),
+            const SizedBox(height: EchoMetrics.space3),
 
-          // 章节预览（点击直达对应章节）
-          const SizedBox(height: EchoMetrics.space4),
-          Row(
-            children: [
-              Text(
-                '章节',
-                style: textTheme.titleSmall?.copyWith(
-                  color: tokens.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              if (canReadOrConvert)
-                TextButton.icon(
-                  key: const Key('detail_live_tts'),
-                  onPressed: () => _liveListen(book),
-                  icon: Icon(
-                    isLivePlaying
-                        ? Icons.pause_circle_outline
-                        : Icons.record_voice_over_outlined,
-                    size: 18,
-                  ),
-                  label: Text(isLivePlaying ? '暂停朗读' : '实时朗读'),
-                ),
-              if (_chapters.isNotEmpty)
-                TextButton(
-                  key: const Key('detail_all_chapters'),
-                  onPressed: () => _openReader(),
-                  child: const Text('开始阅读'),
-                ),
-            ],
-          ),
-          if (_loadingChapters)
-            const Padding(
-              padding: EdgeInsets.all(EchoMetrics.space2),
-              child: LinearProgressIndicator(minHeight: 2),
-            )
-          else if (_chapters.isEmpty)
+            // 正文内容面板
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: EchoMetrics.space2),
-              child: Text(
-                '暂无章节信息（支持 EPUB / TXT 格式）',
-                style: textTheme.bodySmall?.copyWith(
-                  color: tokens.textSecondary,
-                ),
+              padding: const EdgeInsets.fromLTRB(
+                EchoMetrics.pagePadding,
+                0,
+                EchoMetrics.pagePadding,
+                EchoMetrics.space4,
               ),
-            )
-          else
-            for (final chapter in _chapters.take(6))
-              ListTile(
-                key: Key('detail_chapter_${chapter.index}'),
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  chapter.title.isNotEmpty
-                      ? chapter.title
-                      : '第 ${chapter.index + 1} 章',
-                  style: textTheme.bodyMedium?.copyWith(
-                    color: tokens.textPrimary,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 端侧实时朗读入口条
+                  if (canReadOrConvert) ...[
+                    Container(
+                      decoration: echoElevatedCardDecoration(
+                        context,
+                        radius: 14,
+                        borderColor: isLivePlaying
+                            ? tokens.primary.withValues(alpha: 0.45)
+                            : hairline,
+                      ),
+                      child: InkWell(
+                        key: const Key('detail_live_tts'),
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => _liveListen(book),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: tokens.primary.withValues(alpha: 0.14),
+                                ),
+                                child: Icon(
+                                  isLivePlaying
+                                      ? Icons.pause_rounded
+                                      : Icons.record_voice_over_outlined,
+                                  size: 18,
+                                  color: tokens.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isLivePlaying ? '暂停实时朗读' : '端侧实时朗读',
+                                      style: textTheme.titleSmall?.copyWith(
+                                        color: tokens.textPrimary,
+                                      ),
+                                    ),
+                                    Text(
+                                      '免转码直接「边听边生成」，支持离线语音引擎',
+                                      style: textTheme.labelSmall?.copyWith(
+                                        color: tokens.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 20,
+                                color: tokens.textSecondary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: EchoMetrics.space3),
+                  ],
+
+                  // 简介
+                  if (book.description.isNotEmpty) ...[
+                    const EchoSectionHeader(title: '简介'),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: echoElevatedCardDecoration(
+                        context,
+                        radius: 14,
+                      ),
+                      child: _ExpandableText(text: book.description),
+                    ),
+                    const SizedBox(height: EchoMetrics.space3),
+                  ],
+
+                  // 有声书
+                  if (audiobooks.isNotEmpty) ...[
+                    EchoSectionHeader(
+                      title: '有声版本',
+                      subtitle: '${audiobooks.length} 个',
+                    ),
+                    const SizedBox(height: 10),
+                    for (var i = 0; i < audiobooks.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 8),
+                      _AudiobookTile(
+                        audio: audiobooks[i],
+                        book: book,
+                        onPlay: () => _play(audiobooks[i]),
+                      ),
+                    ],
+                    const SizedBox(height: EchoMetrics.space3),
+                  ],
+
+                  // 章节预览
+                  EchoSectionHeader(
+                    title: '章节目录',
+                    subtitle: _chapters.isNotEmpty
+                        ? '${_chapters.length} 章'
+                        : null,
+                    trailing: _chapters.isNotEmpty
+                        ? TextButton(
+                            key: const Key('detail_all_chapters'),
+                            onPressed: () => _openReader(),
+                            child: const Text('开始阅读'),
+                          )
+                        : null,
                   ),
-                ),
-                subtitle: Text(
-                  '${chapter.chars} 字',
-                  style: textTheme.bodySmall?.copyWith(
-                    color: tokens.textSecondary,
-                  ),
-                ),
-                trailing: Icon(
-                  Icons.chevron_right,
-                  size: 18,
-                  color: tokens.textDisabled,
-                ),
-                onTap: () => _openReader(chapterIndex: chapter.index),
-              ),
-          if (_chapters.length > 6)
-            Padding(
-              padding: const EdgeInsets.only(top: EchoMetrics.space1),
-              child: Text(
-                '共 ${_chapters.length} 章，进入阅读器可查看完整目录',
-                style: textTheme.bodySmall?.copyWith(
-                  color: tokens.textDisabled,
-                ),
-              ),
-            ),
+                  const SizedBox(height: 8),
+                  if (_loadingChapters)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: EchoMetrics.space2,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 2,
+                          color: tokens.primary,
+                          backgroundColor: tokens.surfaceSubtle,
+                        ),
+                      ),
+                    )
+                  else if (_chapters.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: echoElevatedCardDecoration(
+                        context,
+                        radius: 14,
+                      ),
+                      child: Text(
+                        '暂无章节信息（支持 EPUB / TXT 格式）',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                    )
+                  else
+                    EchoGroupedCard(
+                      dividerIndent: 16,
+                      children: [
+                        for (final chapter in _chapters.take(6))
+                          ListTile(
+                            key: Key('detail_chapter_${chapter.index}'),
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 2,
+                            ),
+                            title: Text(
+                              chapter.title.isNotEmpty
+                                  ? chapter.title
+                                  : '第 ${chapter.index + 1} 章',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: textTheme.bodyMedium?.copyWith(
+                                fontSize: 14.5,
+                                color: tokens.textPrimary,
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '${chapter.chars} 字',
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: tokens.textSecondary,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color: tokens.textDisabled,
+                                ),
+                              ],
+                            ),
+                            onTap: () =>
+                                _openReader(chapterIndex: chapter.index),
+                          ),
+                      ],
+                    ),
+                  if (_chapters.length > 6)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10, left: 4),
+                      child: Text(
+                        '共 ${_chapters.length} 章，进入阅读器可查看完整目录',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: tokens.textDisabled,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
           ],
         ),
       ),
-      // 底部固定操作栏（对齐设计 §4.1：靛蓝渐变主按钮 + 次级圆角操作）
       bottomNavigationBar: (readyAudio.isNotEmpty || canReadOrConvert)
-          ? SafeArea(
-              top: false,
-              child: Container(
-                key: const Key('detail_bottom_bar'),
-                padding: const EdgeInsets.fromLTRB(
-                  EchoMetrics.space3,
-                  EchoMetrics.space1,
-                  EchoMetrics.space3,
-                  EchoMetrics.space2,
-                ),
-                decoration: BoxDecoration(
-                  color: tokens.surfaceElevated,
-                  border: Border(top: BorderSide(color: tokens.surfaceSubtle)),
-                ),
-                child: Row(
-                  children: [
-                    if (readyAudio.isNotEmpty && canReadOrConvert) ...[
-                      EchoSquareIconButton(
-                        key: const Key('detail_read'),
-                        tooltip: '阅读原文',
-                        onPressed: () => _openReader(),
-                        icon: Icons.menu_book_outlined,
-                      ),
-                      const SizedBox(width: EchoMetrics.space1),
-                    ],
-                    if (canReadOrConvert) ...[
-                      EchoSecondaryButton(
-                        key: const Key('detail_convert'),
-                        onPressed: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          useSafeArea: true,
-                          builder: (_) => ConvertSheet(book: book),
-                        ),
-                        icon: Icons.graphic_eq,
-                        label: readyAudio.isEmpty ? '转有声书' : '再转一版',
-                      ),
-                      const SizedBox(width: EchoMetrics.space1),
-                    ],
-                    if (readyAudio.isNotEmpty)
-                      Expanded(
-                        child: EchoPrimaryButton(
-                          key: const Key('detail_play'),
-                          icon: Icons.play_arrow,
-                          label: readyAudio.first.isReady ? '继续收听' : '抢先收听',
-                          onPressed: () =>
-                              _play(widget.audiobook ?? readyAudio.first),
-                        ),
-                      )
-                    else if (canReadOrConvert)
-                      Expanded(
-                        child: EchoPrimaryButton(
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: tokens.surfaceElevated,
+                border: Border(top: BorderSide(color: hairline, width: 0.6)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  key: const Key('detail_bottom_bar'),
+                  padding: const EdgeInsets.fromLTRB(
+                    EchoMetrics.pagePadding,
+                    10,
+                    EchoMetrics.pagePadding,
+                    12,
+                  ),
+                  child: Row(
+                    children: [
+                      if (readyAudio.isNotEmpty && canReadOrConvert) ...[
+                        EchoSquareIconButton(
                           key: const Key('detail_read'),
-                          icon: Icons.menu_book,
-                          label: '开始阅读',
+                          tooltip: '阅读原文',
                           onPressed: () => _openReader(),
+                          icon: Icons.menu_book_outlined,
                         ),
-                      ),
-                  ],
+                        const SizedBox(width: 10),
+                      ],
+                      if (canReadOrConvert) ...[
+                        EchoSecondaryButton(
+                          key: const Key('detail_convert'),
+                          onPressed: () => showModalBottomSheet<void>(
+                            context: context,
+                            isScrollControlled: true,
+                            useSafeArea: true,
+                            builder: (_) => ConvertSheet(book: book),
+                          ),
+                          icon: Icons.graphic_eq_rounded,
+                          label: readyAudio.isEmpty ? '转有声书' : '再转一版',
+                        ),
+                        const SizedBox(width: 10),
+                      ],
+                      if (readyAudio.isNotEmpty)
+                        Expanded(
+                          child: EchoPrimaryButton(
+                            key: const Key('detail_play'),
+                            icon: Icons.play_arrow_rounded,
+                            label: readyAudio.first.isReady ? '继续收听' : '抢先收听',
+                            onPressed: () =>
+                                _play(widget.audiobook ?? readyAudio.first),
+                          ),
+                        )
+                      else if (canReadOrConvert)
+                        Expanded(
+                          child: EchoPrimaryButton(
+                            key: const Key('detail_read'),
+                            icon: Icons.menu_book_rounded,
+                            label: '开始阅读',
+                            onPressed: () => _openReader(),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             )
@@ -454,20 +569,11 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     );
   }
 
-  Widget _pill(String label) {
+  Widget _pill(String label, {bool highlight = false}) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: tokens.surfaceSubtle,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(
-          context,
-        ).textTheme.labelSmall?.copyWith(color: tokens.textSecondary),
-      ),
+    return EchoPillBadge(
+      label: label,
+      color: highlight ? tokens.primary : tokens.textSecondary,
     );
   }
 }
@@ -488,9 +594,11 @@ class _ExpandableTextState extends State<_ExpandableText> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
-    final style = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: tokens.textPrimary, height: 1.7);
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      fontSize: 14.5,
+      color: tokens.textPrimary,
+      height: 1.7,
+    );
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
       child: Column(
@@ -503,12 +611,13 @@ class _ExpandableTextState extends State<_ExpandableText> {
             overflow: _expanded ? null : TextOverflow.ellipsis,
             style: style,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            _expanded ? '收起' : '展开',
-            style: Theme.of(
-              context,
-            ).textTheme.labelMedium?.copyWith(color: tokens.primary),
+            _expanded ? '收起' : '展开全文',
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: tokens.primary,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -543,13 +652,15 @@ class _AudiobookTile extends ConsumerWidget {
         ? '${audio.status == 'cancelled' ? '已取消' : '转换失败'} (${audio.progress}%) · 左滑删除'
         : '状态：${audio.status} (${audio.progress}%)';
 
-    final card = Card(
+    final card = Container(
       key: Key('detail_audio_${audio.id}'),
+      decoration: echoElevatedCardDecoration(context, radius: 14),
       child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         leading: Icon(
           audio.isPlayable
-              ? Icons.headphones
-              : (isFailed ? Icons.error_outline : Icons.hourglass_top),
+              ? Icons.headphones_rounded
+              : (isFailed ? Icons.error_outline : Icons.hourglass_top_rounded),
           color: audio.isPlayable
               ? tokens.primary
               : (isFailed ? tokens.error : tokens.textSecondary),
@@ -562,36 +673,44 @@ class _AudiobookTile extends ConsumerWidget {
               : isFailed
               ? '${audio.status == 'cancelled' ? '已取消' : '转换失败'} #${audio.id}'
               : '转码中 #${audio.id}',
-          style: textTheme.bodyMedium?.copyWith(color: tokens.textPrimary),
+          style: textTheme.titleSmall?.copyWith(color: tokens.textPrimary),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               label,
-              style: textTheme.bodySmall?.copyWith(
+              style: textTheme.labelSmall?.copyWith(
                 color: isFailed ? tokens.error : tokens.textSecondary,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
             if (state.status == OfflineStatus.downloading)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: LinearProgressIndicator(
-                  value: state.progress,
-                  minHeight: 2,
+                padding: const EdgeInsets.only(top: 6),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: state.progress,
+                    minHeight: 2.5,
+                    backgroundColor: tokens.surfaceSubtle,
+                    color: tokens.primary,
+                  ),
                 ),
               ),
             if (state.status == OfflineStatus.done)
-              Text(
-                '已缓存 · 离线可听',
-                style: textTheme.labelSmall?.copyWith(color: tokens.success),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '已缓存 · 离线可听',
+                  style: textTheme.labelSmall?.copyWith(color: tokens.success),
+                ),
               ),
           ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 已缓存的有声书不再显示下载按钮；转换未完成时也不触发整本离线下载。
             if (audio.isReady && state.status != OfflineStatus.done)
               IconButton(
                 key: Key('detail_download_${audio.id}'),
@@ -608,7 +727,7 @@ class _AudiobookTile extends ConsumerWidget {
                 },
                 icon: Icon(
                   state.status == OfflineStatus.downloading
-                      ? Icons.close
+                      ? Icons.close_rounded
                       : Icons.download_outlined,
                   color: tokens.textSecondary,
                 ),
@@ -617,8 +736,12 @@ class _AudiobookTile extends ConsumerWidget {
               IconButton(
                 key: Key('detail_audio_play_${audio.id}'),
                 tooltip: audio.isReady ? '播放' : '抢先收听',
+                style: IconButton.styleFrom(
+                  backgroundColor: tokens.primary.withValues(alpha: 0.14),
+                  foregroundColor: tokens.primary,
+                ),
                 onPressed: onPlay,
-                icon: Icon(Icons.play_arrow, color: tokens.primary),
+                icon: const Icon(Icons.play_arrow_rounded),
               ),
           ],
         ),
@@ -636,7 +759,7 @@ class _AudiobookTile extends ConsumerWidget {
         alignment: Alignment.centerRight,
         decoration: BoxDecoration(
           color: tokens.error.withValues(alpha: 0.9),
-          borderRadius: BorderRadius.circular(EchoMetrics.radiusCard),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -671,5 +794,3 @@ class _AudiobookTile extends ConsumerWidget {
     );
   }
 }
-
-

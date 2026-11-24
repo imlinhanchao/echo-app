@@ -6,6 +6,7 @@ import '../../core/audio/chunked_player_controller.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
+import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../library/book_detail_page.dart';
 import '../library/convert_sheet.dart';
@@ -15,8 +16,8 @@ import 'jobs_controller.dart';
 
 enum _JobFilter { all, active, completed }
 
-/// 任务中心 Tab（高保真对齐 ui-mobile-tasks.png）：
-/// 发光筛选胶囊（全部/进行中/已完成）+ 细高光描边卡片 + 分段式转换进度条 + 描边音色标签 + 立即收听。
+/// 任务中心 Tab（极简书房 Editorial Minimalism）：
+/// 极简分段筛选胶囊（全部 / 进行中 / 已完成）+ 细描边卡片 + 清晰章级进度。
 class JobsPage extends ConsumerStatefulWidget {
   const JobsPage({super.key, this.isActive = true});
 
@@ -80,9 +81,9 @@ class _JobsPageState extends ConsumerState<JobsPage> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
-            EchoMetrics.space3,
-            EchoMetrics.space3,
+            EchoMetrics.pagePadding,
             EchoMetrics.space2,
+            12,
             EchoMetrics.space1,
           ),
           child: Row(
@@ -91,45 +92,48 @@ class _JobsPageState extends ConsumerState<JobsPage> {
                 '任务中心',
                 key: const Key('jobs_title'),
                 style: textTheme.headlineSmall?.copyWith(
+                  fontSize: 25,
                   color: tokens.textPrimary,
                   fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
                 ),
               ),
               const Spacer(),
               IconButton(
                 key: const Key('jobs_refresh'),
                 tooltip: '刷新任务',
+                color: tokens.textSecondary,
                 onPressed: controller.refresh,
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh_rounded, size: 22),
               ),
             ],
           ),
         ),
-        // 顶部三态发光胶囊筛选：全部 / 进行中 / 已完成
+        // 极简胶囊分段筛选：全部 / 进行中 / 已完成
         Padding(
           padding: const EdgeInsets.fromLTRB(
-            EchoMetrics.space3,
-            EchoMetrics.space1,
-            EchoMetrics.space3,
-            EchoMetrics.space2,
+            EchoMetrics.pagePadding,
+            4,
+            EchoMetrics.pagePadding,
+            14,
           ),
           child: Row(
             children: [
-              _GlowFilterPill(
+              _SegmentPill(
                 key: const Key('jobs_filter_all'),
                 label: '全部 (${state.jobs.length})',
                 selected: _filter == _JobFilter.all,
                 onTap: () => setState(() => _filter = _JobFilter.all),
               ),
-              const SizedBox(width: EchoMetrics.space1),
-              _GlowFilterPill(
+              const SizedBox(width: 8),
+              _SegmentPill(
                 key: const Key('jobs_filter_active'),
                 label: '进行中 ($activeCount)',
                 selected: _filter == _JobFilter.active,
                 onTap: () => setState(() => _filter = _JobFilter.active),
               ),
-              const SizedBox(width: EchoMetrics.space1),
-              _GlowFilterPill(
+              const SizedBox(width: 8),
+              _SegmentPill(
                 key: const Key('jobs_filter_completed'),
                 label: '已完成 ($doneCount)',
                 selected: _filter == _JobFilter.completed,
@@ -141,11 +145,18 @@ class _JobsPageState extends ConsumerState<JobsPage> {
         if (state.error != null)
           Container(
             key: const Key('jobs_error_banner'),
-            width: double.infinity,
-            color: tokens.error.withValues(alpha: 0.15),
-            padding: const EdgeInsets.symmetric(
-              horizontal: EchoMetrics.space2,
-              vertical: EchoMetrics.space1,
+            margin: const EdgeInsets.fromLTRB(
+              EchoMetrics.pagePadding,
+              0,
+              EchoMetrics.pagePadding,
+              12,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: echoElevatedCardDecoration(
+              context,
+              radius: 12,
+              color: tokens.error.withValues(alpha: 0.08),
+              borderColor: tokens.error.withValues(alpha: 0.25),
             ),
             child: Text(
               state.error!,
@@ -156,28 +167,38 @@ class _JobsPageState extends ConsumerState<JobsPage> {
           child: filteredJobs.isEmpty
               ? Center(
                   key: const Key('jobs_empty'),
-                  child: Text(
-                    state.jobs.isEmpty
-                        ? '暂无任务。去「发现」下载一本书吧。'
-                        : (_filter == _JobFilter.active
-                              ? '当前没有进行中的任务'
-                              : '还没有已完成的任务'),
-                    style: textTheme.bodyLarge?.copyWith(
-                      color: tokens.textSecondary,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.checklist_rounded,
+                        size: 38,
+                        color: tokens.textDisabled,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        state.jobs.isEmpty
+                            ? '暂无任务，去「发现」或书库开启创作吧'
+                            : (_filter == _JobFilter.active
+                                  ? '当前没有进行中的任务'
+                                  : '还没有已完成的任务'),
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                    ],
                   ),
                 )
               : ListView.separated(
                   key: const Key('jobs_list'),
                   padding: EdgeInsets.fromLTRB(
-                    EchoMetrics.space3,
+                    EchoMetrics.pagePadding,
                     0,
-                    EchoMetrics.space3,
-                    hasPlayer ? 104 : EchoMetrics.space3,
+                    EchoMetrics.pagePadding,
+                    hasPlayer ? 112 : EchoMetrics.space3,
                   ),
                   itemCount: filteredJobs.length,
-                  separatorBuilder: (_, _) =>
-                      const SizedBox(height: EchoMetrics.space2),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final job = filteredJobs[index];
                     return _JobCard(job: job);
@@ -189,9 +210,9 @@ class _JobsPageState extends ConsumerState<JobsPage> {
   }
 }
 
-/// 设计稿风格发光筛选胶囊（ui-mobile-tasks.png）。
-class _GlowFilterPill extends StatelessWidget {
-  const _GlowFilterPill({
+/// 极简筛选胶囊（无刺眼蓝紫高光与阴影）。
+class _SegmentPill extends StatelessWidget {
+  const _SegmentPill({
     super.key,
     required this.label,
     required this.selected,
@@ -208,35 +229,26 @@ class _GlowFilterPill extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
         onTap: onTap,
         child: AnimatedContainer(
           duration: EchoMetrics.motionFast,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           decoration: BoxDecoration(
-            color: selected
-                ? tokens.primary.withValues(alpha: 0.28)
-                : tokens.surfaceElevated.withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(12),
+            color: selected ? tokens.primary : tokens.surfaceElevated,
+            borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
             border: Border.all(
-              color: selected
-                  ? tokens.primary.withValues(alpha: 0.75)
-                  : Colors.white.withValues(alpha: 0.08),
+              color: selected ? tokens.primary : echoHairlineColor(context),
+              width: 0.8,
             ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: tokens.primary.withValues(alpha: 0.35),
-                      blurRadius: 14,
-                    ),
-                  ]
-                : null,
           ),
           child: Text(
             label,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontSize: 12.5,
               color: selected ? tokens.textOnPrimary : tokens.textSecondary,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ),
@@ -257,7 +269,6 @@ class _JobCard extends ConsumerWidget {
     final controller = ref.read(jobsControllerProvider.notifier);
     final libState = ref.watch(libraryControllerProvider);
 
-    // 关联书库信息（书名、封面、音色/模型）
     AudiobookInfo? audiobook;
     LibraryBook? book;
     if (job.kind == JobKind.audiobook) {
@@ -288,7 +299,6 @@ class _JobCard extends ConsumerWidget {
         ? job.result!['title'] as String
         : '${job.kindLabel} #${job.id}';
 
-    // 章级进度（后端 result 携带时优先展示）
     final completedChapters =
         (job.result?['completed_chapters'] as num?)?.toInt();
     final totalChapters = (job.result?['total_chapters'] as num?)?.toInt();
@@ -319,7 +329,7 @@ class _JobCard extends ConsumerWidget {
 
     return Container(
       key: Key('job_card_${job.id}'),
-      padding: const EdgeInsets.all(EchoMetrics.space2),
+      padding: const EdgeInsets.all(14),
       decoration: echoElevatedCardDecoration(context, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,7 +341,13 @@ class _JobCard extends ConsumerWidget {
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    BookCover(url: book.coverUrl, width: 44, height: 56),
+                    BookCover(
+                      url: book.coverUrl,
+                      title: resolvedTitle,
+                      width: 42,
+                      height: 60,
+                      borderRadius: 7,
+                    ),
                     if (job.status == JobStatus.done)
                       Positioned(
                         right: -4,
@@ -342,8 +358,8 @@ class _JobCard extends ConsumerWidget {
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            Icons.check_circle,
-                            size: 18,
+                            Icons.check_circle_rounded,
+                            size: 16,
                             color: tokens.success,
                           ),
                         ),
@@ -351,19 +367,26 @@ class _JobCard extends ConsumerWidget {
                   ],
                 )
               else
-                Icon(
-                  job.status == JobStatus.done
-                      ? Icons.check_circle
-                      : (job.kind == JobKind.download
-                            ? Icons.file_download
-                            : Icons.graphic_eq),
-                  color: job.status == JobStatus.done
-                      ? tokens.success
-                      : (job.kind == JobKind.download
-                            ? tokens.accent
-                            : tokens.primary),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: tokens.surfaceSubtle,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    job.status == JobStatus.done
+                        ? Icons.check_circle_rounded
+                        : (job.kind == JobKind.download
+                              ? Icons.file_download_outlined
+                              : Icons.graphic_eq_rounded),
+                    size: 20,
+                    color: job.status == JobStatus.done
+                        ? tokens.success
+                        : tokens.primary,
+                  ),
                 ),
-              const SizedBox(width: EchoMetrics.space2),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -377,7 +400,7 @@ class _JobCard extends ConsumerWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 5),
                     Row(
                       children: [
                         Text(
@@ -386,31 +409,15 @@ class _JobCard extends ConsumerWidget {
                           style: textTheme.labelSmall?.copyWith(
                             color: statusColor,
                             fontWeight: FontWeight.w600,
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
                         if (voiceMeta.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           Flexible(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: tokens.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: tokens.primary.withValues(alpha: 0.45),
-                                ),
-                              ),
-                              child: Text(
-                                voiceMeta,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: textTheme.labelSmall?.copyWith(
-                                  color: tokens.primaryHover,
-                                ),
-                              ),
+                            child: EchoPillBadge(
+                              label: voiceMeta,
+                              color: tokens.textSecondary,
                             ),
                           ),
                         ],
@@ -423,7 +430,11 @@ class _JobCard extends ConsumerWidget {
                 IconButton(
                   key: Key('job_cancel_${job.id}'),
                   tooltip: '取消任务',
-                  icon: Icon(Icons.close, color: tokens.textSecondary),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 19,
+                    color: tokens.textSecondary,
+                  ),
                   onPressed: () async {
                     final error = await controller.cancel(job.id);
                     if (error != null && context.mounted) {
@@ -438,7 +449,7 @@ class _JobCard extends ConsumerWidget {
           if (job.status == JobStatus.running ||
               job.status == JobStatus.cancelling)
             Padding(
-              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              padding: const EdgeInsets.only(top: 12),
               child: job.kind == JobKind.audiobook
                   ? _SegmentedProgressBar(
                       key: Key('job_progress_${job.id}'),
@@ -449,7 +460,7 @@ class _JobCard extends ConsumerWidget {
                       child: LinearProgressIndicator(
                         key: Key('job_progress_${job.id}'),
                         value: (job.progress / 100).clamp(0.0, 1.0),
-                        minHeight: 5,
+                        minHeight: 4,
                         backgroundColor: tokens.surfaceSubtle,
                         color: tokens.primary,
                       ),
@@ -457,19 +468,18 @@ class _JobCard extends ConsumerWidget {
             ),
           if (job.error.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: EchoMetrics.space1),
+              padding: const EdgeInsets.only(top: 8),
               child: Text(
                 job.error,
                 key: Key('job_error_${job.id}'),
                 style: textTheme.bodySmall?.copyWith(color: tokens.error),
               ),
             ),
-          // 完成直达 / 抢先收听 / 失败重试操作行
           if (audiobook != null &&
               audiobook.isPlayable &&
               (job.status == JobStatus.done || job.isActive))
             Padding(
-              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              padding: const EdgeInsets.only(top: 12),
               child: Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton.icon(
@@ -482,7 +492,7 @@ class _JobCard extends ConsumerWidget {
                       await openPlayer(context);
                     }
                   },
-                  icon: const Icon(Icons.play_arrow, size: 18),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
                   label: Text(audiobook.isReady ? '立即收听' : '抢先收听'),
                 ),
               ),
@@ -491,7 +501,7 @@ class _JobCard extends ConsumerWidget {
               job.kind == JobKind.download &&
               book != null)
             Padding(
-              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              padding: const EdgeInsets.only(top: 12),
               child: Align(
                 alignment: Alignment.centerRight,
                 child: OutlinedButton.icon(
@@ -510,7 +520,7 @@ class _JobCard extends ConsumerWidget {
               job.kind == JobKind.audiobook &&
               book != null)
             Padding(
-              padding: const EdgeInsets.only(top: EchoMetrics.space2),
+              padding: const EdgeInsets.only(top: 12),
               child: Align(
                 alignment: Alignment.centerRight,
                 child: OutlinedButton.icon(
@@ -521,7 +531,7 @@ class _JobCard extends ConsumerWidget {
                     useSafeArea: true,
                     builder: (_) => ConvertSheet(book: book!),
                   ),
-                  icon: const Icon(Icons.refresh, size: 18),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
                   label: const Text('重新转换'),
                 ),
               ),
@@ -532,7 +542,7 @@ class _JobCard extends ConsumerWidget {
   }
 }
 
-/// 分段式转换进度条（对齐设计图 ui-mobile-tasks.png）。
+/// 分段式转换进度条。
 class _SegmentedProgressBar extends StatelessWidget {
   const _SegmentedProgressBar({super.key, required this.progress});
 
@@ -552,7 +562,7 @@ class _SegmentedProgressBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               child: LinearProgressIndicator(
                 value: (filledExact - i).clamp(0.0, 1.0),
-                minHeight: 5,
+                minHeight: 4,
                 backgroundColor: tokens.surfaceSubtle,
                 color: tokens.primary,
               ),

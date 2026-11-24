@@ -5,11 +5,12 @@ import '../../core/api/ebook_api_client.dart';
 import '../../core/api/models.dart';
 import '../../core/settings/standalone_config_store.dart';
 import '../../design/echo_ambient.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../providers/providers_controller.dart';
 
-/// ebook-api 书源服务配置页（不内置默认地址，由首次启动引导或用户手动配置）。
+/// ebook-api 书源服务配置页（极简书房 Editorial Minimalism）。
 class EbookApiSettingsPage extends ConsumerStatefulWidget {
   const EbookApiSettingsPage({super.key});
 
@@ -103,7 +104,6 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
     await ref
         .read(standaloneConfigProvider.notifier)
         .setEbookApi(baseUrl: raw, apiKey: _keyCtrl.text.trim());
-    // 刷新书源列表
     ref.invalidate(providersControllerProvider);
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -121,7 +121,7 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
       appBar: AppBar(title: const Text('ebook-api 书源服务配置')),
       body: EchoAmbientBackground(
         child: ListView(
-          padding: const EdgeInsets.all(EchoMetrics.space3),
+          padding: const EdgeInsets.all(EchoMetrics.pagePadding),
           children: [
             Container(
               padding: const EdgeInsets.all(EchoMetrics.space3),
@@ -133,7 +133,7 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
                     '在线搜书与下载服务',
                     style: textTheme.titleMedium?.copyWith(
                       color: tokens.textPrimary,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -154,7 +154,7 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
                       prefixIcon: Icon(Icons.dns_outlined),
                     ),
                   ),
-                  const SizedBox(height: EchoMetrics.space2),
+                  const SizedBox(height: 12),
                   TextField(
                     key: const Key('ebook_api_key_field'),
                     controller: _keyCtrl,
@@ -177,25 +177,17 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
                   const SizedBox(height: EchoMetrics.space3),
                   Row(
                     children: [
-                      OutlinedButton.icon(
+                      EchoSecondaryButton(
                         onPressed: _testing ? null : _testConnection,
-                        icon: _testing
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.wifi_tethering, size: 18),
-                        label: const Text('测试连接'),
+                        icon: Icons.wifi_tethering_rounded,
+                        label: _testing ? '测试中...' : '测试连接',
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: FilledButton(
+                        child: EchoPrimaryButton(
                           key: const Key('ebook_api_save_button'),
                           onPressed: _save,
-                          child: const Text('保存配置'),
+                          label: '保存配置',
                         ),
                       ),
                     ],

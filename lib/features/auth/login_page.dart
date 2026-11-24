@@ -90,41 +90,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 顶部品牌声纹徽章（与启动加载页视觉一脉相承）
                       Center(
                         child: Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(22),
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                tokens.primary,
-                                const Color(0xFF8B5CF6),
-                              ],
-                            ),
-                            border: Border.all(
-                              color: Colors.white.withValues(
-                                alpha: isDark ? 0.28 : 0.45,
-                              ),
-                              width: 1.2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: tokens.primary.withValues(
-                                  alpha: isDark ? 0.42 : 0.28,
-                                ),
-                                blurRadius: 28,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
+                          width: 68,
+                          height: 68,
+                          decoration: echoElevatedCardDecoration(
+                            context,
+                            radius: 20,
+                            borderColor: tokens.primary.withValues(alpha: 0.35),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.graphic_eq_rounded,
-                            color: Colors.white,
-                            size: 36,
+                            color: tokens.primary,
+                            size: 32,
                           ),
                         ),
                       ),
@@ -133,9 +111,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         shaderCallback: (bounds) => LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          colors: isDark
-                              ? [Colors.white, const Color(0xFFC7D2FE)]
-                              : [const Color(0xFF0F172A), tokens.primary],
+                          colors: [tokens.textPrimary, tokens.primary],
                         ).createShader(bounds),
                         child: Text(
                           '回声',

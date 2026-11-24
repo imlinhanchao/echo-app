@@ -14,10 +14,12 @@ import '../../core/tts/tts_model_catalog.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../core/tts/wav_encoder.dart';
 import '../../design/echo_ambient.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
+import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 
-/// 端侧语音管理页：
+/// 端侧语音管理页（极简书房 Editorial Minimalism）：
 /// - 严格单镜像下拉选择（支持自定义加速前缀）与旧 Kokoro/Piper 残留清理；
 /// - Android 系统语音（含 MultiTTS 等已安装引擎）与离线 ZipVoice / MeloTTS / Matcha 管理；
 /// - ZipVoice 自定义参考音频克隆、本地压缩包导入与一键试听。
@@ -189,18 +191,19 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
           IconButton(
             tooltip: '刷新模型状态',
             onPressed: manager.refresh,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
       body: EchoAmbientBackground(
         child: ListView(
-          padding: const EdgeInsets.all(EchoMetrics.space3),
+          padding: const EdgeInsets.all(EchoMetrics.pagePadding),
           children: [
-            // 下载镜像源下拉选择卡片
+            const EchoSectionHeader(title: '下载源'),
+            const SizedBox(height: 10),
             Container(
               key: const Key('tts_mirror_card'),
-              padding: const EdgeInsets.all(EchoMetrics.space3),
+              padding: const EdgeInsets.all(16),
               decoration: echoElevatedCardDecoration(context, radius: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,21 +212,20 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
                     '模型下载镜像源',
                     style: textTheme.titleSmall?.copyWith(
                       color: tokens.textPrimary,
-                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     '严格仅使用所选镜像下载，不静默跳转其他源；若失败请切换镜像后继续断点续传',
                     style: textTheme.bodySmall?.copyWith(
+                      fontSize: 12.5,
                       color: tokens.textSecondary,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   DropdownButtonHideUnderline(
                     child: InputDecorator(
                       decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 12,
@@ -283,15 +285,22 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
             ),
             const SizedBox(height: EchoMetrics.space3),
 
-            // 旧模型（Kokoro / Piper）残留清理提醒卡片
+            // 旧模型残留清理提醒
             if (modelsState.legacyModelsSizeBytes > 0) ...[
               Container(
                 key: const Key('tts_legacy_cleanup_card'),
-                padding: const EdgeInsets.all(EchoMetrics.space3),
-                decoration: echoElevatedCardDecoration(context, radius: 16),
+                padding: const EdgeInsets.all(14),
+                decoration: echoElevatedCardDecoration(
+                  context,
+                  radius: 16,
+                  borderColor: tokens.warning.withValues(alpha: 0.35),
+                ),
                 child: Row(
                   children: [
-                    Icon(Icons.cleaning_services_outlined, color: tokens.accent),
+                    Icon(
+                      Icons.cleaning_services_outlined,
+                      color: tokens.warning,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -301,13 +310,13 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
                             '检测到已下架旧模型残留（${formatBytes(modelsState.legacyModelsSizeBytes)}）',
                             style: textTheme.titleSmall?.copyWith(
                               color: tokens.textPrimary,
-                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'Kokoro / Piper 已移除，清理后可释放手机空间',
                             style: textTheme.bodySmall?.copyWith(
+                              fontSize: 12.5,
                               color: tokens.textSecondary,
                             ),
                           ),
@@ -334,7 +343,8 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
               const SizedBox(height: EchoMetrics.space3),
             ],
 
-            // 模型与引擎卡片列表
+            const EchoSectionHeader(title: '可用引擎与离线模型'),
+            const SizedBox(height: 10),
             for (final entry in modelsState.orderedEntries) ...[
               if (entry.spec.isSystemTts)
                 _SystemTtsCard(
@@ -393,7 +403,7 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
                   },
                   onAudition: (sid) => _audition(entry, sid),
                 ),
-              const SizedBox(height: EchoMetrics.space2),
+              const SizedBox(height: 12),
             ],
           ],
         ),
@@ -464,8 +474,14 @@ class _SystemTtsCard extends StatelessWidget {
 
     return Container(
       key: const Key('tts_system_card'),
-      padding: const EdgeInsets.all(EchoMetrics.space3),
-      decoration: echoElevatedCardDecoration(context, radius: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: echoElevatedCardDecoration(
+        context,
+        radius: 16,
+        borderColor: isActive
+            ? tokens.primary.withValues(alpha: 0.45)
+            : echoHairlineColor(context),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -476,33 +492,26 @@ class _SystemTtsCard extends StatelessWidget {
                   spec.name,
                   style: textTheme.titleMedium?.copyWith(
                     color: tokens.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: (isActive ? tokens.primary : tokens.accent)
-                      .withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  isActive ? '当前使用' : spec.recommendedTag,
-                  style: textTheme.labelSmall?.copyWith(
-                    color: isActive ? tokens.primary : tokens.accent,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+              ),
+              EchoPillBadge(
+                label: isActive ? '当前使用' : spec.recommendedTag,
+                color: isActive ? tokens.primary : tokens.textSecondary,
+                filled: isActive,
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
             spec.subtitle,
-            style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+            style: textTheme.bodySmall?.copyWith(
+              fontSize: 13,
+              color: tokens.textSecondary,
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           if (!modelsState.systemTtsSupported)
             Text(
               '仅 Android 真机可用（免下载调起系统自带、MultiTTS 等语音引擎）',
@@ -520,7 +529,6 @@ class _SystemTtsCard extends StatelessWidget {
               child: InputDecorator(
                 decoration: const InputDecoration(
                   labelText: '本机语音引擎',
-                  border: OutlineInputBorder(),
                   isDense: true,
                   contentPadding: EdgeInsets.symmetric(
                     horizontal: 12,
@@ -543,7 +551,6 @@ class _SystemTtsCard extends StatelessWidget {
               child: InputDecorator(
                 decoration: const InputDecoration(
                   labelText: '引擎音色',
-                  border: OutlineInputBorder(),
                   isDense: true,
                   contentPadding: EdgeInsets.symmetric(
                     horizontal: 12,
@@ -561,11 +568,11 @@ class _SystemTtsCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 if (!isActive) ...[
-                  FilledButton.tonal(
+                  FilledButton(
                     onPressed: onSelectActive,
                     child: const Text('设为默认'),
                   ),
@@ -585,8 +592,9 @@ class _SystemTtsCard extends StatelessWidget {
                 const Spacer(),
                 IconButton(
                   tooltip: '刷新系统引擎与音色列表',
+                  color: tokens.textSecondary,
                   onPressed: onReloadInfo,
-                  icon: const Icon(Icons.sync),
+                  icon: const Icon(Icons.sync_rounded, size: 20),
                 ),
               ],
             ),
@@ -644,8 +652,14 @@ class _ModelCard extends StatelessWidget {
     final hasCustomZipVoiceRef = config.zipvoiceRefAudioPath.isNotEmpty;
 
     return Container(
-      padding: const EdgeInsets.all(EchoMetrics.space3),
-      decoration: echoElevatedCardDecoration(context, radius: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: echoElevatedCardDecoration(
+        context,
+        radius: 16,
+        borderColor: isActive
+            ? tokens.primary.withValues(alpha: 0.45)
+            : echoHairlineColor(context),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -656,46 +670,48 @@ class _ModelCard extends StatelessWidget {
                   spec.name,
                   style: textTheme.titleMedium?.copyWith(
                     color: tokens.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: (isActive ? tokens.primary : tokens.accent)
-                      .withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  isActive ? '当前使用' : spec.recommendedTag,
-                  style: textTheme.labelSmall?.copyWith(
-                    color: isActive ? tokens.primary : tokens.accent,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+              ),
+              EchoPillBadge(
+                label: isActive ? '当前使用' : spec.recommendedTag,
+                color: isActive ? tokens.primary : tokens.textSecondary,
+                filled: isActive,
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
             spec.subtitle,
-            style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
+            style: textTheme.bodySmall?.copyWith(
+              fontSize: 13,
+              color: tokens.textSecondary,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             entry.isInstalled
                 ? '已安装 · 占用 ${formatBytes(entry.installedBytes)}'
                 : '预计下载约 ${spec.estimatedSizeMb} MB',
-            style: textTheme.labelSmall?.copyWith(color: tokens.textDisabled),
+            style: textTheme.labelSmall?.copyWith(
+              color: tokens.textDisabled,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
 
           if (entry.isBusy || entry.isPaused) ...[
             const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: entry.progress > 0
-                  ? entry.progress
-                  : (entry.isPaused ? 0 : null),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: entry.progress > 0
+                    ? entry.progress
+                    : (entry.isPaused ? 0 : null),
+                minHeight: 4,
+                backgroundColor: tokens.surfaceSubtle,
+                color: tokens.primary,
+              ),
             ),
             const SizedBox(height: 6),
             Row(
@@ -703,8 +719,9 @@ class _ModelCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     entry.statusText,
-                    style: textTheme.bodySmall?.copyWith(
+                    style: textTheme.labelSmall?.copyWith(
                       color: tokens.textSecondary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ),
@@ -740,10 +757,11 @@ class _ModelCard extends StatelessWidget {
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: tokens.surfaceElevated.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(12),
+                padding: const EdgeInsets.all(12),
+                decoration: echoElevatedCardDecoration(
+                  context,
+                  radius: 12,
+                  color: tokens.surfaceBase,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -751,7 +769,7 @@ class _ModelCard extends StatelessWidget {
                     Text(
                       hasCustomZipVoiceRef
                           ? '参考音色：自定义 (${p.basename(config.zipvoiceRefAudioPath)})'
-                          : '参考音色：内置默认示例（可自行导入 WAV 克隆）',
+                          : '参考音色：内置默认示例（可导入 WAV 克隆音色）',
                       style: textTheme.labelMedium?.copyWith(
                         color: tokens.textPrimary,
                         fontWeight: FontWeight.w600,
@@ -765,6 +783,7 @@ class _ModelCard extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.bodySmall?.copyWith(
+                          fontSize: 12.5,
                           color: tokens.textSecondary,
                         ),
                       ),
@@ -791,15 +810,16 @@ class _ModelCard extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
-                if (!isActive)
-                  FilledButton.tonal(
+                if (!isActive) ...[
+                  FilledButton(
                     onPressed: onSelectActive,
                     child: const Text('设为默认'),
                   ),
-                if (!isActive) const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
                 OutlinedButton.icon(
                   onPressed: isAuditioning
                       ? null
@@ -817,12 +837,16 @@ class _ModelCard extends StatelessWidget {
                 IconButton(
                   tooltip: '删除模型释放空间',
                   onPressed: onDelete,
-                  icon: Icon(Icons.delete_outline, color: tokens.error),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: tokens.error,
+                  ),
                 ),
               ],
             ),
           ] else if (!entry.isBusy) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -843,10 +867,10 @@ class _ModelCard extends StatelessWidget {
                     icon: const Icon(Icons.delete_sweep_outlined, size: 18),
                     label: const Text('清除断点'),
                   ),
-                OutlinedButton.icon(
+                EchoSecondaryButton(
                   onPressed: onImportLocal,
-                  icon: const Icon(Icons.folder_open_outlined, size: 18),
-                  label: const Text('导入本地包'),
+                  icon: Icons.folder_open_outlined,
+                  label: '导入本地包',
                 ),
               ],
             ),

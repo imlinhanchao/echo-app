@@ -15,6 +15,7 @@ import '../../core/sync/progress_sync_service.dart';
 import '../../core/tts/sentence_splitter.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_metrics.dart';
+import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../library/library_controller.dart';
@@ -355,40 +356,73 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       isScrollControlled: true,
       builder: (sheetCtx) => DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.6,
+        initialChildSize: 0.65,
         maxChildSize: 0.9,
-        builder: (sheetCtx, controller) => ListView.builder(
-          key: const Key('reader_toc_list'),
-          controller: controller,
-          padding: const EdgeInsets.all(EchoMetrics.space2),
-          itemCount: _chapters.length,
-          itemBuilder: (_, i) {
-            final chapter = _chapters[i];
-            final selected = i == currentArrayIdx;
-            return ListTile(
-              key: Key('reader_toc_item_$i'),
-              selected: selected,
-              selectedTileColor: tokens.readingHighlight,
-              leading: Icon(
-                selected ? Icons.bookmark : Icons.article_outlined,
-                color: selected ? tokens.primary : tokens.textSecondary,
+        builder: (sheetCtx, controller) => Column(
+          children: [
+            const EchoSheetDragHandle(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: EchoSectionHeader(
+                title: '目录',
+                subtitle: '${_chapters.length} 章',
               ),
-              title: Text(
-                chapter.title.isNotEmpty ? chapter.title : '第 ${i + 1} 章',
-                style: TextStyle(
-                  color: selected ? tokens.primary : tokens.paperText,
-                ),
+            ),
+            Expanded(
+              child: ListView.separated(
+                key: const Key('reader_toc_list'),
+                controller: controller,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                itemCount: _chapters.length,
+                separatorBuilder: (_, _) =>
+                    const Divider(height: 1, indent: 48, endIndent: 12),
+                itemBuilder: (_, i) {
+                  final chapter = _chapters[i];
+                  final selected = i == currentArrayIdx;
+                  return ListTile(
+                    key: Key('reader_toc_item_$i'),
+                    dense: true,
+                    selected: selected,
+                    selectedTileColor: tokens.readingHighlight,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    leading: Icon(
+                      selected
+                          ? Icons.bookmark_rounded
+                          : Icons.article_outlined,
+                      size: 19,
+                      color: selected ? tokens.primary : tokens.textSecondary,
+                    ),
+                    title: Text(
+                      chapter.title.isNotEmpty
+                          ? chapter.title
+                          : '第 ${i + 1} 章',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected ? tokens.primary : tokens.paperText,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    trailing: Text(
+                      '${chapter.chars} 字',
+                      style: Theme.of(sheetCtx).textTheme.labelSmall?.copyWith(
+                        color: tokens.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetCtx).pop();
+                      _jumpToChapterArrayIndex(i);
+                    },
+                  );
+                },
               ),
-              subtitle: Text(
-                '${chapter.chars} 字',
-                style: TextStyle(color: tokens.textSecondary),
-              ),
-              onTap: () {
-                Navigator.of(sheetCtx).pop();
-                _jumpToChapterArrayIndex(i);
-              },
-            );
-          },
+            ),
+          ],
         ),
       ),
     );
@@ -466,22 +500,31 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (sheetCtx) => StatefulBuilder(
         builder: (sheetCtx, setSheetState) {
           final textTheme = Theme.of(sheetCtx).textTheme;
           final keepScreenOn = ref.read(standaloneConfigProvider).keepScreenOnWhileReading;
           return SafeArea(
-            child: Padding(
-              key: const Key('reader_typography_sheet'),
-              padding: const EdgeInsets.all(EchoMetrics.space3),
-              child: Column(
+            child: SingleChildScrollView(
+              child: Padding(
+                key: const Key('reader_typography_sheet'),
+                padding: const EdgeInsets.fromLTRB(
+                  EchoMetrics.pagePadding,
+                  4,
+                  EchoMetrics.pagePadding,
+                  EchoMetrics.space3,
+                ),
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const EchoSheetDragHandle(),
                   Text(
                     '阅读排版',
                     style: textTheme.titleMedium?.copyWith(
                       color: tokens.textPrimary,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: EchoMetrics.space2),
@@ -606,7 +649,8 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                 ],
               ),
             ),
-          );
+          ),
+        );
         },
       ),
     );
