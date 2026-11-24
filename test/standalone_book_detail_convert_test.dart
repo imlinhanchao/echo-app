@@ -7,13 +7,16 @@ import 'package:echo/core/api/models.dart';
 import 'package:echo/core/api/provider_token_store.dart';
 import 'package:echo/core/api/standalone_echo_api.dart';
 import 'package:echo/core/audio/chunked_player_controller.dart';
+import 'package:echo/core/audio/live_tts_player_controller.dart';
 import 'package:echo/core/books/local_library_store.dart';
 import 'package:echo/core/reader/reading_store.dart';
 import 'package:echo/core/settings/standalone_config_store.dart';
 import 'package:echo/core/storage/progress_store.dart';
 import 'package:echo/core/tts/audio_encoder_service.dart';
+import 'package:echo/core/tts/download_keepalive_service.dart';
 import 'package:echo/core/tts/local_convert_service.dart';
 import 'package:echo/core/tts/sherpa_tts_engine.dart';
+import 'package:echo/core/tts/system_tts_engine.dart';
 import 'package:echo/core/tts/tts_model_manager.dart';
 import 'package:echo/design/echo_theme.dart';
 import 'package:echo/design/echo_tokens.dart';
@@ -144,6 +147,109 @@ void main() {
           find.byKey(const Key('convert_goto_models_button')),
           findsOneWidget,
         );
+      },
+    );
+
+    testWidgets(
+      'tapping detail_live_tts with installed voice enters ReaderPageView and starts live playback',
+      timeout: const Timeout(Duration(seconds: 20)),
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        final fakeBridge = FakeSystemTtsBridge(isSupported: true);
+        final sysConfigCtrl = StandaloneConfigController(
+          configStorage,
+          const StandaloneConfig(onboardingCompleted: true),
+        );
+        final readyManager = await tester.runAsync(() async {
+          final m = TtsModelManager(
+            sysConfigCtrl,
+            rootDirOverride: modelsDir,
+            keepAliveService: const NoopDownloadKeepAliveService(),
+            systemTtsBridge: fakeBridge,
+          );
+          await m.refresh();
+          return m;
+        });
+
+        final theme = buildEchoTheme(
+          Brightness.dark,
+          EchoTokens.fromColors(darkColors, Brightness.dark),
+        );
+        final readingStore = MemoryReadingStore();
+        final audioEngine = FakeAudioEngine();
+        addTearDown(audioEngine.dispose);
+        final chunkedAudioEngine = FakeAudioEngine();
+        final liveCacheDir = Directory('${modelsDir.path}/live_cache');
+        final liveController = LiveTtsPlayerController(
+          libraryStore: libStore,
+          ttsEngine: FakeOnDeviceTtsEngine(),
+          audioEngine: audioEngine,
+          resolveActiveModel: () => readyManager!.activeModelPaths,
+          readConfig: () => sysConfigCtrl.state,
+          readingStore: readingStore,
+          cacheDirOverride: liveCacheDir,
+        );
+
+        await tester.runAsync(() => libStore.listChapters(txtBook.id));
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              standaloneConfigStorageProvider.overrideWithValue(configStorage),
+              providerTokenStoreProvider.overrideWithValue(
+                MemoryProviderTokenStore(),
+              ),
+              echoApiProvider.overrideWithValue(api),
+              localLibraryStoreProvider.overrideWithValue(libStore),
+              systemTtsBridgeProvider.overrideWithValue(fakeBridge),
+              ttsModelManagerProvider.overrideWith((_) => readyManager!),
+              audioEngineProvider.overrideWithValue(chunkedAudioEngine),
+              onDeviceTtsEngineProvider.overrideWithValue(
+                FakeOnDeviceTtsEngine(),
+              ),
+              liveTtsPlayerProvider.overrideWith((_) => liveController),
+              progressStoreProvider.overrideWithValue(MemoryProgressStore()),
+              readingStoreProvider.overrideWithValue(readingStore),
+            ],
+            child: MaterialApp(
+              theme: theme,
+              home: BookDetailPage(book: txtBook),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        await tester.ensureVisible(find.byKey(const Key('detail_live_tts')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('detail_live_tts')));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 120)),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 80)),
+        );
+        await tester.pump();
+
+        expect(find.byKey(const Key('reader_page')), findsOneWidget);
+        expect(liveController.state.hasBook, isTrue);
+        expect(liveController.state.book?.id, txtBook.id);
+
+        final stopFinder = find.byKey(const Key('reader_live_stop'));
+        if (stopFinder.evaluate().isNotEmpty) {
+          await tester.tap(stopFinder);
+        } else {
+          await liveController.stop();
+        }
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(audioEngine.stopCount, greaterThanOrEqualTo(1));
+        expect(liveController.state.hasBook, isFalse);
       },
     );
   });

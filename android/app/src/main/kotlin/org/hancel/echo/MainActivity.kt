@@ -1,5 +1,7 @@
 package org.hancel.echo
 
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
@@ -157,6 +159,22 @@ class MainActivity : AudioServiceActivity() {
                     )
                 }
                 else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.hancel.echo/media_notification"
+        ).setMethodCallHandler { call, result ->
+            if (call.method == "cancelPlaybackNotification") {
+                try {
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    manager?.cancel(1124)
+                } catch (_: Exception) {
+                }
+                result.success(null)
+            } else {
+                result.notImplemented()
             }
         }
     }

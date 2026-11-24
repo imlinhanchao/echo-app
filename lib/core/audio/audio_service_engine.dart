@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
 import 'chunked_player_controller.dart' show AudioEngine, LockScreenControls;
@@ -77,6 +78,13 @@ class EchoAudioHandler extends BaseAudioHandler {
   @override
   Future<void> stop() async {
     await _player.stop();
+    mediaItem.add(null);
+    playbackState.add(
+      PlaybackState(
+        processingState: AudioProcessingState.idle,
+        playing: false,
+      ),
+    );
     await super.stop();
   }
 
@@ -103,6 +111,16 @@ class EchoAudioHandler extends BaseAudioHandler {
   };
 
   void _broadcast() {
+    final procState = _player.processingState;
+    if (procState == ProcessingState.idle) {
+      playbackState.add(
+        PlaybackState(
+          processingState: AudioProcessingState.idle,
+          playing: false,
+        ),
+      );
+      return;
+    }
     playbackState.add(
       PlaybackState(
         controls: <MediaControl>[
@@ -122,8 +140,7 @@ class EchoAudioHandler extends BaseAudioHandler {
         // 紧凑通知栏优先展示：-15s / 播放暂停 / +15s（对齐设计 §4.1 锁屏播控卡）
         androidCompactActionIndices: const <int>[1, 2, 3],
         processingState:
-            _processingStateMap[_player.processingState] ??
-            AudioProcessingState.idle,
+            _processingStateMap[procState] ?? AudioProcessingState.idle,
         playing: _player.playing,
         updatePosition: _player.position,
         bufferedPosition: _player.bufferedPosition,
@@ -158,10 +175,11 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'org.hancel.echo.playback',
           androidNotificationChannelName: 'Echo 播放',
-          // 暂停后仍保留通知与锁屏媒体卡片（网易云同类体验），
-          // 通知可被划掉，因此 ongoing 必须为 false（audio_service 有断言）。
+          androidNotificationIcon: 'drawable/ic_stat_echo',
+          // 暂停后允许划掉通知，终止播放时先退出前台状态再彻底撤除通知栏卡片。
           androidNotificationOngoing: false,
-          androidStopForegroundOnPause: false,
+          androidStopForegroundOnPause: true,
+          androidResumeOnClick: false,
           rewindInterval: Duration(seconds: 15),
           fastForwardInterval: Duration(seconds: 15),
         ),
@@ -255,8 +273,25 @@ class AudioServiceEngine implements AudioEngine, LockScreenControls {
   @override
   Future<void> pause() => _handler.pause();
 
+  static const MethodChannel _mediaNotifChannel = MethodChannel(
+    'org.hancel.echo/media_notification',
+  );
+
   @override
-  Future<void> stop() => _handler.stop();
+  Future<void> stop() async {
+    await _handler.stop();
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await _mediaNotifChannel.invokeMethod<void>(
+          'cancelPlaybackNotification',
+        );
+      } catch (_) {}
+    }
+  }
 
   @override
   Future<void> seek(Duration position) => _handler.seek(position);

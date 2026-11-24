@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,8 @@ import '../../core/audio/chunked_player_controller.dart';
 import '../../core/audio/live_tts_player_controller.dart';
 import '../../core/export/book_exporter.dart';
 import '../../core/offline/offline_store.dart';
+import '../../core/reader/reading_store.dart';
+import '../../core/tts/tts_model_manager.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
@@ -112,33 +116,90 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
     final liveState = ref.read(liveTtsPlayerProvider);
     if (liveState.hasBook && liveState.book?.id == book.id) {
-      await liveCtrl.togglePlayPause();
+      if (!liveState.isPlaying && !liveState.isSynthesizing) {
+        unawaited(liveCtrl.togglePlayPause());
+      }
+      final chapterIdx = liveState.chapters.isNotEmpty
+          ? liveState
+                .chapters[liveState.chapterIndex.clamp(
+                  0,
+                  liveState.chapters.length - 1,
+                )]
+                .index
+          : liveState.chapterIndex;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ReaderPageView(
+            book: book,
+            initialChapterIndex: chapterIdx,
+            initialCharOffset: liveState.currentSentence?.startOffset ?? 0,
+          ),
+        ),
+      );
       return;
     }
+
+    final activeModel = ref.read(ttsModelManagerProvider.notifier).activeModelPaths;
+    if (activeModel == null) {
+      await liveCtrl.playBookChapter(book);
+      if (!mounted) return;
+      final err = ref.read(liveTtsPlayerProvider).error;
+      if (err != null) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(err),
+            action: SnackBarAction(
+              label: '去下载模型',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TtsModelManagerPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
     final chunkedState = ref.read(chunkedPlayerProvider);
     if (chunkedState.hasBook && chunkedState.isPlaying) {
       await ref.read(chunkedPlayerProvider.notifier).togglePlayPause();
     }
-    await liveCtrl.playBookChapter(book);
-    if (!mounted) return;
-    final err = ref.read(liveTtsPlayerProvider).error;
-    if (err != null) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-          content: Text(err),
-          action: SnackBarAction(
-            label: '去下载模型',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const TtsModelManagerPage(),
-                ),
-              );
-            },
-          ),
-        ),
+
+    final savedPos = await ref.read(readingStoreProvider).read(book.id);
+    var targetArrayIdx = 0;
+    if (savedPos != null && _chapters.isNotEmpty) {
+      final matched = _chapters.indexWhere(
+        (c) => c.index == savedPos.chapterIndex,
       );
+      targetArrayIdx = matched >= 0
+          ? matched
+          : savedPos.chapterIndex.clamp(0, _chapters.length - 1);
     }
+    final targetChapterIndex = savedPos?.chapterIndex;
+    final targetOffset = savedPos?.charOffset ?? 0;
+
+    unawaited(
+      liveCtrl.playBookChapter(
+        book,
+        chapterIndex: targetArrayIdx,
+        startCharOffset: targetOffset,
+      ),
+    );
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReaderPageView(
+          book: book,
+          initialChapterIndex: targetChapterIndex,
+          initialCharOffset: targetOffset,
+        ),
+      ),
+    );
   }
 
   @override
@@ -331,13 +392,17 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      isLivePlaying ? '暂停实时朗读' : '端侧实时朗读',
+                                      isLivePlaying
+                                          ? '正在实时朗读 · 点击进入阅读'
+                                          : '端侧实时朗读',
                                       style: textTheme.titleSmall?.copyWith(
                                         color: tokens.textPrimary,
                                       ),
                                     ),
                                     Text(
-                                      '免转码直接「边听边生成」，支持离线语音引擎',
+                                      isLivePlaying
+                                          ? '返回阅读页跟随高亮，或随时暂停'
+                                          : '免转码直接「边听边生成」，进入阅读页实时朗读',
                                       style: textTheme.labelSmall?.copyWith(
                                         color: tokens.textSecondary,
                                       ),

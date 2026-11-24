@@ -139,6 +139,7 @@ class FakeAudioEngine implements AudioEngine, LockScreenControls {
   bool playing = false;
   double speed = 1.0;
   double volume = 1.0;
+  int stopCount = 0;
 
   @override
   Stream<Duration> get positionStream => _positionController.stream;
@@ -195,6 +196,7 @@ class FakeAudioEngine implements AudioEngine, LockScreenControls {
 
   @override
   Future<void> stop() async {
+    stopCount++;
     playing = false;
     _playingController.add(false);
   }

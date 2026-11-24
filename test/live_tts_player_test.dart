@@ -159,5 +159,39 @@ void main() {
       expect(controller.state.error, contains('语音模型'));
       expect(controller.state.isPlaying, isFalse);
     });
+
+    test('stop() clears state before stopping engine and ignores late completion events', () async {
+      final book = await libraryStore.importBytes(
+        Uint8List.fromList(utf8.encode('第一章\n第一句测试朗读。第二句紧接出现。')),
+        filename: 'stop_clean.txt',
+      );
+      final controller = LiveTtsPlayerController(
+        libraryStore: libraryStore,
+        ttsEngine: ttsEngine,
+        audioEngine: audioEngine,
+        resolveActiveModel: () => fakeModelPaths,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          activeTtsSpeakerId: 0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.playBookChapter(book, chapterIndex: 0);
+      expect(controller.state.hasBook, isTrue);
+      expect(controller.state.isPlaying, isTrue);
+
+      await controller.stop();
+      expect(audioEngine.stopCount, 1);
+      expect(controller.state.hasBook, isFalse);
+      expect(controller.state.isPlaying, isFalse);
+
+      // 停止后若底层播放器晚到触发 completed/playing 事件，不应重新唤醒朗读状态
+      audioEngine.emitCompleted();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(controller.state.hasBook, isFalse);
+      expect(controller.state.isPlaying, isFalse);
+    });
   });
 }

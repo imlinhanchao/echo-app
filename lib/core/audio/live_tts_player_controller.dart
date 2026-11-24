@@ -530,8 +530,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     _generation++;
     _recordListeningDelta();
     _sentenceCache.clear();
-    await _audioEngine.stop();
     state = const LiveTtsState();
+    await _audioEngine.stop();
   }
 
   @override
