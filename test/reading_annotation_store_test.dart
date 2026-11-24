@@ -242,5 +242,28 @@ void main() {
       expect(segments[5].annotation, isNull);
       expect(segments[5].isActiveCue, isFalse);
     });
+
+    test('expandInitialSelection expands ASCII words, CJK clauses, caps long spans, and skips whitespace', () {
+      expect(expandInitialSelection('   ', 0), isNull);
+
+      const enText = 'Hello wonderful world.';
+      final enSpan = expandInitialSelection(enText, 9); // inside 'wonderful'
+      expect(enSpan, isNotNull);
+      expect(enText.substring(enSpan!.start, enSpan.end), 'wonderful');
+
+      const zhText = '第一句内容。  第二分句写得刚好合适，第三句开始。';
+      // Click on space before '第'
+      final wsSpan = expandInitialSelection(zhText, 6);
+      expect(wsSpan, isNotNull);
+      expect(zhText.substring(wsSpan!.start, wsSpan.end), '第二分句写得刚好合适');
+
+      const longClause =
+          '这是一段非常长而且中间没有任何标点符号隔开的连续中文测试长句内容需要自动截取窗口';
+      final capped = expandInitialSelection(longClause, 15);
+      expect(capped, isNotNull);
+      expect(capped!.end - capped.start, lessThanOrEqualTo(14));
+      expect(capped.start, lessThanOrEqualTo(15));
+      expect(capped.end, greaterThan(15));
+    });
   });
 }

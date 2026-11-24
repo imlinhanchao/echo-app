@@ -7,6 +7,7 @@ import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/audio/live_tts_player_controller.dart';
 import '../../core/export/book_exporter.dart';
+import '../../core/notes/reading_annotation_store.dart';
 import '../../core/offline/offline_store.dart';
 import '../../core/reader/reading_store.dart';
 import '../../core/tts/tts_model_manager.dart';
@@ -20,6 +21,7 @@ import '../auth/auth_controller.dart';
 import '../library/convert_sheet.dart';
 import '../library/library_controller.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
+import '../reader/reader_annotation_sheets.dart';
 import '../reader/reader_page.dart';
 import '../tts/tts_model_manager_page.dart';
 
@@ -222,6 +224,7 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
     final liveState = ref.watch(liveTtsPlayerProvider);
     final isLivePlaying =
         liveState.hasBook && liveState.book?.id == book.id && liveState.isPlaying;
+    final annotations = ref.watch(bookAnnotationsProvider(book.id));
     final authorText = book.authors.isNotEmpty
         ? book.authors.join(', ')
         : '未知作者';
@@ -403,6 +406,84 @@ class _BookDetailPageState extends ConsumerState<BookDetailPage> {
                                       isLivePlaying
                                           ? '返回阅读页跟随高亮，或随时暂停'
                                           : '免转码直接「边听边生成」，进入阅读页实时朗读',
+                                      style: textTheme.labelSmall?.copyWith(
+                                        color: tokens.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 20,
+                                color: tokens.textSecondary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: EchoMetrics.space3),
+                  ],
+
+                  if (annotations.isNotEmpty) ...[
+                    Container(
+                      decoration: echoElevatedCardDecoration(
+                        context,
+                        radius: 14,
+                        borderColor: hairline,
+                      ),
+                      child: InkWell(
+                        key: const Key('detail_annotations_card'),
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => showBookAnnotationsSheet(
+                          context: context,
+                          bookId: book.id,
+                          onJumpTo: (ann) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ReaderPageView(
+                                  book: book,
+                                  initialChapterIndex: ann.chapterIndex,
+                                  initialCharOffset: ann.startOffset,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: tokens.primary.withValues(alpha: 0.14),
+                                ),
+                                child: Icon(
+                                  Icons.edit_note_outlined,
+                                  size: 18,
+                                  color: tokens.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '划线与笔记',
+                                      style: textTheme.titleSmall?.copyWith(
+                                        color: tokens.textPrimary,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${annotations.length} 条记录 · 点击查看或跳转正文',
                                       style: textTheme.labelSmall?.copyWith(
                                         color: tokens.textSecondary,
                                       ),

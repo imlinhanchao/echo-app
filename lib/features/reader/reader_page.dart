@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/audio/live_tts_player_controller.dart';
+import '../../core/notes/reading_annotation_store.dart';
 import '../../core/reader/reading_store.dart';
 import '../../core/reader/screen_keep_alive.dart';
 import '../../core/settings/standalone_config_store.dart';
@@ -21,6 +25,7 @@ import '../auth/auth_controller.dart';
 import '../library/library_controller.dart';
 import '../player/player_sheet.dart' show openPlayer;
 import '../tts/tts_model_manager_page.dart';
+import 'reader_annotation_sheets.dart';
 
 /// 在单页正文中定位当前朗读句的字符区间（支持跨换行/空白差异的容错匹配）。
 ({int start, int end})? findCueSpanInPage(String pageText, String cueText) {
@@ -112,6 +117,8 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   bool _pendingJumpToLastPage = false;
   bool _switchingChapter = false;
   double _overscrollDelta = 0.0;
+  bool _hasTextSelection = false;
+  ReadingHighlightColor _lastHighlightColor = ReadingHighlightColor.gold;
 
   /// 已处理过的离线字幕/实时朗读位置，防止重复触发翻页。
   String? _lastAutoPagedCue;
@@ -657,26 +664,191 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   }
 
   /// 边听边看：从当前可见页首句起播/续播，若正在朗读本页则切换暂停/播放。
-  Future<void> _listenFromHere({bool openFullPlayer = false}) async {
+  Future<void> _createHighlight({
+    required ReaderPage page,
+    required int localStart,
+    required int localEnd,
+    required ReadingHighlightColor color,
+  }) async {
+    final safeStart = localStart.clamp(0, page.text.length);
+    final safeEnd = localEnd.clamp(0, page.text.length);
+    if (safeStart >= safeEnd) return;
+    final quote = page.text.substring(safeStart, safeEnd).trim();
+    if (quote.isEmpty) return;
+
+    setState(() => _lastHighlightColor = color);
+    final created = await ref
+        .read(bookAnnotationsProvider(widget.book.id).notifier)
+        .add(
+          chapterIndex: page.chapterIndex,
+          startOffset: page.startChar + safeStart,
+          endOffset: page.startChar + safeEnd,
+          quote: quote,
+          color: color,
+          chapterTitle: page.chapterTitle,
+        );
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(
+      SnackBar(
+        content: const Text('已划线'),
+        action: SnackBarAction(
+          label: '写笔记',
+          onPressed: () {
+            if (mounted) {
+              unawaited(_openAnnotationEditor(existing: created));
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAnnotationEditor({
+    ReadingAnnotation? existing,
+    ReaderPage? page,
+    int? localStart,
+    int? localEnd,
+  }) async {
+    final String quote;
+    final String chapterTitle;
+    if (existing != null) {
+      quote = existing.quote;
+      chapterTitle = existing.chapterTitle;
+    } else {
+      if (page == null || localStart == null || localEnd == null) return;
+      final s = localStart.clamp(0, page.text.length);
+      final e = localEnd.clamp(0, page.text.length);
+      if (s >= e) return;
+      quote = page.text.substring(s, e).trim();
+      if (quote.isEmpty) return;
+      chapterTitle = page.chapterTitle;
+    }
+
+    final notifier = ref.read(bookAnnotationsProvider(widget.book.id).notifier);
+    await showAnnotationEditorSheet(
+      context: context,
+      quote: quote,
+      existing: existing,
+      initialColor: existing?.color ?? _lastHighlightColor,
+      chapterTitle: chapterTitle,
+      onSave: (color, note) async {
+        if (mounted) {
+          setState(() => _lastHighlightColor = color);
+        }
+        if (existing != null) {
+          await notifier.update(existing.copyWith(color: color, note: note));
+        } else if (page != null && localStart != null && localEnd != null) {
+          await notifier.add(
+            chapterIndex: page.chapterIndex,
+            startOffset: page.startChar + localStart,
+            endOffset: page.startChar + localEnd,
+            quote: quote,
+            note: note,
+            color: color,
+            chapterTitle: chapterTitle,
+          );
+        }
+      },
+      onDelete: existing == null ? null : () => notifier.remove(existing.id),
+    );
+  }
+
+  void _jumpToAnnotation(ReadingAnnotation ann) {
+    if (_chapters.isEmpty) return;
+    final targetArrayIdx = _findChapterArrayIdx(_chapters, ann.chapterIndex);
+    final targetChapter = _chapters[targetArrayIdx];
+    if (targetChapter.index == _chapterIndex &&
+        _pages.isNotEmpty &&
+        _pageController.hasClients) {
+      final pageIdx = pageIndexForOffset(
+        _pages,
+        targetChapter.index,
+        ann.startOffset,
+      );
+      setState(() => _charOffset = ann.startOffset);
+      _animateOrJumpToPage(pageIdx);
+      unawaited(_persistPosition(targetChapter.index, ann.startOffset));
+      return;
+    }
+    _jumpToChapterArrayIndex(targetArrayIdx, charOffset: ann.startOffset);
+  }
+
+  Future<void> _showBookNotes() async {
+    await showBookAnnotationsSheet(
+      context: context,
+      bookId: widget.book.id,
+      onJumpTo: _jumpToAnnotation,
+      onEdit: (ann) => _openAnnotationEditor(existing: ann),
+      onDelete: (ann) => ref
+          .read(bookAnnotationsProvider(widget.book.id).notifier)
+          .remove(ann.id),
+    );
+  }
+
+  Future<void> _listenFromHere({
+    bool openFullPlayer = false,
+    int? overrideChapterArrayIdx,
+    int? overrideCharOffset,
+  }) async {
     if (_listening) return;
     setState(() => _listening = true);
     try {
-      await _listenFromHereInner(openFullPlayer: openFullPlayer);
+      await _listenFromHereInner(
+        openFullPlayer: openFullPlayer,
+        overrideChapterArrayIdx: overrideChapterArrayIdx,
+        overrideCharOffset: overrideCharOffset,
+      );
     } finally {
       if (mounted) setState(() => _listening = false);
     }
   }
 
-  Future<void> _listenFromHereInner({required bool openFullPlayer}) async {
+  Future<void> _listenFromHereInner({
+    required bool openFullPlayer,
+    int? overrideChapterArrayIdx,
+    int? overrideCharOffset,
+  }) async {
     final playerState = ref.read(chunkedPlayerProvider);
     final controller = ref.read(chunkedPlayerProvider.notifier);
     final liveState = ref.read(liveTtsPlayerProvider);
     final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
 
-    final arrayIdx = _currentChapterArrayIdx();
+    final arrayIdx = overrideChapterArrayIdx ?? _currentChapterArrayIdx();
     final page = (_currentPage >= 0 && _currentPage < _pages.length)
         ? _pages[_currentPage]
         : null;
+
+    if (overrideCharOffset != null) {
+      if (playerState.hasBook && playerState.isPlaying) {
+        await controller.togglePlayPause();
+      }
+      await liveCtrl.playBookChapter(
+        widget.book,
+        chapterIndex: arrayIdx,
+        startCharOffset: overrideCharOffset,
+      );
+      final err = ref.read(liveTtsPlayerProvider).error;
+      if (err != null && mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(err),
+            action: SnackBarAction(
+              label: '去下载模型',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TtsModelManagerPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      }
+      return;
+    }
 
     // 1. 若本书正在进行端侧「边听边生成」实时朗读：
     //    - 仍停留在正在朗读的同一页时：原地切换播放/暂停；
@@ -1058,6 +1230,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final palette = _themeColors(tokens);
     final playerState = ref.watch(chunkedPlayerProvider);
     final liveState = ref.watch(liveTtsPlayerProvider);
+    final annotations = ref.watch(bookAnnotationsProvider(widget.book.id));
     final isThisBookLoaded =
         playerState.hasBook && playerState.audiobook?.bookId == widget.book.id;
     final isLiveThisBook =
@@ -1145,12 +1318,39 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           IconButton(
             key: const Key('reader_toc_button'),
             tooltip: '目录',
+            visualDensity: VisualDensity.compact,
             onPressed: _loading || _chapters.isEmpty ? null : _showToc,
             icon: Icon(Icons.list, color: palette.fg),
           ),
           IconButton(
+            key: const Key('reader_notes_button'),
+            tooltip: '划线与笔记',
+            visualDensity: VisualDensity.compact,
+            onPressed: _loading ? null : _showBookNotes,
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.edit_note_outlined, color: palette.fg),
+                if (annotations.isNotEmpty)
+                  Positioned(
+                    right: -2,
+                    top: -1,
+                    child: Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: tokens.primary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
             key: const Key('reader_font_button'),
             tooltip: '排版设置',
+            visualDensity: VisualDensity.compact,
             onPressed: _loading ? null : _showTypographySheet,
             icon: Text(
               'Aa',
@@ -1160,6 +1360,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           IconButton(
             key: const Key('reader_play_button'),
             tooltip: isPlayingThisBook ? '从本页听书 / 暂停' : '边听边看',
+            visualDensity: VisualDensity.compact,
             onPressed: _loading ? null : () => _listenFromHere(),
             icon: Icon(
               isPlayingThisBook
@@ -1217,10 +1418,54 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
               highlightColor: tokens.readingHighlight,
               activeSentence: activeSentence,
               activeCueText: activeCueText,
+              annotations: annotations,
+              lastHighlightColor: _lastHighlightColor,
+              hasTextSelection: _hasTextSelection,
               layoutSize: _layoutSize,
               onNeedPagination: _paginateCurrentChapter,
               onPageChanged: _onPageChanged,
               onScrollNotification: _onScrollNotification,
+              onSelectionActiveChanged: (active) {
+                if (mounted && _hasTextSelection != active) {
+                  setState(() => _hasTextSelection = active);
+                }
+              },
+              onQuickHighlight: (page, localStart, localEnd, color) {
+                unawaited(
+                  _createHighlight(
+                    page: page,
+                    localStart: localStart,
+                    localEnd: localEnd,
+                    color: color,
+                  ),
+                );
+              },
+              onOpenNoteEditor: (page, localStart, localEnd) {
+                unawaited(
+                  _openAnnotationEditor(
+                    page: page,
+                    localStart: localStart,
+                    localEnd: localEnd,
+                  ),
+                );
+              },
+              onTapAnnotation: (ann) {
+                unawaited(_openAnnotationEditor(existing: ann));
+              },
+              onListenFromSelection: hasAudio
+                  ? (page, localStart) {
+                      final idx = _findChapterArrayIdx(
+                        _chapters,
+                        page.chapterIndex,
+                      );
+                      unawaited(
+                        _listenFromHere(
+                          overrideChapterArrayIdx: idx,
+                          overrideCharOffset: page.startChar + localStart,
+                        ),
+                      );
+                    }
+                  : null,
             ),
       bottomNavigationBar: _loading || _pages.isEmpty
           ? null
@@ -1251,10 +1496,18 @@ class _ReaderBody extends StatelessWidget {
     required this.highlightColor,
     required this.activeSentence,
     required this.activeCueText,
+    required this.annotations,
+    required this.lastHighlightColor,
+    required this.hasTextSelection,
     required this.layoutSize,
     required this.onNeedPagination,
     required this.onPageChanged,
     required this.onScrollNotification,
+    required this.onSelectionActiveChanged,
+    required this.onQuickHighlight,
+    required this.onOpenNoteEditor,
+    required this.onTapAnnotation,
+    this.onListenFromSelection,
   });
 
   final List<ReaderPage> pages;
@@ -1264,10 +1517,25 @@ class _ReaderBody extends StatelessWidget {
   final Color highlightColor;
   final TextSentence? activeSentence;
   final String? activeCueText;
+  final List<ReadingAnnotation> annotations;
+  final ReadingHighlightColor lastHighlightColor;
+  final bool hasTextSelection;
   final Size? layoutSize;
   final Future<void> Function(Size size, EchoTokens tokens) onNeedPagination;
   final ValueChanged<int> onPageChanged;
   final bool Function(ScrollNotification) onScrollNotification;
+  final ValueChanged<bool> onSelectionActiveChanged;
+  final void Function(
+    ReaderPage page,
+    int localStart,
+    int localEnd,
+    ReadingHighlightColor color,
+  )
+  onQuickHighlight;
+  final void Function(ReaderPage page, int localStart, int localEnd)
+  onOpenNoteEditor;
+  final ValueChanged<ReadingAnnotation> onTapAnnotation;
+  final void Function(ReaderPage page, int localStart)? onListenFromSelection;
 
   static const double _maxReadingWidth = 680.0;
 
@@ -1298,35 +1566,6 @@ class _ReaderBody extends StatelessWidget {
       return findCueSpanInPage(page.text, cue);
     }
     return null;
-  }
-
-  Widget _buildPageText(int index, ReaderPage page) {
-    final span = _resolveHighlightSpan(page);
-    if (span == null) {
-      return Text(
-        page.text,
-        key: Key('reader_page_text_$index'),
-        style: textStyle,
-        textHeightBehavior: _kReaderTextHeightBehavior,
-      );
-    }
-    return Text.rich(
-      key: Key('reader_page_text_$index'),
-      textHeightBehavior: _kReaderTextHeightBehavior,
-      TextSpan(
-        style: textStyle,
-        children: <InlineSpan>[
-          if (span.start > 0)
-            TextSpan(text: page.text.substring(0, span.start)),
-          TextSpan(
-            text: page.text.substring(span.start, span.end),
-            style: textStyle.copyWith(backgroundColor: highlightColor),
-          ),
-          if (span.end < page.text.length)
-            TextSpan(text: page.text.substring(span.end)),
-        ],
-      ),
-    );
   }
 
   @override
@@ -1360,28 +1599,582 @@ class _ReaderBody extends StatelessWidget {
             key: ValueKey<int>(pageViewEpoch),
             child: PageView.builder(
               key: const Key('reader_pageview'),
-              physics: const ClampingScrollPhysics(),
+              physics: hasTextSelection
+                  ? const NeverScrollableScrollPhysics()
+                  : const ClampingScrollPhysics(),
               controller: pageController,
               onPageChanged: onPageChanged,
               itemCount: pages.length,
-              itemBuilder: (context, index) => Center(
-                child: ConstrainedBox(
-                  key: index == 0 ? const Key('reader_column_constraint') : null,
-                  constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
-                  child: SizedBox(
-                    width: effectiveWidth,
-                    height: constraints.maxHeight,
-                    child: Padding(
-                      padding: _insets,
-                      child: _buildPageText(index, pages[index]),
+              itemBuilder: (context, index) {
+                final page = pages[index];
+                return Center(
+                  child: ConstrainedBox(
+                    key: index == 0
+                        ? const Key('reader_column_constraint')
+                        : null,
+                    constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
+                    child: SizedBox(
+                      width: effectiveWidth,
+                      height: constraints.maxHeight,
+                      child: Padding(
+                        padding: _insets,
+                        child: _SelectableReaderPage(
+                          index: index,
+                          page: page,
+                          textStyle: textStyle,
+                          highlightColor: highlightColor,
+                          activeCueSpan: _resolveHighlightSpan(page),
+                          annotations: annotations,
+                          lastHighlightColor: lastHighlightColor,
+                          onSelectionActiveChanged: onSelectionActiveChanged,
+                          onQuickHighlight: onQuickHighlight,
+                          onOpenNoteEditor: onOpenNoteEditor,
+                          onTapAnnotation: onTapAnnotation,
+                          onListenFromSelection: onListenFromSelection,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _SelectableReaderPage extends StatefulWidget {
+  const _SelectableReaderPage({
+    required this.index,
+    required this.page,
+    required this.textStyle,
+    required this.highlightColor,
+    required this.activeCueSpan,
+    required this.annotations,
+    required this.lastHighlightColor,
+    required this.onSelectionActiveChanged,
+    required this.onQuickHighlight,
+    required this.onOpenNoteEditor,
+    required this.onTapAnnotation,
+    this.onListenFromSelection,
+  });
+
+  final int index;
+  final ReaderPage page;
+  final TextStyle textStyle;
+  final Color highlightColor;
+  final ({int start, int end})? activeCueSpan;
+  final List<ReadingAnnotation> annotations;
+  final ReadingHighlightColor lastHighlightColor;
+  final ValueChanged<bool> onSelectionActiveChanged;
+  final void Function(
+    ReaderPage page,
+    int localStart,
+    int localEnd,
+    ReadingHighlightColor color,
+  )
+  onQuickHighlight;
+  final void Function(ReaderPage page, int localStart, int localEnd)
+  onOpenNoteEditor;
+  final ValueChanged<ReadingAnnotation> onTapAnnotation;
+  final void Function(ReaderPage page, int localStart)? onListenFromSelection;
+
+  @override
+  State<_SelectableReaderPage> createState() => _SelectableReaderPageState();
+}
+
+class _SelectableReaderPageState extends State<_SelectableReaderPage> {
+  final GlobalKey _textKey = GlobalKey();
+  final Map<String, TapGestureRecognizer> _annotationRecognizers =
+      <String, TapGestureRecognizer>{};
+  int? _selStart;
+  int? _selEnd;
+  int? _dragAnchor;
+  OverlayEntry? _toolbarEntry;
+  bool _lastReportedActive = false;
+
+  bool get _hasSelection =>
+      _selStart != null && _selEnd != null && _selStart! < _selEnd!;
+
+  @override
+  void didUpdateWidget(_SelectableReaderPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.page.chapterIndex != widget.page.chapterIndex ||
+        oldWidget.page.startChar != widget.page.startChar ||
+        oldWidget.page.text != widget.page.text) {
+      _clearSelection(notifyState: false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _toolbarEntry?.remove();
+    _toolbarEntry = null;
+    for (final recognizer in _annotationRecognizers.values) {
+      recognizer.dispose();
+    }
+    _annotationRecognizers.clear();
+    if (_lastReportedActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onSelectionActiveChanged(false);
+      });
+    }
+    super.dispose();
+  }
+
+  RenderParagraph? _findRenderParagraph() {
+    final root = _textKey.currentContext;
+    if (root is! Element) return null;
+    RenderParagraph? found;
+    void visit(Element element) {
+      if (found != null) return;
+      final ro = element.renderObject;
+      if (ro is RenderParagraph) {
+        found = ro;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    visit(root);
+    return found;
+  }
+
+  void _reportSelectionActive(bool active) {
+    if (active == _lastReportedActive) return;
+    _lastReportedActive = active;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onSelectionActiveChanged(active);
+    });
+  }
+
+  void _clearSelection({bool notifyState = true}) {
+    _toolbarEntry?.remove();
+    _toolbarEntry = null;
+    _selStart = null;
+    _selEnd = null;
+    _dragAnchor = null;
+    _reportSelectionActive(false);
+    if (notifyState && mounted) {
+      setState(() {});
+    }
+  }
+
+  int _hitTestOffset(RenderParagraph paragraph, Offset globalPos) {
+    final local = paragraph.globalToLocal(globalPos);
+    final clamped = Offset(
+      local.dx.clamp(0.0, paragraph.size.width),
+      local.dy.clamp(0.0, paragraph.size.height),
+    );
+    return paragraph.getPositionForOffset(clamped).offset;
+  }
+
+  List<TextBox> _computeSelectionBoxes(RenderParagraph? paragraph) {
+    if (!_hasSelection ||
+        paragraph == null ||
+        !paragraph.attached ||
+        !paragraph.hasSize) {
+      return const <TextBox>[];
+    }
+    return paragraph.getBoxesForSelection(
+      TextSelection(baseOffset: _selStart!, extentOffset: _selEnd!),
+    );
+  }
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    final paragraph = _findRenderParagraph();
+    if (paragraph == null || widget.page.text.isEmpty) return;
+    final offset = _hitTestOffset(paragraph, details.globalPosition);
+    final span = expandInitialSelection(widget.page.text, offset);
+    if (span == null) return;
+    setState(() {
+      _selStart = span.start;
+      _selEnd = span.end;
+      _dragAnchor = span.start;
+    });
+    _reportSelectionActive(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showOrUpdateToolbar();
+    });
+  }
+
+  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+    final anchor = _dragAnchor;
+    final paragraph = _findRenderParagraph();
+    final textLen = widget.page.text.length;
+    if (anchor == null || paragraph == null || textLen == 0) return;
+    final raw = _hitTestOffset(
+      paragraph,
+      details.globalPosition,
+    ).clamp(0, textLen);
+    var start = math.min(anchor, raw);
+    var end = math.max(anchor, raw);
+    if (start == end) {
+      if (end < textLen) {
+        end++;
+      } else if (start > 0) {
+        start--;
+      }
+    }
+    if (start == _selStart && end == _selEnd) return;
+    setState(() {
+      _selStart = start;
+      _selEnd = end;
+    });
+    _showOrUpdateToolbar();
+  }
+
+  void _updateHandle({required bool isStart, required Offset globalPosition}) {
+    final paragraph = _findRenderParagraph();
+    final curStart = _selStart;
+    final curEnd = _selEnd;
+    final textLen = widget.page.text.length;
+    if (paragraph == null ||
+        curStart == null ||
+        curEnd == null ||
+        textLen == 0) {
+      return;
+    }
+    final offset = _hitTestOffset(paragraph, globalPosition).clamp(0, textLen);
+    var nextStart = curStart;
+    var nextEnd = curEnd;
+    if (isStart) {
+      if (offset < curEnd) {
+        nextStart = offset;
+      } else if (offset > curEnd) {
+        nextStart = curEnd;
+        nextEnd = offset;
+      } else {
+        nextStart = math.max(0, curEnd - 1);
+      }
+    } else {
+      if (offset > curStart) {
+        nextEnd = offset;
+      } else if (offset < curStart) {
+        nextEnd = curStart;
+        nextStart = offset;
+      } else {
+        nextEnd = math.min(textLen, curStart + 1);
+      }
+    }
+    if (nextStart == curStart && nextEnd == curEnd) return;
+    setState(() {
+      _selStart = nextStart;
+      _selEnd = nextEnd;
+    });
+    _showOrUpdateToolbar();
+  }
+
+  void _showOrUpdateToolbar() {
+    if (!mounted || !_hasSelection) return;
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    if (_toolbarEntry == null) {
+      _toolbarEntry = OverlayEntry(builder: _buildToolbarOverlay);
+      overlay.insert(_toolbarEntry!);
+    } else {
+      _toolbarEntry!.markNeedsBuild();
+    }
+  }
+
+  Widget _buildToolbarOverlay(BuildContext overlayContext) {
+    final s = _selStart;
+    final e = _selEnd;
+    final paragraph = _findRenderParagraph();
+    if (s == null || e == null || s >= e || paragraph == null) {
+      return const SizedBox.shrink();
+    }
+    final boxes = _computeSelectionBoxes(paragraph);
+    if (boxes.isEmpty) return const SizedBox.shrink();
+    final firstBox = boxes.first;
+    final lastBox = boxes.last;
+    final anchorAbove = paragraph.localToGlobal(
+      Offset((firstBox.left + firstBox.right) / 2, firstBox.top - 8),
+    );
+    final anchorBelow = paragraph.localToGlobal(
+      Offset((lastBox.left + lastBox.right) / 2, lastBox.bottom + 34),
+    );
+
+    return EchoSelectionToolbar(
+      anchors: TextSelectionToolbarAnchors(
+        primaryAnchor: anchorAbove,
+        secondaryAnchor: anchorBelow,
+      ),
+      selectedColor: widget.lastHighlightColor,
+      onSelectColor: (color) {
+        _clearSelection();
+        widget.onQuickHighlight(widget.page, s, e, color);
+      },
+      onHighlight: () {
+        _clearSelection();
+        widget.onQuickHighlight(
+          widget.page,
+          s,
+          e,
+          widget.lastHighlightColor,
+        );
+      },
+      onNote: () {
+        _clearSelection();
+        widget.onOpenNoteEditor(widget.page, s, e);
+      },
+      onCopy: () {
+        final text = widget.page.text.substring(s, e);
+        _clearSelection();
+        unawaited(Clipboard.setData(ClipboardData(text: text)));
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('已复制所选文字')),
+        );
+      },
+      onListenFromHere: widget.onListenFromSelection == null
+          ? null
+          : () {
+              _clearSelection();
+              widget.onListenFromSelection!(widget.page, s);
+            },
+    );
+  }
+
+  TapGestureRecognizer _recognizerFor(ReadingAnnotation ann) {
+    final existing = _annotationRecognizers[ann.id];
+    if (existing != null) {
+      existing.onTap = () => widget.onTapAnnotation(ann);
+      return existing;
+    }
+    final created = TapGestureRecognizer()
+      ..onTap = () => widget.onTapAnnotation(ann);
+    _annotationRecognizers[ann.id] = created;
+    return created;
+  }
+
+  Widget _buildPageText(BuildContext context) {
+    final segments = buildStyledPageSegments(
+      page: widget.page,
+      annotations: widget.annotations,
+      activeCueSpan: widget.activeCueSpan,
+    );
+
+    final activeIds = <String>{
+      for (final seg in segments)
+        if (seg.annotation != null) seg.annotation!.id,
+    };
+    _annotationRecognizers.removeWhere((id, recognizer) {
+      if (activeIds.contains(id)) return false;
+      recognizer.dispose();
+      return true;
+    });
+
+    if (segments.length <= 1 &&
+        (segments.isEmpty ||
+            (segments.first.annotation == null && !segments.first.isActiveCue))) {
+      return Text(
+        widget.page.text,
+        key: Key('reader_page_text_${widget.index}'),
+        style: widget.textStyle,
+        textHeightBehavior: _kReaderTextHeightBehavior,
+      );
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Text.rich(
+      key: Key('reader_page_text_${widget.index}'),
+      style: widget.textStyle,
+      textHeightBehavior: _kReaderTextHeightBehavior,
+      TextSpan(
+        style: widget.textStyle,
+        children: <InlineSpan>[
+          for (final seg in segments)
+            () {
+              final ann = seg.annotation;
+              var spanStyle = widget.textStyle;
+              TapGestureRecognizer? recognizer;
+              if (ann != null) {
+                recognizer = _recognizerFor(ann);
+                spanStyle = spanStyle.copyWith(
+                  decoration: TextDecoration.underline,
+                  decorationColor: ann.color.color,
+                  decorationThickness: ann.hasNote ? 2.2 : 1.8,
+                  decorationStyle: ann.hasNote
+                      ? TextDecorationStyle.double
+                      : TextDecorationStyle.solid,
+                  backgroundColor: ann.color.color.withValues(
+                    alpha: ann.hasNote
+                        ? (isDark ? 0.22 : 0.24)
+                        : (isDark ? 0.12 : 0.14),
+                  ),
+                );
+              }
+              if (seg.isActiveCue) {
+                spanStyle = spanStyle.copyWith(
+                  backgroundColor: widget.highlightColor,
+                );
+              }
+              return TextSpan(
+                text: seg.text,
+                style: (ann != null || seg.isActiveCue) ? spanStyle : null,
+                recognizer: recognizer,
+              );
+            }(),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final boxes = _computeSelectionBoxes(_findRenderParagraph());
+    final firstBox = boxes.isNotEmpty ? boxes.first : null;
+    final lastBox = boxes.isNotEmpty ? boxes.last : null;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: _hasSelection ? _clearSelection : null,
+      onLongPressStart: _onLongPressStart,
+      onLongPressMoveUpdate: _onLongPressMoveUpdate,
+      onLongPressEnd: (_) {
+        if (_hasSelection) _showOrUpdateToolbar();
+      },
+      child: Stack(
+        fit: StackFit.passthrough,
+        clipBehavior: Clip.none,
+        children: [
+          if (boxes.isNotEmpty)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _SelectionHighlightPainter(
+                    boxes: boxes,
+                    color: tokens.primary.withValues(
+                      alpha: isDark ? 0.28 : 0.24,
+                    ),
+                    edgeColor: tokens.primary,
+                  ),
+                ),
+              ),
+            ),
+          KeyedSubtree(key: _textKey, child: _buildPageText(context)),
+          if (firstBox != null)
+            Positioned(
+              left: firstBox.left - 18,
+              top: firstBox.bottom - 4,
+              child: _SelectionHandle(
+                handleKey: const Key('reader_selection_handle_start'),
+                color: tokens.primary,
+                isStart: true,
+                onDragUpdate: (d) => _updateHandle(
+                  isStart: true,
+                  globalPosition: d.globalPosition,
+                ),
+              ),
+            ),
+          if (lastBox != null)
+            Positioned(
+              left: lastBox.right - 18,
+              top: lastBox.bottom - 4,
+              child: _SelectionHandle(
+                handleKey: const Key('reader_selection_handle_end'),
+                color: tokens.primary,
+                isStart: false,
+                onDragUpdate: (d) => _updateHandle(
+                  isStart: false,
+                  globalPosition: d.globalPosition,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectionHighlightPainter extends CustomPainter {
+  const _SelectionHighlightPainter({
+    required this.boxes,
+    required this.color,
+    required this.edgeColor,
+  });
+
+  final List<TextBox> boxes;
+  final Color color;
+  final Color edgeColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (boxes.isEmpty) return;
+    final fillPaint = Paint()..color = color;
+    final edgePaint = Paint()
+      ..color = edgeColor.withValues(alpha: 0.75)
+      ..strokeWidth = 1.6;
+    for (final box in boxes) {
+      final rect = box.toRect();
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+        fillPaint,
+      );
+      canvas.drawLine(rect.bottomLeft, rect.bottomRight, edgePaint);
+    }
+    final firstRect = boxes.first.toRect();
+    final lastRect = boxes.last.toRect();
+    canvas.drawLine(firstRect.topLeft, firstRect.bottomLeft, edgePaint);
+    canvas.drawLine(lastRect.topRight, lastRect.bottomRight, edgePaint);
+  }
+
+  @override
+  bool shouldRepaint(_SelectionHighlightPainter oldDelegate) =>
+      oldDelegate.boxes != boxes ||
+      oldDelegate.color != color ||
+      oldDelegate.edgeColor != edgeColor;
+}
+
+class _SelectionHandle extends StatelessWidget {
+  const _SelectionHandle({
+    required this.handleKey,
+    required this.color,
+    required this.isStart,
+    required this.onDragUpdate,
+  });
+
+  final Key handleKey;
+  final Color color;
+  final bool isStart;
+  final GestureDragUpdateCallback onDragUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      key: handleKey,
+      behavior: HitTestBehavior.opaque,
+      onPanUpdate: onDragUpdate,
+      child: SizedBox(
+        width: 36,
+        height: 36,
+        child: Center(
+          child: Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.only(
+                topLeft: isStart ? const Radius.circular(7) : Radius.zero,
+                topRight: isStart ? Radius.zero : const Radius.circular(7),
+                bottomLeft: const Radius.circular(7),
+                bottomRight: const Radius.circular(7),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.28),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -515,3 +515,95 @@ List<StyledPageSegment> buildStyledPageSegments({
 
   return segments;
 }
+
+/// 根据长按命中的字符偏移自动扩展为语义词句选区（英文扩至完整单词，中文扩至分句且过长截窗）。
+({int start, int end})? expandInitialSelection(String text, int rawOffset) {
+  if (text.trim().isEmpty) return null;
+  var offset = rawOffset.clamp(0, text.length - 1);
+  const separators = '\n。！？；，、：“”「」（）()';
+
+  bool isWordContent(String ch) => ch.trim().isNotEmpty && !separators.contains(ch);
+
+  if (text[offset].trim().isEmpty) {
+    int? nearestContent;
+    int? nearestNonWs;
+    for (var delta = 1; delta <= 8; delta++) {
+      final fwd = offset + delta;
+      if (fwd < text.length) {
+        if (isWordContent(text[fwd])) {
+          nearestContent = fwd;
+          break;
+        }
+        nearestNonWs ??= text[fwd].trim().isNotEmpty ? fwd : null;
+      }
+      final bwd = offset - delta;
+      if (bwd >= 0) {
+        if (isWordContent(text[bwd])) {
+          nearestContent = bwd;
+          break;
+        }
+        nearestNonWs ??= text[bwd].trim().isNotEmpty ? bwd : null;
+      }
+    }
+    final resolved = nearestContent ?? nearestNonWs;
+    if (resolved == null) return null;
+    offset = resolved;
+  }
+
+  final asciiWordChar = RegExp(r"[A-Za-z0-9_'-]");
+  var start = offset;
+  var end = offset + 1;
+
+  if (asciiWordChar.hasMatch(text[offset])) {
+    while (start > 0 && asciiWordChar.hasMatch(text[start - 1])) {
+      start--;
+    }
+    while (end < text.length && asciiWordChar.hasMatch(text[end])) {
+      end++;
+    }
+  } else {
+    if (separators.contains(text[offset])) {
+      var steps = 0;
+      while (steps < 3 &&
+          end < text.length &&
+          !separators.contains(text[end])) {
+        if (text[end].trim().isNotEmpty) steps++;
+        end++;
+      }
+      if (steps == 0) {
+        while (steps < 3 &&
+            start > 0 &&
+            !separators.contains(text[start - 1])) {
+          if (text[start - 1].trim().isNotEmpty) steps++;
+          start--;
+        }
+      }
+    } else {
+      while (start > 0 && !separators.contains(text[start - 1])) {
+        start--;
+      }
+      while (end < text.length && !separators.contains(text[end])) {
+        end++;
+      }
+      while (start < end && text[start].trim().isEmpty) {
+        start++;
+      }
+      while (end > start && text[end - 1].trim().isEmpty) {
+        end--;
+      }
+      if (end - start > 24) {
+        start = (offset - 7).clamp(start, text.length - 1);
+        end = math.min(text.length, start + 14);
+      }
+    }
+  }
+
+  while (start < end && text[start].trim().isEmpty) {
+    start++;
+  }
+  while (end > start && text[end - 1].trim().isEmpty) {
+    end--;
+  }
+  if (start >= end) return null;
+  return (start: start, end: end);
+}
