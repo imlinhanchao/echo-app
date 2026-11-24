@@ -1945,20 +1945,40 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
     }
     final boxes = _computeSelectionBoxes(paragraph);
     if (boxes.isEmpty) return const SizedBox.shrink();
-    final firstBox = boxes.first;
-    final lastBox = boxes.last;
-    final anchorAbove = paragraph.localToGlobal(
-      Offset((firstBox.left + firstBox.right) / 2, firstBox.top - 8),
-    );
-    final anchorBelow = paragraph.localToGlobal(
-      Offset((lastBox.left + lastBox.right) / 2, lastBox.bottom + 34),
-    );
+
+    var minLeft = boxes.first.left;
+    var minTop = boxes.first.top;
+    var maxRight = boxes.first.right;
+    var maxBottom = boxes.first.bottom;
+    for (final box in boxes.skip(1)) {
+      minLeft = math.min(minLeft, box.left);
+      minTop = math.min(minTop, box.top);
+      maxRight = math.max(maxRight, box.right);
+      maxBottom = math.max(maxBottom, box.bottom);
+    }
+
+    final overlayBox =
+        Overlay.maybeOf(overlayContext)?.context.findRenderObject()
+            as RenderBox?;
+    final topLeft = overlayBox != null
+        ? paragraph.localToGlobal(Offset(minLeft, minTop), ancestor: overlayBox)
+        : paragraph.localToGlobal(Offset(minLeft, minTop));
+    final bottomRight = overlayBox != null
+        ? paragraph.localToGlobal(
+            Offset(maxRight, maxBottom),
+            ancestor: overlayBox,
+          )
+        : paragraph.localToGlobal(Offset(maxRight, maxBottom));
+
+    final mediaPadding = MediaQuery.paddingOf(overlayContext);
+    final selectionRect = Rect.fromPoints(topLeft, bottomRight);
 
     return EchoSelectionToolbar(
-      anchors: TextSelectionToolbarAnchors(
-        primaryAnchor: anchorAbove,
-        secondaryAnchor: anchorBelow,
-      ),
+      selectionRect: selectionRect,
+      safeTop: mediaPadding.top + 4,
+      safeBottom: mediaPadding.bottom + 4,
+      topClearance: mediaPadding.top + kToolbarHeight + 4,
+      bottomClearance: mediaPadding.bottom + 52,
       selectedColor: widget.lastHighlightColor,
       onSelectColor: (color) {
         _clearSelection();

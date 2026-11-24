@@ -11,8 +11,10 @@ import 'package:echo/design/echo_metrics.dart';
 import 'package:echo/design/echo_theme.dart';
 import 'package:echo/design/echo_tokens.dart';
 import 'package:echo/features/auth/auth_controller.dart';
+import 'package:echo/features/reader/reader_annotation_sheets.dart';
 import 'package:echo/features/reader/reader_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -319,6 +321,223 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('第3章第1段'), findsOneWidget);
+    });
+
+    testWidgets(
+      'selection toolbar never overlaps selected text or handles with status bar padding',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(360, 720);
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.padding = const FakeViewPadding(top: 44, bottom: 24);
+        tester.view.viewPadding = const FakeViewPadding(top: 44, bottom: 24);
+        addTearDown(tester.view.reset);
+        ChapterPaginationCache.instance.clear();
+
+        final api = await makeApi();
+        final readingStore = MemoryReadingStore();
+        final annotationStore = MemoryReadingAnnotationStore();
+
+        await tester.pumpWidget(
+          buildReaderApp(
+            api: api,
+            readingStore: readingStore,
+            annotationStore: annotationStore,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final textFinder = find.byKey(const Key('reader_page_text_0'));
+        final textRect = tester.getRect(textFinder);
+        final paragraph = tester.renderObject<RenderParagraph>(
+          find.descendant(of: textFinder, matching: find.byType(RichText)),
+        );
+
+        Rect lineRectAt(Offset globalHit) {
+          final pos = paragraph.getPositionForOffset(
+            paragraph.globalToLocal(globalHit),
+          );
+          final nextOffset = (pos.offset + 1).clamp(
+            0,
+            paragraph.text.toPlainText().length,
+          );
+          final boxes = paragraph.getBoxesForSelection(
+            TextSelection(baseOffset: pos.offset, extentOffset: nextOffset),
+          );
+          expect(boxes, isNotEmpty);
+          final box = boxes.first;
+          return Rect.fromPoints(
+            paragraph.localToGlobal(Offset(box.left, box.top)),
+            paragraph.localToGlobal(Offset(box.right, box.bottom)),
+          );
+        }
+
+        // 1. Top-line selection: too close to AppBar above -> must place below text & handles.
+        final topHit = Offset(textRect.left + 48, textRect.top + 18);
+        final topLineRect = lineRectAt(topHit);
+        await tester.longPressAt(topHit);
+        await tester.pumpAndSettle();
+
+        final toolbarFinder = find.byKey(const Key('reader_selection_toolbar'));
+        expect(toolbarFinder, findsOneWidget);
+        final topToolbarRect = tester.getRect(toolbarFinder);
+        final topProtectedArea = Rect.fromLTRB(
+          0,
+          topLineRect.top,
+          360,
+          topLineRect.bottom + 32,
+        );
+        expect(topToolbarRect.overlaps(topProtectedArea), isFalse);
+        expect(topToolbarRect.top, greaterThanOrEqualTo(topLineRect.bottom + 32));
+        expect(topToolbarRect.left, greaterThanOrEqualTo(12.0));
+        expect(topToolbarRect.right, lessThanOrEqualTo(348.0));
+        expect(topToolbarRect.bottom, lessThanOrEqualTo(720.0 - 28.0));
+
+        // Clear selection cleanly via highlight action.
+        await tester.tap(find.byKey(const Key('selection_action_highlight')));
+        await tester.pumpAndSettle();
+        expect(toolbarFinder, findsNothing);
+
+        // 2. Lower/middle-line selection: plenty of room above -> must place above text.
+        final midHit = Offset(textRect.left + 80, textRect.top + 220);
+        final midLineRect = lineRectAt(midHit);
+        await tester.longPressAt(midHit);
+        await tester.pumpAndSettle();
+
+        expect(toolbarFinder, findsOneWidget);
+        final midToolbarRect = tester.getRect(toolbarFinder);
+        final midProtectedArea = Rect.fromLTRB(
+          0,
+          midLineRect.top,
+          360,
+          midLineRect.bottom + 32,
+        );
+        expect(midToolbarRect.overlaps(midProtectedArea), isFalse);
+        expect(midToolbarRect.bottom, lessThanOrEqualTo(midLineRect.top - 8));
+        expect(midToolbarRect.top, greaterThanOrEqualTo(48.0));
+        expect(midToolbarRect.left, greaterThanOrEqualTo(12.0));
+        expect(midToolbarRect.right, lessThanOrEqualTo(348.0));
+      },
+    );
+  });
+
+  group('computeSelectionToolbarOffset', () {
+    const overlaySize = Size(360, 720);
+    const childSize = Size(272, 82);
+    const safeTop = 48.0; // 44dp status bar + 4dp safety margin
+    const safeBottom = 28.0; // 24dp nav inset + 4dp safety margin
+    const contentTop = 104.0; // 44dp status bar + 56dp AppBar + 4dp gap
+    const contentBottom = 76.0; // 24dp nav inset + 52dp bottom bar
+
+    test('places toolbar above middle selection inside content bounds', () {
+      const sel = Rect.fromLTRB(40, 260, 320, 340);
+      final offset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: sel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      final rect = offset & childSize;
+      expect(rect.overlaps(sel), isFalse);
+      expect(rect.bottom, closeTo(sel.top - 12.0, 0.01));
+      expect(rect.top, greaterThanOrEqualTo(contentTop));
+    });
+
+    test('places toolbar below top-line selection clearing handles', () {
+      const sel = Rect.fromLTRB(40, 120, 320, 170);
+      final offset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: sel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      final rect = offset & childSize;
+      expect(rect.overlaps(sel), isFalse);
+      expect(rect.top, closeTo(sel.bottom + 38.0, 0.01));
+      expect(rect.bottom, lessThanOrEqualTo(overlaySize.height - contentBottom));
+    });
+
+    test('borrows AppBar area before overlapping tall selection when bottom is tight', () {
+      const sel = Rect.fromLTRB(40, 145, 320, 580);
+      final offset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: sel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      final rect = offset & childSize;
+      expect(rect.overlaps(sel), isFalse);
+      expect(rect.top, greaterThanOrEqualTo(safeTop));
+      expect(rect.bottom, lessThan(sel.top));
+    });
+
+    test('borrows bottom-bar area when tall selection reaches near AppBar', () {
+      const sel = Rect.fromLTRB(40, 120, 320, 565);
+      final offset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: sel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      final rect = offset & childSize;
+      expect(rect.overlaps(sel), isFalse);
+      expect(rect.top, greaterThan(sel.bottom));
+      expect(rect.bottom, lessThanOrEqualTo(overlaySize.height - safeBottom));
+    });
+
+    test('falls back safely inside safe area when selection spans whole viewport', () {
+      const sel = Rect.fromLTRB(20, 108, 340, 635);
+      final offset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: sel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      expect(offset.dy, closeTo(safeTop, 0.01));
+      expect(
+        offset.dy + childSize.height,
+        lessThanOrEqualTo(overlaySize.height - safeBottom),
+      );
+    });
+
+    test('clamps horizontal coordinates within 12dp screen margins', () {
+      const leftSel = Rect.fromLTRB(16, 260, 48, 284);
+      final leftOffset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: leftSel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      expect(leftOffset.dx, closeTo(12.0, 0.01));
+
+      const rightSel = Rect.fromLTRB(310, 260, 344, 284);
+      final rightOffset = computeSelectionToolbarOffset(
+        overlaySize: overlaySize,
+        childSize: childSize,
+        selectionRect: rightSel,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: contentTop,
+        contentBottom: contentBottom,
+      );
+      expect(rightOffset.dx + childSize.width, closeTo(348.0, 0.01));
     });
   });
 }

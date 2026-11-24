@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -151,11 +152,117 @@ class _ToolbarActionButton extends StatelessWidget {
   }
 }
 
+/// 在 Overlay 坐标系下计算无遮挡的选词浮动操作栏左上角坐标。
+///
+/// 优先放在正文内容区内的选区上方（留出 [gapAbove] 间距）或选区下方
+/// （留出底部水滴手柄高度 [gapBelow]），其次才借用顶栏或底栏外侧安全区域，
+/// 避免工具栏覆盖被选中的文本与拖动手柄。
+@visibleForTesting
+Offset computeSelectionToolbarOffset({
+  required Size overlaySize,
+  required Size childSize,
+  required Rect selectionRect,
+  required double safeTop,
+  required double safeBottom,
+  required double contentTop,
+  required double contentBottom,
+  double horizontalMargin = 12.0,
+  double gapAbove = 12.0,
+  double gapBelow = 38.0,
+}) {
+  final maxX = math.max(
+    horizontalMargin,
+    overlaySize.width - horizontalMargin - childSize.width,
+  );
+  final x = (selectionRect.center.dx - childSize.width / 2).clamp(
+    horizontalMargin,
+    maxX,
+  );
+
+  final aboveY = selectionRect.top - gapAbove - childSize.height;
+  final belowY = selectionRect.bottom + gapBelow;
+  final contentMaxBottom = overlaySize.height - contentBottom;
+  final safeMaxBottom = overlaySize.height - safeBottom;
+
+  final double y;
+  if (aboveY >= contentTop && aboveY + childSize.height <= safeMaxBottom) {
+    y = aboveY;
+  } else if (belowY >= safeTop &&
+      belowY + childSize.height <= contentMaxBottom) {
+    y = belowY;
+  } else if (aboveY >= safeTop &&
+      aboveY + childSize.height <= safeMaxBottom) {
+    y = aboveY;
+  } else if (belowY >= safeTop &&
+      belowY + childSize.height <= safeMaxBottom) {
+    y = belowY;
+  } else {
+    final maxY = math.max(
+      safeTop,
+      safeMaxBottom - childSize.height,
+    );
+    y = safeTop.clamp(safeTop, maxY);
+  }
+  return Offset(x.toDouble(), y.toDouble());
+}
+
+class _SelectionToolbarLayoutDelegate extends SingleChildLayoutDelegate {
+  const _SelectionToolbarLayoutDelegate({
+    required this.selectionRect,
+    required this.safeTop,
+    required this.safeBottom,
+    required this.contentTop,
+    required this.contentBottom,
+  });
+
+  final Rect selectionRect;
+  final double safeTop;
+  final double safeBottom;
+  final double contentTop;
+  final double contentBottom;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    return BoxConstraints.loose(
+      Size(
+        math.max(0.0, constraints.maxWidth - 24.0),
+        math.max(0.0, constraints.maxHeight - safeTop - safeBottom),
+      ),
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    return computeSelectionToolbarOffset(
+      overlaySize: size,
+      childSize: childSize,
+      selectionRect: selectionRect,
+      safeTop: safeTop,
+      safeBottom: safeBottom,
+      contentTop: contentTop,
+      contentBottom: contentBottom,
+    );
+  }
+
+  @override
+  bool shouldRelayout(_SelectionToolbarLayoutDelegate oldDelegate) {
+    return oldDelegate.selectionRect != selectionRect ||
+        oldDelegate.safeTop != safeTop ||
+        oldDelegate.safeBottom != safeBottom ||
+        oldDelegate.contentTop != contentTop ||
+        oldDelegate.contentBottom != contentBottom;
+  }
+}
+
 /// 极简书房选词浮动操作栏：提供 5 色快速划线、写笔记、复制与从此朗读。
 class EchoSelectionToolbar extends StatelessWidget {
   const EchoSelectionToolbar({
     super.key,
-    required this.anchors,
+    required this.selectionRect,
+    required this.safeTop,
+    required this.safeBottom,
+    required this.topClearance,
+    required this.bottomClearance,
     required this.selectedColor,
     required this.onSelectColor,
     required this.onHighlight,
@@ -164,7 +271,11 @@ class EchoSelectionToolbar extends StatelessWidget {
     this.onListenFromHere,
   });
 
-  final TextSelectionToolbarAnchors anchors;
+  final Rect selectionRect;
+  final double safeTop;
+  final double safeBottom;
+  final double topClearance;
+  final double bottomClearance;
   final ReadingHighlightColor selectedColor;
   final ValueChanged<ReadingHighlightColor> onSelectColor;
   final VoidCallback onHighlight;
@@ -181,87 +292,82 @@ class EchoSelectionToolbar extends StatelessWidget {
         ? Color.lerp(tokens.surfaceElevated, tokens.surfaceBase, 0.2)!
         : tokens.surfaceElevated;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        12,
-        MediaQuery.paddingOf(context).top + 8,
-        12,
-        8,
+    return CustomSingleChildLayout(
+      delegate: _SelectionToolbarLayoutDelegate(
+        selectionRect: selectionRect,
+        safeTop: safeTop,
+        safeBottom: safeBottom,
+        contentTop: topClearance,
+        contentBottom: bottomClearance,
       ),
-      child: CustomSingleChildLayout(
-        delegate: TextSelectionToolbarLayoutDelegate(
-          anchorAbove: anchors.primaryAnchor,
-          anchorBelow: anchors.secondaryAnchor ?? anchors.primaryAnchor,
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            key: const Key('reader_selection_toolbar'),
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: hairline, width: 0.8),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.14),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _AnnotationColorRow(
-                  selectedColor: selectedColor,
-                  keyPrefix: 'selection_color_',
-                  dotSize: 18,
-                  spacing: 8,
-                  onSelect: onSelectColor,
-                ),
-                const SizedBox(height: 6),
-                SizedBox(
-                  width: onListenFromHere != null ? 248 : 190,
-                  child: Divider(height: 1, thickness: 0.6, color: hairline),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          key: const Key('reader_selection_toolbar'),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: hairline, width: 0.8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.14),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _AnnotationColorRow(
+                selectedColor: selectedColor,
+                keyPrefix: 'selection_color_',
+                dotSize: 18,
+                spacing: 8,
+                onSelect: onSelectColor,
+              ),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: onListenFromHere != null ? 248 : 190,
+                child: Divider(height: 1, thickness: 0.6, color: hairline),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ToolbarActionButton(
+                    buttonKey: const Key('selection_action_highlight'),
+                    icon: Icons.border_color_outlined,
+                    label: '划线',
+                    color: tokens.primary,
+                    onTap: onHighlight,
+                  ),
+                  _ToolbarActionButton(
+                    buttonKey: const Key('selection_action_note'),
+                    icon: Icons.edit_note_outlined,
+                    label: '写笔记',
+                    color: tokens.textPrimary,
+                    onTap: onNote,
+                  ),
+                  _ToolbarActionButton(
+                    buttonKey: const Key('selection_action_copy'),
+                    icon: Icons.content_copy_rounded,
+                    label: '复制',
+                    color: tokens.textPrimary,
+                    onTap: onCopy,
+                  ),
+                  if (onListenFromHere != null)
                     _ToolbarActionButton(
-                      buttonKey: const Key('selection_action_highlight'),
-                      icon: Icons.border_color_outlined,
-                      label: '划线',
-                      color: tokens.primary,
-                      onTap: onHighlight,
-                    ),
-                    _ToolbarActionButton(
-                      buttonKey: const Key('selection_action_note'),
-                      icon: Icons.edit_note_outlined,
-                      label: '写笔记',
+                      buttonKey: const Key('selection_action_listen'),
+                      icon: Icons.headphones_outlined,
+                      label: '从此朗读',
                       color: tokens.textPrimary,
-                      onTap: onNote,
+                      onTap: onListenFromHere!,
                     ),
-                    _ToolbarActionButton(
-                      buttonKey: const Key('selection_action_copy'),
-                      icon: Icons.content_copy_rounded,
-                      label: '复制',
-                      color: tokens.textPrimary,
-                      onTap: onCopy,
-                    ),
-                    if (onListenFromHere != null)
-                      _ToolbarActionButton(
-                        buttonKey: const Key('selection_action_listen'),
-                        icon: Icons.headphones_outlined,
-                        label: '从此朗读',
-                        color: tokens.textPrimary,
-                        onTap: onListenFromHere!,
-                      ),
-                  ],
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
