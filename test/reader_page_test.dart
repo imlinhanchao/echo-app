@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -7,11 +8,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:echo/core/api/echo_api.dart';
 import 'package:echo/core/api/models.dart';
+import 'package:echo/core/audio/chunked_player_controller.dart';
+import 'package:echo/core/audio/live_tts_player_controller.dart';
 import 'package:echo/core/auth/token_store.dart';
+import 'package:echo/core/books/local_library_store.dart';
 import 'package:echo/core/reader/reading_store.dart';
 import 'package:echo/core/reader/screen_keep_alive.dart';
 import 'package:echo/core/settings/standalone_config_store.dart';
 import 'package:echo/core/tts/sentence_splitter.dart';
+import 'package:echo/core/tts/sherpa_tts_engine.dart';
+import 'package:echo/core/tts/tts_model_catalog.dart';
+import 'package:echo/core/tts/tts_model_manager.dart';
+import 'package:echo/design/echo_metrics.dart';
 import 'package:echo/design/echo_theme.dart';
 import 'package:echo/design/echo_tokens.dart';
 import 'package:echo/features/auth/auth_controller.dart';
@@ -376,6 +384,120 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('第 3 章'), findsWidgets);
+    });
+
+    testWidgets('Material 3 主题下排版实测不溢出且边听边看控制融入单行底栏', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 720);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      ChapterPaginationCache.instance.clear();
+
+      final libDir = Directory.systemTemp.createTempSync('echo_rdr_bar_lib_');
+      final cacheDir = Directory.systemTemp.createTempSync('echo_rdr_bar_cache_');
+      addTearDown(() {
+        if (libDir.existsSync()) libDir.deleteSync(recursive: true);
+        if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
+      });
+
+      final tokenStore = MemoryTokenStore();
+      await tokenStore.write('echo_pat_reader');
+      final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+        ..httpClientAdapter = _ReaderStubAdapter();
+      final api = EchoApi(dio: dio, tokenStore: tokenStore);
+      final readingStore = MemoryReadingStore();
+
+      final longChapter = List<String>.generate(
+        24,
+        (i) => '第${i + 1}段：乱哄哄的教室里惟有一个女生在认真学习课文。她二十一二年纪，正凝神细声诵读课文。',
+      ).join('\n\n');
+      final libStore = LocalLibraryStore(rootDir: libDir);
+      final localBook = await tester.runAsync(
+        () => libStore.importBytes(
+          Uint8List.fromList(utf8.encode('第一章 一地鸡毛\n\n$longChapter')),
+          filename: 'ydjm.txt',
+        ),
+      );
+
+      final fakeTts = FakeOnDeviceTtsEngine();
+      final fakeAudio = FakeAudioEngine();
+      addTearDown(fakeAudio.dispose);
+      const fakeModel = ResolvedTtsModelPaths(
+        spec: TtsModelCatalog.meloTtsZhEn,
+        rootDir: '/tmp/fake_melo',
+        modelPath: '/tmp/fake_melo/model.onnx',
+        tokensPath: '/tmp/fake_melo/tokens.txt',
+      );
+      final liveCtrl = LiveTtsPlayerController(
+        libraryStore: libStore,
+        ttsEngine: fakeTts,
+        audioEngine: fakeAudio,
+        readingStore: readingStore,
+        resolveActiveModel: () => fakeModel,
+        readConfig: () => const StandaloneConfig(
+          activeTtsModelId: 'vits-melo-tts-zh_en',
+          defaultTtsSpeed: 1.0,
+        ),
+        cacheDirOverride: cacheDir,
+      );
+      await tester.runAsync(() => liveCtrl.playBookChapter(localBook!));
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            echoApiProvider.overrideWithValue(api),
+            readingStoreProvider.overrideWithValue(readingStore),
+            liveTtsPlayerProvider.overrideWith((_) => liveCtrl),
+          ],
+          child: MaterialApp(
+            theme: buildEchoTheme(Brightness.dark, darkTokens),
+            home: ReaderPageView(book: localBook!),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 1. 末行不被底栏截断：实测 TextPainter 高度 <= 渲染容器去除内边距后的可用高度
+      final pageViewSize = tester.getSize(find.byKey(const Key('reader_pageview')));
+      final pageTextWidget = tester.widget<Text>(
+        find.byKey(const Key('reader_page_text_0')),
+      );
+      final maxTextWidth = pageViewSize.width - EchoMetrics.space3 * 2;
+      final maxTextHeight = pageViewSize.height - EchoMetrics.space2 * 2;
+      final measured = TextPainter(
+        text: pageTextWidget.textSpan ??
+            TextSpan(
+              text: pageTextWidget.data ?? '',
+              style: pageTextWidget.style,
+            ),
+        textDirection: TextDirection.ltr,
+        textHeightBehavior: pageTextWidget.textHeightBehavior,
+      )..layout(maxWidth: maxTextWidth);
+      expect(measured.height, lessThanOrEqualTo(maxTextHeight));
+
+      // 2. 底栏融入听书控制按钮后仍保持紧凑单行（<= 64dp）
+      final barSizeWithLive = tester.getSize(
+        find.byKey(const Key('reader_bottom_bar')),
+      );
+      expect(barSizeWithLive.height, lessThanOrEqualTo(64.0));
+      expect(find.byKey(const Key('reader_page_indicator')), findsOneWidget);
+      expect(find.byKey(const Key('reader_global_indicator')), findsOneWidget);
+      expect(find.byKey(const Key('reader_live_control_bar')), findsOneWidget);
+      expect(find.byKey(const Key('reader_live_prev_sentence')), findsOneWidget);
+      expect(find.byKey(const Key('reader_live_toggle_play')), findsOneWidget);
+      expect(find.byKey(const Key('reader_live_next_sentence')), findsOneWidget);
+      expect(find.byKey(const Key('reader_live_stop')), findsOneWidget);
+
+      // 点击停止后底栏高度保持一致（无布局跳变）
+      await tester.tap(find.byKey(const Key('reader_live_stop')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('reader_live_control_bar')), findsNothing);
+      final barSizeAfterStop = tester.getSize(
+        find.byKey(const Key('reader_bottom_bar')),
+      );
+      expect(barSizeAfterStop.height, equals(barSizeWithLive.height));
     });
   });
 }

@@ -215,9 +215,13 @@ class _ChapterPaginator {
     required this.maxHeight,
     required this.contentStart,
     required this.contentEnd,
+    Locale? locale,
+    TextHeightBehavior? textHeightBehavior,
   }) : _painter = TextPainter(
          textDirection: TextDirection.ltr,
          textScaler: textScaler,
+         locale: locale,
+         textHeightBehavior: textHeightBehavior,
        ),
        _maxCandidateChars = _computeMaxCandidateChars(
          style: style,
@@ -235,6 +239,8 @@ class _ChapterPaginator {
     required TextScaler textScaler,
     required double maxWidth,
     required double maxHeight,
+    Locale? locale,
+    TextHeightBehavior? textHeightBehavior,
   }) {
     var start = 0;
     while (start < text.length && text[start].trim().isEmpty) {
@@ -254,6 +260,8 @@ class _ChapterPaginator {
       maxHeight: maxHeight,
       contentStart: start,
       contentEnd: end,
+      locale: locale,
+      textHeightBehavior: textHeightBehavior,
     );
   }
 
@@ -415,6 +423,8 @@ List<ReaderPage> paginateChapterBySize({
   required TextScaler textScaler,
   required double maxWidth,
   required double maxHeight,
+  Locale? locale,
+  TextHeightBehavior? textHeightBehavior,
 }) {
   final paginator = _ChapterPaginator(
     chapterIndex: chapterIndex,
@@ -424,6 +434,8 @@ List<ReaderPage> paginateChapterBySize({
     textScaler: textScaler,
     maxWidth: maxWidth,
     maxHeight: maxHeight,
+    locale: locale,
+    textHeightBehavior: textHeightBehavior,
   );
   while (!paginator.isDone) {
     paginator.stepPage();
@@ -440,6 +452,8 @@ Future<List<ReaderPage>> paginateChapterBySizeAsync({
   required TextScaler textScaler,
   required double maxWidth,
   required double maxHeight,
+  Locale? locale,
+  TextHeightBehavior? textHeightBehavior,
   bool Function()? isCancelled,
 }) async {
   final paginator = _ChapterPaginator(
@@ -450,6 +464,8 @@ Future<List<ReaderPage>> paginateChapterBySizeAsync({
     textScaler: textScaler,
     maxWidth: maxWidth,
     maxHeight: maxHeight,
+    locale: locale,
+    textHeightBehavior: textHeightBehavior,
   );
   final sw = Stopwatch()..start();
   while (!paginator.isDone) {

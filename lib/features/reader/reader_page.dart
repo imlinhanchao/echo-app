@@ -80,6 +80,11 @@ class ReaderPageView extends ConsumerStatefulWidget {
 
 enum _ReaderTheme { warmDark, pureBlack, lightPaper }
 
+const TextHeightBehavior _kReaderTextHeightBehavior = TextHeightBehavior(
+  applyHeightToFirstAscent: true,
+  applyHeightToLastDescent: true,
+);
+
 class _ReaderPageState extends ConsumerState<ReaderPageView> {
   PageController _pageController = PageController();
   int _pageViewEpoch = 0;
@@ -192,6 +197,12 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     fontFamily: 'serif',
     fontSize: _fontSize,
     height: _lineHeight,
+    letterSpacing: 0.0,
+    wordSpacing: 0.0,
+    fontWeight: FontWeight.normal,
+    fontStyle: FontStyle.normal,
+    decoration: TextDecoration.none,
+    leadingDistribution: TextLeadingDistribution.even,
     color: _themeColors(tokens).fg,
   );
 
@@ -243,8 +254,9 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     _pendingJumpToLastPage = false;
     _layoutSize = size;
     final gen = ++_paginationGen;
-    final style = _textStyle(tokens);
+    final style = DefaultTextStyle.of(context).style.merge(_textStyle(tokens));
     final textScaler = MediaQuery.textScalerOf(context);
+    final locale = Localizations.maybeLocaleOf(context);
     final textScaleFactor = textScaler.scale(10.0) / 10.0;
 
     final arrayIdx = _currentChapterArrayIdx();
@@ -273,6 +285,8 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         textScaler: textScaler,
         maxWidth: size.width,
         maxHeight: size.height,
+        locale: locale,
+        textHeightBehavior: _kReaderTextHeightBehavior,
         isCancelled: () => !mounted || gen != _paginationGen,
       );
       if (!mounted || gen != _paginationGen) return;
@@ -833,82 +847,162 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
   }
 
-  Widget _buildLiveControlBar(
+  Widget _buildCompactLiveControls(
     EchoTokens tokens,
-    TextTheme textTheme,
     ({Color bg, Color fg, Color secondary}) palette,
     LiveTtsState liveState,
   ) {
     final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
-    return Container(
+    const btnConstraints = BoxConstraints.tightFor(width: 34, height: 34);
+    return Row(
       key: const Key('reader_live_control_bar'),
-      padding: const EdgeInsets.symmetric(
-        horizontal: EchoMetrics.space2,
-        vertical: 4,
-      ),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: const Key('reader_live_prev_sentence'),
+          tooltip: '上一句',
+          padding: EdgeInsets.zero,
+          constraints: btnConstraints,
+          visualDensity: VisualDensity.compact,
+          onPressed: liveCtrl.prevSentence,
+          icon: Icon(Icons.skip_previous_rounded, size: 20, color: palette.fg),
+        ),
+        IconButton(
+          key: const Key('reader_live_toggle_play'),
+          tooltip: liveState.isPlaying ? '暂停朗读' : '继续朗读',
+          padding: EdgeInsets.zero,
+          constraints: btnConstraints,
+          visualDensity: VisualDensity.compact,
+          onPressed: liveCtrl.togglePlayPause,
+          icon: liveState.isSynthesizing
+              ? SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: tokens.primary,
+                  ),
+                )
+              : Icon(
+                  liveState.isPlaying
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_filled,
+                  size: 22,
+                  color: tokens.primary,
+                ),
+        ),
+        IconButton(
+          key: const Key('reader_live_next_sentence'),
+          tooltip: '下一句',
+          padding: EdgeInsets.zero,
+          constraints: btnConstraints,
+          visualDensity: VisualDensity.compact,
+          onPressed: liveCtrl.nextSentence,
+          icon: Icon(Icons.skip_next_rounded, size: 20, color: palette.fg),
+        ),
+        IconButton(
+          key: const Key('reader_live_stop'),
+          tooltip: '停止听书',
+          padding: EdgeInsets.zero,
+          constraints: btnConstraints,
+          visualDensity: VisualDensity.compact,
+          onPressed: liveCtrl.stop,
+          icon: Icon(Icons.close, size: 18, color: palette.secondary),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUnifiedBottomBar({
+    required EchoTokens tokens,
+    required TextTheme textTheme,
+    required ({Color bg, Color fg, Color secondary}) palette,
+    required int currentArrayIdx,
+    required ReaderPage? page,
+    required int bookPct,
+    required bool isLiveThisBook,
+    required LiveTtsState liveState,
+    required bool isThisBookLoaded,
+    required bool isPlayingThisBook,
+    required bool hasAudio,
+  }) {
+    final compactLabelStyle = textTheme.labelSmall?.copyWith(
+      color: palette.secondary,
+    );
+    return Container(
+      key: const Key('reader_bottom_bar'),
       decoration: BoxDecoration(
         color: palette.bg,
         border: Border(
-          top: BorderSide(color: palette.secondary.withValues(alpha: 0.2)),
+          top: BorderSide(color: palette.secondary.withValues(alpha: 0.16)),
         ),
       ),
-      child: Row(
-        children: [
-          Icon(Icons.graphic_eq, size: 16, color: tokens.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              liveState.currentCueText.isNotEmpty
-                  ? liveState.currentCueText
-                  : (liveState.isSynthesizing ? '正在合成语音...' : '实时朗读中'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: textTheme.bodySmall?.copyWith(color: palette.secondary),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 48,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: EchoMetrics.space2),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          '第 ${currentArrayIdx + 1}/${_chapters.length} 章 · '
+                          '${page?.pageInChapter ?? 1}/${page?.pageCountInChapter ?? 1} 页',
+                          key: const Key('reader_page_indicator'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: compactLabelStyle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '全书 $bookPct%',
+                        key: const Key('reader_global_indicator'),
+                        style: compactLabelStyle,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                if (isLiveThisBook)
+                  _buildCompactLiveControls(tokens, palette, liveState)
+                else if (isThisBookLoaded)
+                  TextButton.icon(
+                    key: const Key('reader_open_player'),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => openPlayer(context),
+                    icon: Icon(
+                      isPlayingThisBook
+                          ? Icons.graphic_eq
+                          : Icons.play_circle_outline,
+                      size: 16,
+                    ),
+                    label: const Text('全屏播放器'),
+                  )
+                else if (hasAudio)
+                  TextButton.icon(
+                    key: const Key('reader_listen_here'),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => _listenFromHere(),
+                    icon: const Icon(Icons.play_circle_outline, size: 16),
+                    label: const Text('边听边看'),
+                  ),
+              ],
             ),
           ),
-          IconButton(
-            key: const Key('reader_live_prev_sentence'),
-            tooltip: '上一句',
-            visualDensity: VisualDensity.compact,
-            onPressed: liveCtrl.prevSentence,
-            icon: Icon(Icons.skip_previous_rounded, color: palette.fg),
-          ),
-          IconButton(
-            key: const Key('reader_live_toggle_play'),
-            tooltip: liveState.isPlaying ? '暂停朗读' : '继续朗读',
-            visualDensity: VisualDensity.compact,
-            onPressed: liveCtrl.togglePlayPause,
-            icon: liveState.isSynthesizing
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: tokens.primary,
-                    ),
-                  )
-                : Icon(
-                    liveState.isPlaying
-                        ? Icons.pause_circle_filled
-                        : Icons.play_circle_filled,
-                    color: tokens.primary,
-                  ),
-          ),
-          IconButton(
-            key: const Key('reader_live_next_sentence'),
-            tooltip: '下一句',
-            visualDensity: VisualDensity.compact,
-            onPressed: liveCtrl.nextSentence,
-            icon: Icon(Icons.skip_next_rounded, color: palette.fg),
-          ),
-          IconButton(
-            key: const Key('reader_live_stop'),
-            tooltip: '停止听书',
-            visualDensity: VisualDensity.compact,
-            onPressed: liveCtrl.stop,
-            icon: Icon(Icons.close, size: 18, color: palette.secondary),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1073,7 +1167,9 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
               pages: _pages,
               pageViewEpoch: _pageViewEpoch,
               pageController: _pageController,
-              textStyle: _textStyle(tokens),
+              textStyle: DefaultTextStyle.of(
+                context,
+              ).style.merge(_textStyle(tokens)),
               highlightColor: tokens.readingHighlight,
               activeSentence: activeSentence,
               activeCueText: activeCueText,
@@ -1084,61 +1180,18 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
             ),
       bottomNavigationBar: _loading || _pages.isEmpty
           ? null
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isLiveThisBook)
-                  _buildLiveControlBar(tokens, textTheme, palette, liveState),
-                BottomAppBar(
-                  color: palette.bg,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '第 ${currentArrayIdx + 1}/${_chapters.length} 章 · '
-                          '${page?.pageInChapter ?? 1}/${page?.pageCountInChapter ?? 1} 页',
-                          key: const Key('reader_page_indicator'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: textTheme.labelMedium?.copyWith(
-                            color: palette.secondary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '全书 $bookPct%',
-                        key: const Key('reader_global_indicator'),
-                        style: textTheme.labelMedium?.copyWith(
-                          color: palette.secondary,
-                        ),
-                      ),
-                      if (isThisBookLoaded)
-                        TextButton.icon(
-                          key: const Key('reader_open_player'),
-                          onPressed: () => openPlayer(context),
-                          icon: Icon(
-                            isPlayingThisBook
-                                ? Icons.graphic_eq
-                                : Icons.play_circle_outline,
-                            size: 18,
-                          ),
-                          label: const Text('全屏播放器'),
-                        )
-                      else if (hasAudio && !isLiveThisBook)
-                        TextButton.icon(
-                          key: const Key('reader_listen_here'),
-                          onPressed: () => _listenFromHere(),
-                          icon: const Icon(Icons.play_circle_outline, size: 18),
-                          label: const Text('边听边看'),
-                        )
-                      else
-                        const SizedBox.shrink(),
-                    ],
-                  ),
-                ),
-              ],
+          : _buildUnifiedBottomBar(
+              tokens: tokens,
+              textTheme: textTheme,
+              palette: palette,
+              currentArrayIdx: currentArrayIdx,
+              page: page,
+              bookPct: bookPct,
+              isLiveThisBook: isLiveThisBook,
+              liveState: liveState,
+              isThisBookLoaded: isThisBookLoaded,
+              isPlayingThisBook: isPlayingThisBook,
+              hasAudio: hasAudio,
             ),
     );
   }
@@ -1178,7 +1231,7 @@ class _ReaderBody extends StatelessWidget {
     EchoMetrics.space3,
     EchoMetrics.space2,
     EchoMetrics.space3,
-    EchoMetrics.space1,
+    EchoMetrics.space2,
   );
 
   ({int start, int end})? _resolveHighlightSpan(ReaderPage page) {
@@ -1210,10 +1263,12 @@ class _ReaderBody extends StatelessWidget {
         page.text,
         key: Key('reader_page_text_$index'),
         style: textStyle,
+        textHeightBehavior: _kReaderTextHeightBehavior,
       );
     }
     return Text.rich(
       key: Key('reader_page_text_$index'),
+      textHeightBehavior: _kReaderTextHeightBehavior,
       TextSpan(
         style: textStyle,
         children: <InlineSpan>[
@@ -1239,8 +1294,8 @@ class _ReaderBody extends StatelessWidget {
             ? _maxReadingWidth
             : constraints.maxWidth;
         final available = Size(
-          effectiveWidth - _insets.horizontal,
-          constraints.maxHeight - _insets.vertical,
+          math.max(0.0, effectiveWidth - _insets.horizontal),
+          math.max(0.0, constraints.maxHeight - _insets.vertical - 4.0),
         );
         // 尺寸变化（首次布局/旋转/字号/行距）触发按章重新分页
         if (layoutSize == null ||
