@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/icon/app_icon.png" alt="Echo Logo" width="112" height="112" />
+  <img src="assets/icon/logo.svg" alt="Echo Logo" width="112" height="112" />
   <h1>Echo · 回声</h1>
   <p>静默阅读，随时聆听 —— 端侧离线语音驱动的跨平台听看一体书客户端</p>
 
