@@ -354,12 +354,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang \
+            lld \
             cmake \
             ninja-build \
             pkg-config \
             libgtk-3-dev \
             liblzma-dev \
-            libsecret-1-dev
+            libsecret-1-dev \
+            libstdc++-12-dev \
+            libstdc++-13-dev \
+            libstdc++-14-dev
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -376,6 +380,9 @@ jobs:
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
         run: |
           set -euo pipefail
+          clang++ --version
+          cmake --version
+          pkg-config --modversion gtk+-3.0 libsecret-1
           flutter pub get
           flutter build linux --release \
             --build-name="${VERSION}" \

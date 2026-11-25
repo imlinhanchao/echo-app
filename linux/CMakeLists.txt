@@ -78,6 +78,15 @@ set(CMAKE_DISABLE_FIND_PACKAGE_JNI ON CACHE BOOL "Skip optional JNI build on des
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Third-party plugins (e.g. flutter_secure_storage_linux's bundled nlohmann/json.hpp)
+# emit deprecation warnings under newer Clang/GCC toolchains; keep strict -Wall -Werror
+# for the app runner while allowing warnings in third-party plugin targets.
+foreach(plugin ${FLUTTER_PLUGIN_LIST})
+  if(TARGET ${plugin}_plugin)
+    target_compile_options(${plugin}_plugin PRIVATE -Wno-error)
+  endif()
+endforeach()
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
