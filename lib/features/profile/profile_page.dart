@@ -285,7 +285,7 @@ class ProfilePage extends ConsumerWidget {
               ),
               title: const Text('关于回声'),
               subtitle: Text(
-                '回声 · 单机版 v0.3.9',
+                '回声 · 单机版 v0.3.10',
                 style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
               ),
             ),
