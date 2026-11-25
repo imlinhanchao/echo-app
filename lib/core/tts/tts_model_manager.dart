@@ -272,6 +272,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   final Map<String, CancelToken> _cancelTokens = <String, CancelToken>{};
   final Set<String> _autoResumeModelIds = <String>{};
   final Set<String> _userPausedModelIds = <String>{};
+  Future<void>? _activeRefresh;
 
   TtsModelsState get currentState => state;
 
@@ -338,7 +339,28 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     }
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh() {
+    final prev = _activeRefresh;
+    final current = _runSerializedRefresh(prev);
+    _activeRefresh = current;
+    return current.whenComplete(() {
+      if (identical(_activeRefresh, current)) {
+        _activeRefresh = null;
+      }
+    });
+  }
+
+  Future<void> _runSerializedRefresh(Future<void>? prev) async {
+    if (prev != null) {
+      try {
+        await prev;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await _refreshInternal();
+  }
+
+  Future<void> _refreshInternal() async {
     final sysInfo = await _fetchSystemTtsInfo();
     final Directory root;
     try {
@@ -363,6 +385,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     }
     final map = <String, TtsModelStatusEntry>{};
     for (final spec in TtsModelCatalog.all) {
+      if (!mounted) return;
       if (spec.isSystemTts) {
         map[spec.id] = _buildSystemTtsEntry();
         continue;
@@ -431,6 +454,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     );
 
     // 若当前尚未选定模型或选中的旧模型已下架且无安装，优先选择已安装的离线模型，其次系统语音。
+    if (!_configController.mounted) return;
     final activeId = _configController.state.activeTtsModelId;
     final activeInvalidOrMissing =
         activeId.isEmpty || !(map[activeId]?.isInstalled ?? false);

@@ -72,6 +72,12 @@ void main() {
     });
 
     tearDown(() {
+      if (manager.mounted) {
+        manager.dispose();
+      }
+      if (configCtrl.mounted) {
+        configCtrl.dispose();
+      }
       if (rootDir.existsSync()) {
         rootDir.deleteSync(recursive: true);
       }
