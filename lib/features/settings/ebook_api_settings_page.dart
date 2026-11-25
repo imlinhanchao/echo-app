@@ -9,6 +9,7 @@ import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../providers/providers_controller.dart';
+import '../search/search_controller.dart';
 
 /// ebook-api 书源服务配置页（极简书房 Editorial Minimalism）。
 class EbookApiSettingsPage extends ConsumerStatefulWidget {
@@ -88,9 +89,7 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
   Future<void> _save() async {
     final raw = _urlCtrl.text.trim();
     if (raw.isEmpty) {
-      await ref.read(standaloneConfigProvider.notifier).clearEbookApi();
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      await _clearAndSkip();
       return;
     }
     final err = validateEbookApiUrl(raw);
@@ -105,10 +104,24 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
         .read(standaloneConfigProvider.notifier)
         .setEbookApi(baseUrl: raw, apiKey: _keyCtrl.text.trim());
     ref.invalidate(providersControllerProvider);
+    ref.invalidate(searchControllerProvider);
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('已保存 ebook-api 配置')));
+    Navigator.of(context).pop(true);
+  }
+
+  Future<void> _clearAndSkip() async {
+    _urlCtrl.clear();
+    _keyCtrl.clear();
+    await ref.read(standaloneConfigProvider.notifier).clearEbookApi();
+    ref.invalidate(providersControllerProvider);
+    ref.invalidate(searchControllerProvider);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已停用在线书源，当前仅使用本地导入')),
+    );
     Navigator.of(context).pop(true);
   }
 
@@ -191,6 +204,14 @@ class _EbookApiSettingsPageState extends ConsumerState<EbookApiSettingsPage> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton(
+                      key: const Key('ebook_api_clear_button'),
+                      onPressed: _clearAndSkip,
+                      child: const Text('跳过 / 清空书源配置（仅使用本地导入）'),
+                    ),
                   ),
                 ],
               ),

@@ -7,6 +7,8 @@ import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
+import '../auth/auth_controller.dart';
+import '../settings/ebook_api_settings_page.dart';
 import 'providers_controller.dart';
 
 /// 书源账号配置页（极简书房 Editorial Minimalism）：
@@ -85,6 +87,76 @@ class _ProviderAccountPageState extends ConsumerState<ProviderAccountPage> {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
     final textTheme = Theme.of(context).textTheme;
+    final searchAvailable = ref.watch(onlineSearchAvailableProvider);
+
+    if (!searchAvailable) {
+      return Scaffold(
+        key: const Key('provider_account_page'),
+        appBar: AppBar(title: const Text('书源账号')),
+        body: EchoAmbientBackground(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(EchoMetrics.pagePadding),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Container(
+                  key: const Key('provider_need_ebook_api_card'),
+                  padding: const EdgeInsets.all(EchoMetrics.space3),
+                  decoration: echoElevatedCardDecoration(context, radius: 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: tokens.primary.withValues(alpha: 0.12),
+                        ),
+                        child: Icon(
+                          Icons.dns_outlined,
+                          size: 24,
+                          color: tokens.primary,
+                        ),
+                      ),
+                      const SizedBox(height: EchoMetrics.space2),
+                      Text(
+                        '尚未配置 ebook-api 书源服务',
+                        textAlign: TextAlign.center,
+                        style: textTheme.titleMedium?.copyWith(
+                          color: tokens.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '书源账号仅用于在线搜书与下载。你可以继续使用本地导入，或先配置 ebook-api 服务地址。',
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: EchoMetrics.space3),
+                      EchoPrimaryButton(
+                        key: const Key('provider_go_configure_api'),
+                        icon: Icons.dns_outlined,
+                        label: '去配置书源服务',
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const EbookApiSettingsPage(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final state = ref.watch(providersControllerProvider);
     final controller = ref.read(providersControllerProvider.notifier);
 

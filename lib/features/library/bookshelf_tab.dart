@@ -14,34 +14,59 @@ import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
+import '../auth/auth_controller.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
 import '../reader/reader_page.dart';
+import '../settings/ebook_api_settings_page.dart';
 import '../shell/echo_shell.dart' show EchoShell;
 import 'book_detail_page.dart';
 import 'convert_sheet.dart';
 import 'library_controller.dart';
 
-/// 从手机本地选择 EPUB / TXT 文件导入单机书库。
-Future<void> _importLocalBook(BuildContext context, WidgetRef ref) async {
-  try {
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const <String>['epub', 'txt'],
+/// 本地导入文件选择器（测试可覆盖注入确定的文件路径）。
+typedef LocalBookFilePicker = Future<String?> Function();
+
+final Provider<LocalBookFilePicker> localBookFilePickerProvider =
+    Provider<LocalBookFilePicker>(
+      (_) => () async {
+        final picked = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const <String>['epub', 'txt'],
+        );
+        final files = picked?.files;
+        if (files == null || files.isEmpty) return null;
+        return files.single.path;
+      },
     );
-    final filePath = picked?.files.single.path;
-    if (filePath == null || filePath.isEmpty) return;
+
+/// 从手机本地选择 EPUB / TXT 文件导入单机书库。
+Future<bool> importLocalBook(
+  BuildContext context,
+  WidgetRef ref, {
+  bool switchToBookshelf = false,
+}) async {
+  try {
+    final picker = ref.read(localBookFilePickerProvider);
+    final filePath = await picker();
+    if (filePath == null || filePath.isEmpty) return false;
     final store = ref.read(localLibraryStoreProvider);
     final book = await store.importFile(File(filePath));
     await ref.read(libraryControllerProvider.notifier).refresh();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    if (!context.mounted) return true;
+    if (switchToBookshelf) {
+      EchoShell.switchTab(context, 0);
+    }
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(content: Text('已导入《${book.title}》')),
     );
+    return true;
   } catch (e) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('导入失败：$e')),
-    );
+    if (context.mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    }
+    return false;
   }
 }
 
@@ -90,6 +115,7 @@ class BookshelfTab extends ConsumerWidget {
     final libController = ref.read(libraryControllerProvider.notifier);
     final playerState = ref.watch(chunkedPlayerProvider);
     final liveTtsState = ref.watch(liveTtsPlayerProvider);
+    final searchAvailable = ref.watch(onlineSearchAvailableProvider);
     final hasAnyPlayer = playerState.hasBook || liveTtsState.hasBook;
     final shelfAudios = libState.audiobooks
         .where((a) => a.showOnShelf)
@@ -161,7 +187,7 @@ class BookshelfTab extends ConsumerWidget {
               InkWell(
                 key: const Key('bookshelf_import_local_button'),
                 borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
-                onTap: () => _importLocalBook(context, ref),
+                onTap: () => importLocalBook(context, ref),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -194,10 +220,11 @@ class BookshelfTab extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: EchoMetrics.space2),
-
-          // 胶囊搜索入口（点击切到「发现」Tab）
-          _SearchEntry(onTap: () => EchoShell.switchTab(context, 1)),
+          if (searchAvailable) ...[
+            const SizedBox(height: EchoMetrics.space2),
+            // 胶囊搜索入口（点击切到「发现」Tab）
+            _SearchEntry(onTap: () => EchoShell.switchTab(context, 1)),
+          ],
           const SizedBox(height: EchoMetrics.space3),
 
           // 「正在收听」精致卡（2:3 书封左置，右置标题/当前句/进度与纯净圆形播放键）
@@ -267,26 +294,53 @@ class BookshelfTab extends ConsumerWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '导入手机里的 EPUB / TXT，或去「发现」搜索好书',
+                    searchAvailable
+                        ? '导入手机里的 EPUB / TXT，或去「发现」搜索好书'
+                        : '已跳过在线书源配置，直接导入本地 EPUB / TXT 即可阅读与听书',
                     textAlign: TextAlign.center,
                     style: textTheme.bodySmall?.copyWith(
                       color: tokens.textSecondary,
                     ),
                   ),
                   const SizedBox(height: EchoMetrics.space3),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
-                        child: EchoPrimaryButton(
+                  if (searchAvailable)
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        EchoPrimaryButton(
                           key: const Key('bookshelf_go_discover'),
                           icon: Icons.search_rounded,
                           label: '去发现找书',
                           onPressed: () => EchoShell.switchTab(context, 1),
                         ),
+                        EchoSecondaryButton(
+                          key: const Key('bookshelf_empty_import_button'),
+                          icon: Icons.file_upload_outlined,
+                          label: '导入本地书籍',
+                          onPressed: () => importLocalBook(context, ref),
+                        ),
+                      ],
+                    )
+                  else ...[
+                    EchoPrimaryButton(
+                      key: const Key('bookshelf_empty_import_button'),
+                      icon: Icons.file_upload_outlined,
+                      label: '导入本地书籍',
+                      onPressed: () => importLocalBook(context, ref),
+                    ),
+                    const SizedBox(height: 6),
+                    TextButton(
+                      key: const Key('bookshelf_configure_source_button'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const EbookApiSettingsPage(),
+                        ),
                       ),
-                    ],
-                  ),
+                      child: const Text('配置在线书源'),
+                    ),
+                  ],
                 ],
               ),
             )
@@ -359,12 +413,20 @@ class BookshelfTab extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      key: const Key('bookshelf_go_discover'),
-                      onPressed: () => EchoShell.switchTab(context, 1),
-                      child: const Text('去发现'),
-                    ),
+                    if (searchAvailable) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        key: const Key('bookshelf_go_discover'),
+                        onPressed: () => EchoShell.switchTab(context, 1),
+                        child: const Text('去发现'),
+                      ),
+                    ] else ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => importLocalBook(context, ref),
+                        child: const Text('导入新书'),
+                      ),
+                    ],
                   ],
                 ),
               ),

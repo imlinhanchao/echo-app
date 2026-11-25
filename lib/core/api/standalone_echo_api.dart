@@ -217,7 +217,14 @@ class StandaloneEchoApi extends EchoApi {
     int yearTo = 0,
     String order = '',
   }) async {
-    final res = await _readEbookApi().search(
+    final api = _readEbookApi();
+    if (!api.isConfigured) {
+      throw const ApiException(
+        code: 'EBOOK_API_NOT_CONFIGURED',
+        message: '已跳过书源配置，暂无法在线搜书，请先配置书源服务或直接导入本地书籍',
+      );
+    }
+    final res = await api.search(
       query: query,
       provider: provider,
       page: page,

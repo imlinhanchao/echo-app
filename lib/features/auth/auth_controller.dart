@@ -29,6 +29,15 @@ final Provider<EchoApi> echoApiProvider = Provider<EchoApi>(
   ),
 );
 
+/// 当前是否具备可用的在线书源搜索能力：
+/// 监听 [standaloneConfigProvider] 保证配置变更后界面即时刷新，
+/// 并以 [echoApiProvider].baseUrl 非空作为统一判据（兼容测试桩）。
+final Provider<bool> onlineSearchAvailableProvider = Provider<bool>((ref) {
+  ref.watch(standaloneConfigProvider);
+  final api = ref.watch(echoApiProvider);
+  return api.baseUrl.trim().isNotEmpty;
+});
+
 /// 认证生命周期状态。
 sealed class AuthState {
   const AuthState();

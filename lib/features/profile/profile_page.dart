@@ -224,27 +224,34 @@ class ProfilePage extends ConsumerWidget {
                 );
               },
             ),
-            ListTile(
-              key: const Key('profile_providers'),
-              leading: Icon(
-                Icons.source_outlined,
-                size: 20,
-                color: tokens.textPrimary,
-              ),
-              title: const Text('书源账号'),
-              subtitle: Text(
-                'zlib 镜像 / 邮箱密码 / Cookie 凭证',
-                style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
-              ),
-              trailing: Icon(
-                Icons.chevron_right_rounded,
-                color: tokens.textDisabled,
-              ),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const ProviderAccountPage(),
-                ),
-              ),
+            Consumer(
+              builder: (context, ref, _) {
+                final cfg = ref.watch(standaloneConfigProvider);
+                return ListTile(
+                  key: const Key('profile_providers'),
+                  leading: Icon(
+                    Icons.source_outlined,
+                    size: 20,
+                    color: tokens.textPrimary,
+                  ),
+                  title: const Text('书源账号'),
+                  subtitle: Text(
+                    cfg.hasEbookApi
+                        ? 'zlib 镜像 / 邮箱密码 / Cookie 凭证'
+                        : '未配置书源服务（可跳过，仅使用本地导入）',
+                    style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    color: tokens.textDisabled,
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ProviderAccountPage(),
+                    ),
+                  ),
+                );
+              },
             ),
             ValueListenableBuilder<bool>(
               valueListenable: ThemeModeController.darkMode,

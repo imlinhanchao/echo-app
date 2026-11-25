@@ -82,21 +82,45 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
 
   Future<void> _saveApiAndNext() async {
     final raw = _urlCtrl.text.trim();
-    if (raw.isNotEmpty) {
-      final err = validateEbookApiUrl(raw);
-      if (err != null) {
-        setState(() {
-          _testOk = false;
-          _testMessage = err;
-        });
-        return;
-      }
-      await ref
-          .read(standaloneConfigProvider.notifier)
-          .setEbookApi(baseUrl: raw, apiKey: _keyCtrl.text.trim());
+    if (raw.isEmpty) {
+      await _skipApiStep();
+      return;
     }
+    final err = validateEbookApiUrl(raw);
+    if (err != null) {
+      setState(() {
+        _testOk = false;
+        _testMessage = err;
+      });
+      return;
+    }
+    await ref
+        .read(standaloneConfigProvider.notifier)
+        .setEbookApi(baseUrl: raw, apiKey: _keyCtrl.text.trim());
     if (!mounted) return;
-    setState(() => _step = 1);
+    setState(() {
+      _testMessage = null;
+      _step = 1;
+    });
+  }
+
+  Future<void> _skipApiStep() async {
+    _urlCtrl.clear();
+    _keyCtrl.clear();
+    await ref.read(standaloneConfigProvider.notifier).clearEbookApi();
+    if (!mounted) return;
+    setState(() {
+      _testMessage = null;
+      _testOk = false;
+      _step = 1;
+    });
+  }
+
+  Future<void> _skipAllToBookshelf() async {
+    _urlCtrl.clear();
+    _keyCtrl.clear();
+    await ref.read(standaloneConfigProvider.notifier).clearEbookApi();
+    await ref.read(standaloneConfigProvider.notifier).completeOnboarding();
   }
 
   Future<void> _finish() async {
@@ -214,7 +238,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '应用不内置服务地址。填写你部署的 ebook-api 地址即可在线搜书下载；也可以先跳过，直接导入手机里的 EPUB / TXT。',
+            '应用不内置服务地址。填写自建 ebook-api 地址即可在线搜书；也可以跳过此步（将暂不启用在线搜书），直接导入本地 EPUB / TXT 书籍。',
             style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
           ),
           const SizedBox(height: EchoMetrics.space3),
@@ -267,8 +291,13 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
           const SizedBox(height: 8),
           TextButton(
             key: const Key('onboarding_skip_api_button'),
-            onPressed: () => setState(() => _step = 1),
+            onPressed: _skipApiStep,
             child: const Text('暂不配置，跳过此步'),
+          ),
+          TextButton(
+            key: const Key('onboarding_skip_all_button'),
+            onPressed: _skipAllToBookshelf,
+            child: const Text('跳过配置，直接导入本地书'),
           ),
         ],
       ),

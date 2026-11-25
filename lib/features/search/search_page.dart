@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
-import '../../core/settings/standalone_config_store.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
@@ -12,6 +11,7 @@ import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
 import '../jobs/jobs_controller.dart';
+import '../library/bookshelf_tab.dart' show importLocalBook;
 import '../providers/provider_account_page.dart';
 import '../settings/ebook_api_settings_page.dart';
 import 'search_controller.dart';
@@ -40,6 +40,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 
   Future<void> _submit() {
+    if (!ref.read(onlineSearchAvailableProvider)) {
+      return Future<void>.value();
+    }
     final query = _controller.text;
     return ref.read(searchControllerProvider.notifier).search(query).then((_) {
       if (!mounted) return;
@@ -283,7 +286,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final textTheme = Theme.of(context).textTheme;
     final state = ref.watch(searchControllerProvider);
     final controller = ref.read(searchControllerProvider.notifier);
-    final standaloneCfg = ref.watch(standaloneConfigProvider);
+    final searchAvailable = ref.watch(onlineSearchAvailableProvider);
     final hairline = echoHairlineColor(context, darkAlpha: 0.06);
 
     return Column(
@@ -332,14 +335,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                         height: 6,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: standaloneCfg.hasEbookApi
+                          color: searchAvailable
                               ? tokens.success
                               : tokens.warning,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        standaloneCfg.hasEbookApi ? '书源服务' : '配置服务',
+                        searchAvailable ? '书源服务' : '配置服务',
                         style: textTheme.labelSmall?.copyWith(
                           color: tokens.textPrimary,
                           fontWeight: FontWeight.w600,
@@ -352,78 +355,127 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ],
           ),
         ),
-        if (!standaloneCfg.hasEbookApi)
-          Container(
-            key: const Key('search_ebook_api_banner'),
-            margin: const EdgeInsets.fromLTRB(
-              EchoMetrics.pagePadding,
-              12,
-              EchoMetrics.pagePadding,
-              0,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: echoElevatedCardDecoration(
-              context,
-              radius: 14,
-              borderColor: tokens.primary.withValues(alpha: 0.28),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: tokens.primary, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '尚未配置 ebook-api 服务地址，配置后即可在线搜书',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: tokens.textPrimary,
-                    ),
-                  ),
+        if (!searchAvailable)
+          Expanded(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  EchoMetrics.pagePadding,
+                  EchoMetrics.space3,
+                  EchoMetrics.pagePadding,
+                  ref.watch(chunkedPlayerProvider).hasBook
+                      ? 112
+                      : EchoMetrics.space3,
                 ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const EbookApiSettingsPage(),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Container(
+                    key: const Key('search_source_disabled_card'),
+                    padding: const EdgeInsets.all(EchoMetrics.space3),
+                    decoration: echoElevatedCardDecoration(
+                      context,
+                      radius: 18,
                     ),
-                  ),
-                  child: const Text('去配置'),
-                ),
-              ],
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            EchoMetrics.pagePadding,
-            14,
-            EchoMetrics.pagePadding,
-            10,
-          ),
-          child: TextField(
-            key: const Key('search_field'),
-            controller: _controller,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _submit(),
-            decoration: InputDecoration(
-              hintText: '搜索书名、作者（zlib 书源）',
-              prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              suffixIcon: state.isLoading
-                  ? Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: tokens.primary,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: tokens.primary.withValues(alpha: 0.12),
+                            ),
+                            child: Icon(
+                              Icons.travel_explore_outlined,
+                              size: 24,
+                              color: tokens.primary,
+                            ),
+                          ),
                         ),
-                      ),
-                    )
-                  : IconButton(
-                      icon: const Icon(Icons.arrow_forward_rounded, size: 19),
-                      onPressed: _submit,
+                        const SizedBox(height: EchoMetrics.space2),
+                        Text(
+                          '已跳过书源配置，暂无法使用搜索',
+                          textAlign: TextAlign.center,
+                          style: textTheme.titleMedium?.copyWith(
+                            color: tokens.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '你仍可直接导入本地 EPUB / TXT 书籍进行阅读与听书；如需在线搜书下载，请先配置 ebook-api 书源服务。',
+                          textAlign: TextAlign.center,
+                          style: textTheme.bodySmall?.copyWith(
+                            color: tokens.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: EchoMetrics.space3),
+                        EchoPrimaryButton(
+                          key: const Key('search_disabled_import_button'),
+                          icon: Icons.file_upload_outlined,
+                          label: '导入本地书籍（EPUB / TXT）',
+                          onPressed: () => importLocalBook(
+                            context,
+                            ref,
+                            switchToBookshelf: true,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        EchoSecondaryButton(
+                          key: const Key('search_disabled_configure_button'),
+                          icon: Icons.dns_outlined,
+                          label: '配置书源服务',
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const EbookApiSettingsPage(),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                ),
+              ),
+            ),
+          )
+        else ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              EchoMetrics.pagePadding,
+              14,
+              EchoMetrics.pagePadding,
+              10,
+            ),
+            child: TextField(
+              key: const Key('search_field'),
+              controller: _controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
+                hintText: '搜索书名、作者（zlib 书源）',
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                suffixIcon: state.isLoading
+                    ? Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: tokens.primary,
+                          ),
+                        ),
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.arrow_forward_rounded, size: 19),
+                        onPressed: _submit,
+                      ),
+              ),
             ),
           ),
-        ),
         Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: EchoMetrics.pagePadding,
@@ -665,6 +717,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   },
                 ),
         ),
+        ],
       ],
     );
   }
