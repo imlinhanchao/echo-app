@@ -74,6 +74,74 @@
     return rawUrl;
   }
 
+  function bytesToHex(bytes) {
+    if (!bytes || typeof bytes.length !== 'number') return '';
+    var out = '';
+    for (var i = 0; i < bytes.length; i++) {
+      out += ('0' + (bytes[i] & 255).toString(16)).slice(-2);
+    }
+    return out;
+  }
+
+  function generateHexKey(byteLen) {
+    var len = typeof byteLen === 'number' && byteLen > 0 ? Math.floor(byteLen) : 32;
+    var buf = new Uint8Array(len);
+    var cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+    if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+      cryptoObj.getRandomValues(buf);
+    } else if (typeof require === 'function') {
+      var nodeCrypto = require('crypto');
+      var randBuf = nodeCrypto.randomBytes(len);
+      for (var i = 0; i < len; i++) {
+        buf[i] = randBuf[i];
+      }
+    } else {
+      for (var j = 0; j < len; j++) {
+        buf[j] = Math.floor(Math.random() * 256);
+      }
+    }
+    return bytesToHex(buf);
+  }
+
+  function sanitizeLineValue(raw) {
+    if (raw === null || raw === undefined) return '';
+    return String(raw).replace(/[\r\n]/g, '').trim();
+  }
+
+  function buildEnvConfig(opts) {
+    var cfg = opts || {};
+    var host = cfg.mode === 'proxy' ? '127.0.0.1' : '0.0.0.0';
+    var parsedPort = parseInt(sanitizeLineValue(cfg.port), 10);
+    var portStr =
+      !isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
+        ? String(parsedPort)
+        : '8091';
+    var apiKey = sanitizeLineValue(cfg.apiKey);
+    var secret = sanitizeLineValue(cfg.secret);
+
+    var lines = [
+      'EBOOK_ADDR=' + host + ':' + portStr,
+      'EBOOK_DATA_DIR=data'
+    ];
+    if (apiKey) {
+      lines.push('EBOOK_API_KEY=' + apiKey);
+    }
+    if (secret) {
+      lines.push('EBOOK_SECRET=' + secret);
+    } else {
+      lines.push('# 留空则首次启动自动生成并持久化到 data/secret.key');
+      lines.push('# EBOOK_SECRET=');
+    }
+    lines.push('EBOOK_ALLOW_PLAIN_CRED_HEADERS=false');
+    if (cfg.publicDownload) {
+      lines.push('EBOOK_PUBLIC_DOWNLOAD=true');
+    }
+    lines.push(
+      'ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib.bz'
+    );
+    return lines.join('\n');
+  }
+
   function readCachedRelease(allowStale) {
     try {
       var raw = sessionStorage.getItem(CACHE_KEY);
@@ -215,6 +283,72 @@
         });
       })(i);
     }
+
+    var triggers = document.querySelectorAll('[data-select-tab]');
+    for (var t = 0; t < triggers.length; t++) {
+      (function (trigger) {
+        trigger.addEventListener('click', function () {
+          var targetId = trigger.getAttribute('data-select-tab');
+          var targetTab = targetId ? document.getElementById(targetId) : null;
+          if (targetTab) {
+            activateTab(targetTab, false);
+          }
+        });
+      })(triggers[t]);
+    }
+  }
+
+  function initEnvBuilder() {
+    var modeRadios = document.querySelectorAll('input[name="env-mode"]');
+    var portInput = document.getElementById('env-port');
+    var apiKeyInput = document.getElementById('env-api-key');
+    var secretInput = document.getElementById('env-secret');
+    var publicCheckbox = document.getElementById('env-public-download');
+    var genApiBtn = document.getElementById('gen-api-key');
+    var genSecretBtn = document.getElementById('gen-secret');
+    var outputEl = document.getElementById('generated-env-code');
+
+    if (!outputEl) return;
+
+    function currentMode() {
+      for (var i = 0; i < modeRadios.length; i++) {
+        if (modeRadios[i].checked) return modeRadios[i].value;
+      }
+      return 'lan';
+    }
+
+    function render() {
+      outputEl.textContent = buildEnvConfig({
+        mode: currentMode(),
+        port: portInput ? portInput.value : '8091',
+        apiKey: apiKeyInput ? apiKeyInput.value : '',
+        secret: secretInput ? secretInput.value : '',
+        publicDownload: publicCheckbox ? Boolean(publicCheckbox.checked) : false
+      });
+    }
+
+    for (var i = 0; i < modeRadios.length; i++) {
+      modeRadios[i].addEventListener('change', render);
+    }
+    if (portInput) portInput.addEventListener('input', render);
+    if (apiKeyInput) apiKeyInput.addEventListener('input', render);
+    if (secretInput) secretInput.addEventListener('input', render);
+    if (publicCheckbox) publicCheckbox.addEventListener('change', render);
+
+    if (genApiBtn && apiKeyInput) {
+      genApiBtn.addEventListener('click', function () {
+        apiKeyInput.value = generateHexKey(24);
+        render();
+      });
+    }
+    if (genSecretBtn && secretInput) {
+      genSecretBtn.addEventListener('click', function () {
+        secretInput.value = generateHexKey(32);
+        render();
+      });
+    }
+
+    render();
   }
 
   function copyText(text) {
@@ -245,6 +379,7 @@
     for (var i = 0; i < buttons.length; i++) {
       (function (btn) {
         var resetTimer = null;
+        var initialLabel = btn.textContent || '复制';
         btn.addEventListener('click', function () {
           var block = btn.closest('.code-block');
           var code = block ? block.querySelector('pre code') : null;
@@ -256,7 +391,7 @@
               btn.classList.add('is-copied');
               if (resetTimer) clearTimeout(resetTimer);
               resetTimer = setTimeout(function () {
-                btn.textContent = '复制';
+                btn.textContent = initialLabel;
                 btn.classList.remove('is-copied');
               }, 1600);
             })
@@ -264,7 +399,7 @@
               btn.textContent = '请手动复制';
               if (resetTimer) clearTimeout(resetTimer);
               resetTimer = setTimeout(function () {
-                btn.textContent = '复制';
+                btn.textContent = initialLabel;
               }, 1600);
             });
         });
@@ -275,6 +410,7 @@
   function bootBrowser() {
     initThemeToggle();
     initDeployTabs();
+    initEnvBuilder();
     initCopyButtons();
 
     var useMirror = false;
@@ -311,7 +447,7 @@
         if (relDate) {
           relDate.textContent = lastStatusError
             ? 'GitHub API 访问受限，以下链接已直指 Releases 页面'
-            : '暂无预编译 Release 时可使用 Docker Compose 或源码构建';
+            : '暂无预编译 Release 时可使用 Docker / NAS 构建';
         }
         if (relNoteBadge) relNoteBadge.hidden = true;
         if (checksumsEl) checksumsEl.hidden = true;
@@ -415,7 +551,10 @@
       formatBytes: formatBytes,
       formatDate: formatDate,
       matchEbookApiAssets: matchEbookApiAssets,
-      resolveDownloadUrl: resolveDownloadUrl
+      resolveDownloadUrl: resolveDownloadUrl,
+      bytesToHex: bytesToHex,
+      generateHexKey: generateHexKey,
+      buildEnvConfig: buildEnvConfig
     };
   }
 })();
