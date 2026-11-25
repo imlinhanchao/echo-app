@@ -18,6 +18,7 @@ import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
+import 'zipvoice_reference_recorder_page.dart';
 
 /// 端侧语音管理页（极简书房 Editorial Minimalism）：
 /// - 严格单镜像下拉选择（支持自定义加速前缀）与旧 Kokoro/Piper 残留清理；
@@ -57,6 +58,7 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
     if (paths == null) return;
     setState(() => _auditioningModelId = entry.spec.id);
     try {
+      await _previewPlayer.stop();
       final engine = ref.read(onDeviceTtsEngineProvider);
       await engine.loadModel(paths);
       final speed = ref.read(standaloneConfigProvider).defaultTtsSpeed;
@@ -65,6 +67,9 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
         speakerId: speakerId,
         speed: speed,
       );
+      if (res.samples.isEmpty || res.sampleRate <= 0) {
+        throw StateError('未生成有效试听音频');
+      }
       final wav = encodeFloat32ToWav(res.samples, sampleRate: res.sampleRate);
       final tmpDir = await getTemporaryDirectory();
       final outFile = File(p.join(tmpDir.path, 'echo_tts_audition.wav'));
@@ -150,6 +155,16 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(err ?? '已切换为自定义参考音色（${p.basename(filePath)}）')),
+    );
+  }
+
+  Future<void> _openZipVoiceRecorder() async {
+    await _previewPlayer.stop();
+    if (!mounted) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const ZipVoiceReferenceRecorderPage(),
+      ),
     );
   }
 
@@ -382,6 +397,7 @@ class _TtsModelManagerPageState extends ConsumerState<TtsModelManagerPage> {
                   onClearPartial: () =>
                       manager.clearPartialDownload(entry.spec.id),
                   onImportLocal: () => _importLocal(entry.spec),
+                  onRecordZipVoiceRef: _openZipVoiceRecorder,
                   onImportZipVoiceRef: _importZipVoiceReference,
                   onResetZipVoiceRef: manager.resetZipVoiceReferenceAudio,
                   onDelete: () async {
@@ -616,6 +632,7 @@ class _ModelCard extends StatelessWidget {
     required this.onPause,
     required this.onClearPartial,
     required this.onImportLocal,
+    required this.onRecordZipVoiceRef,
     required this.onImportZipVoiceRef,
     required this.onResetZipVoiceRef,
     required this.onDelete,
@@ -633,6 +650,7 @@ class _ModelCard extends StatelessWidget {
   final VoidCallback onPause;
   final VoidCallback onClearPartial;
   final VoidCallback onImportLocal;
+  final VoidCallback onRecordZipVoiceRef;
   final VoidCallback onImportZipVoiceRef;
   final VoidCallback onResetZipVoiceRef;
   final VoidCallback onDelete;
@@ -769,7 +787,7 @@ class _ModelCard extends StatelessWidget {
                     Text(
                       hasCustomZipVoiceRef
                           ? '参考音色：自定义 (${p.basename(config.zipvoiceRefAudioPath)})'
-                          : '参考音色：内置默认示例（可导入 WAV 克隆音色）',
+                          : '参考音色：内置默认示例（可现场录制或导入 WAV 克隆音色）',
                       style: textTheme.labelMedium?.copyWith(
                         color: tokens.textPrimary,
                         fontWeight: FontWeight.w600,
@@ -791,12 +809,19 @@ class _ModelCard extends StatelessWidget {
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
+                      runSpacing: 8,
                       children: [
+                        FilledButton.tonalIcon(
+                          key: const Key('tts_zipvoice_record_ref'),
+                          onPressed: onRecordZipVoiceRef,
+                          icon: const Icon(Icons.mic_rounded, size: 16),
+                          label: const Text('录制参考音色'),
+                        ),
                         OutlinedButton.icon(
                           key: const Key('tts_zipvoice_import_ref'),
                           onPressed: onImportZipVoiceRef,
-                          icon: const Icon(Icons.mic_none_outlined, size: 16),
-                          label: const Text('导入自定义参考音 (.wav)'),
+                          icon: const Icon(Icons.folder_open_outlined, size: 16),
+                          label: const Text('导入 WAV'),
                         ),
                         if (hasCustomZipVoiceRef)
                           TextButton(

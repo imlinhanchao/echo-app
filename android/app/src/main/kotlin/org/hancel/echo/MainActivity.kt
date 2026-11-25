@@ -15,12 +15,15 @@ import java.util.concurrent.Executors
 
 class MainActivity : AudioServiceActivity() {
     private val encoderExecutor = Executors.newSingleThreadExecutor()
+    private val recorderExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var systemTtsBridge: SystemTtsBridge
+    private lateinit var voiceRecorderBridge: VoiceRecorderBridge
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         systemTtsBridge = SystemTtsBridge(applicationContext)
+        voiceRecorderBridge = VoiceRecorderBridge(applicationContext)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "org.hancel.echo/audio_encoder"
@@ -184,10 +187,70 @@ class MainActivity : AudioServiceActivity() {
                 result.notImplemented()
             }
         }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.hancel.echo/voice_recorder"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    val outputPath = call.argument<String>("outputPath")
+                    val sampleRate = call.argument<Int>("sampleRate") ?: 24000
+                    if (outputPath.isNullOrEmpty()) {
+                        result.error("INVALID_ARGS", "outputPath 不能为空", null)
+                        return@setMethodCallHandler
+                    }
+                    recorderExecutor.execute {
+                        try {
+                            val info = voiceRecorderBridge.start(outputPath, sampleRate)
+                            mainHandler.post { result.success(info) }
+                        } catch (e: SecurityException) {
+                            mainHandler.post {
+                                result.error("PERMISSION_DENIED", e.message ?: "缺少麦克风录音权限", null)
+                            }
+                        } catch (e: Exception) {
+                            mainHandler.post {
+                                result.error("RECORDER_START_FAILED", e.message ?: "启动录音失败", null)
+                            }
+                        }
+                    }
+                }
+                "getStatus" -> {
+                    result.success(voiceRecorderBridge.getStatus())
+                }
+                "stop" -> {
+                    recorderExecutor.execute {
+                        try {
+                            val res = voiceRecorderBridge.stop()
+                            mainHandler.post { result.success(res) }
+                        } catch (e: Exception) {
+                            mainHandler.post {
+                                result.error("RECORDER_STOP_FAILED", e.message ?: "停止录音失败", null)
+                            }
+                        }
+                    }
+                }
+                "cancel" -> {
+                    recorderExecutor.execute {
+                        try {
+                            voiceRecorderBridge.cancel()
+                            mainHandler.post { result.success(null) }
+                        } catch (_: Exception) {
+                            mainHandler.post { result.success(null) }
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onDestroy() {
         encoderExecutor.shutdown()
+        recorderExecutor.shutdown()
+        if (::voiceRecorderBridge.isInitialized) {
+            voiceRecorderBridge.dispose()
+        }
         if (::systemTtsBridge.isInitialized) {
             systemTtsBridge.dispose()
         }

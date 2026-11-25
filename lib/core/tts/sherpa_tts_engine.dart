@@ -195,6 +195,51 @@ class _WorkerBootstrap {
   final SendPort responsePort;
 }
 
+@visibleForTesting
+void validateSherpaLoadPayload(Map<String, dynamic> payload) {
+  final kindName = payload['kind'] as String? ?? '';
+  final modelPath = payload['modelPath'] as String? ?? '';
+  final decoderPath = payload['decoderPath'] as String? ?? '';
+  final tokensPath = payload['tokensPath'] as String? ?? '';
+  final vocoderPath = payload['vocoderPath'] as String? ?? '';
+  final lexiconPath = payload['lexiconPath'] as String? ?? '';
+  final dataDir = payload['dataDir'] as String? ?? '';
+  final referenceAudioPath = payload['referenceAudioPath'] as String? ?? '';
+  final referenceText = payload['referenceText'] as String? ?? '';
+
+  if (modelPath.isEmpty || !File(modelPath).existsSync()) {
+    throw StateError('TTS 模型文件不存在：$modelPath');
+  }
+  if (tokensPath.isEmpty || !File(tokensPath).existsSync()) {
+    throw StateError('TTS tokens 文件不存在：$tokensPath');
+  }
+
+  if (kindName == TtsModelKind.zipvoice.name) {
+    if (decoderPath.isEmpty || !File(decoderPath).existsSync()) {
+      throw StateError('ZipVoice 缺少 decoder 模型文件，请重新下载模型');
+    }
+    if (vocoderPath.isEmpty || !File(vocoderPath).existsSync()) {
+      throw StateError('ZipVoice 缺少 vocoder 声码器文件，请重新下载模型');
+    }
+    if (lexiconPath.isEmpty || !File(lexiconPath).existsSync()) {
+      throw StateError('ZipVoice 缺少 lexicon.txt 词典文件，请重新下载模型');
+    }
+    if (!hasValidEspeakDataDir(dataDir)) {
+      throw StateError('ZipVoice 缺少 espeak-ng-data 语音前端数据，请删除该模型后重新下载安装');
+    }
+    if (referenceAudioPath.isEmpty || !File(referenceAudioPath).existsSync()) {
+      throw StateError('ZipVoice 缺少参考音频文件：$referenceAudioPath');
+    }
+    if (referenceText.trim().isEmpty) {
+      throw StateError('ZipVoice 缺少参考音频对应的文本内容');
+    }
+  } else if (kindName == TtsModelKind.matcha.name) {
+    if (dataDir.isNotEmpty && !hasValidEspeakDataDir(dataDir)) {
+      throw StateError('Matcha 的 espeak-ng-data 不完整，请重新下载模型');
+    }
+  }
+}
+
 void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
   final inbox = ReceivePort();
   bootstrap.readyPort.send(inbox.sendPort);
@@ -214,6 +259,7 @@ void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
 
     try {
       if (cmd == 'load') {
+        validateSherpaLoadPayload(payload);
         if (!bindingsReady) {
           sherpa_onnx.initBindings();
           bindingsReady = true;
@@ -331,6 +377,9 @@ void _sherpaWorkerEntry(_WorkerBootstrap bootstrap) {
           );
         } else {
           generated = active.generate(text: text, sid: sid, speed: speed);
+        }
+        if (generated.samples.isEmpty || generated.sampleRate <= 0) {
+          throw StateError('语音合成未生成有效音频，请检查参考音频与对应文本是否匹配');
         }
         final copied = Float32List.fromList(generated.samples);
         final transferable = TransferableTypedData.fromList(<TypedData>[

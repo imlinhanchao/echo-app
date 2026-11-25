@@ -226,7 +226,7 @@ abstract final class TtsModelCatalog {
   static const TtsModelSpec zipvoiceZhEnInt8 = TtsModelSpec(
     id: 'sherpa-onnx-zipvoice-distill-int8-zh-en-emilia',
     name: 'ZipVoice INT8 中英（24kHz 克隆）',
-    subtitle: '零样本音色克隆 · 默认自带参考音色开箱即用，也可导入自己的 3-10 秒 WAV',
+    subtitle: '零样本音色克隆 · 默认自带参考音色开箱即用，支持现场录制或导入 3-10 秒 WAV',
     kind: TtsModelKind.zipvoice,
     estimatedSizeMb: 156,
     recommendedTag: '音质克隆',
@@ -235,7 +235,7 @@ abstract final class TtsModelCatalog {
     vocoderFile: 'vocos_24khz.onnx',
     tokensFile: 'tokens.txt',
     lexiconFiles: <String>['lexicon.txt'],
-    dataDirName: '',
+    dataDirName: 'espeak-ng-data',
     defaultReferenceAudio: 'test_wavs/leijun-1.wav',
     defaultReferenceText: '那还是三十六年前, 一九八七年. 我呢考上了武汉大学的计算机系.',
     assets: <TtsDownloadAsset>[

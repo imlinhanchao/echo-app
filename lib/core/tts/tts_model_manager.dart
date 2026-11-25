@@ -17,6 +17,26 @@ import 'system_tts_engine.dart';
 import 'tts_model_catalog.dart';
 import 'wav_encoder.dart';
 
+const List<String> kRequiredEspeakDataFiles = <String>[
+  'phontab',
+  'phonindex',
+  'phondata',
+  'intonations',
+];
+
+/// 校验 espeak-ng 数据目录完整存在（防止缺失关键文件引发 sherpa-onnx 原生退出）。
+bool hasValidEspeakDataDir(String dirPath) {
+  if (dirPath.isEmpty) return false;
+  final dir = Directory(dirPath);
+  if (!dir.existsSync()) return false;
+  for (final name in kRequiredEspeakDataFiles) {
+    if (!File(p.join(dirPath, name)).existsSync()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// 已安装且通过完整性校验的端侧模型本地路径集合。
 @immutable
 class ResolvedTtsModelPaths {
@@ -61,6 +81,8 @@ class ResolvedTtsModelPaths {
     decoderPath,
     vocoderPath,
     tokensPath,
+    lexiconPath,
+    dataDir,
     ruleFsts,
     referenceAudioPath,
     referenceText,
@@ -822,6 +844,26 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
     return freed;
   }
 
+  static int _customRefSeq = 0;
+
+  Future<void> _deleteCustomZipVoiceRefs(
+    Directory root, {
+    String? keepPath,
+  }) async {
+    if (!await root.exists()) return;
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (name.startsWith('zipvoice_custom_ref') &&
+          name.endsWith('.wav') &&
+          entity.path != keepPath) {
+        try {
+          await entity.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
   /// 为 ZipVoice 导入自定义参考音频（WAV + 对应文本），持久化拷贝后刷新路径配置。
   Future<String?> importZipVoiceReferenceAudio(
     File wavFile,
@@ -846,8 +888,13 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
         return '参考音频过长（${durS.toStringAsFixed(1)} 秒），请裁剪至 3-15 秒以保证手机推理速度';
       }
       final root = await _modelsRoot();
-      final dest = File(p.join(root.path, 'zipvoice_custom_ref.wav'));
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final seq = ++_customRefSeq;
+      final dest = File(
+        p.join(root.path, 'zipvoice_custom_ref_${stamp}_$seq.wav'),
+      );
       await dest.writeAsBytes(bytes, flush: true);
+      await _deleteCustomZipVoiceRefs(root, keepPath: dest.path);
       await _configController.setZipvoiceReference(
         audioPath: dest.path,
         text: trimmedText,
@@ -862,12 +909,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
   /// 恢复 ZipVoice 内置默认参考音频与文本。
   Future<void> resetZipVoiceReferenceAudio() async {
     final root = await _modelsRoot();
-    final customFile = File(p.join(root.path, 'zipvoice_custom_ref.wav'));
-    if (await customFile.exists()) {
-      try {
-        await customFile.delete();
-      } catch (_) {}
-    }
+    await _deleteCustomZipVoiceRefs(root);
     await _configController.setZipvoiceReference(audioPath: '', text: '');
     await refresh();
   }
@@ -1100,6 +1142,15 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       final found = findFile(lex);
       if (found != null && found.isNotEmpty) lexicons.add(found);
     }
+    if (spec.kind == TtsModelKind.zipvoice && lexicons.isEmpty) {
+      return null;
+    }
+
+    final dataDir = findDir(spec.dataDirName);
+    if (spec.dataDirName == 'espeak-ng-data' &&
+        !hasValidEspeakDataDir(dataDir)) {
+      return null;
+    }
 
     final ruleFsts = <String>[];
     for (final fst in spec.ruleFstFiles) {
@@ -1152,7 +1203,7 @@ class TtsModelManager extends StateNotifier<TtsModelsState> {
       voicesPath: voicesPath ?? '',
       vocoderPath: vocoderPath ?? '',
       lexiconPath: lexicons.join(','),
-      dataDir: findDir(spec.dataDirName),
+      dataDir: dataDir,
       dictDir: findDir(spec.dictDirName),
       ruleFsts: ruleFsts.join(','),
       referenceAudioPath: refAudioPath,

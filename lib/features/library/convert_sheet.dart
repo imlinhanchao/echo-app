@@ -161,6 +161,10 @@ class _ConvertSheetState extends ConsumerState<ConvertSheet> {
           speakerId: sid,
           speed: _speed,
         );
+        if (res.samples.isEmpty || res.sampleRate <= 0) {
+          throw StateError('未生成有效试听音频');
+        }
+        await _samplePlayer!.stop();
         final wav = encodeFloat32ToWav(res.samples, sampleRate: res.sampleRate);
         final tmpDir = await getTemporaryDirectory();
         final outFile = File(p.join(tmpDir.path, 'echo_convert_sample.wav'));
