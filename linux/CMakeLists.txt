@@ -70,6 +70,10 @@ set_target_properties(${BINARY_NAME}
 )
 
 
+# path_provider_android transitively pulls in package:jni; skip optional desktop JNI build
+# so the Linux bundle does not link against the build machine's libjvm.so.
+set(CMAKE_DISABLE_FIND_PACKAGE_JNI ON CACHE BOOL "Skip optional JNI build on desktop" FORCE)
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)

@@ -53,6 +53,10 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("runner")
 
 
+# path_provider_android transitively pulls in package:jni; skip optional desktop JNI build
+# (jni 1.2.1 has a Windows CMake bug when a JDK is present on the host, e.g. GitHub runners).
+set(CMAKE_DISABLE_FIND_PACKAGE_JNI ON CACHE BOOL "Skip optional JNI build on desktop" FORCE)
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)

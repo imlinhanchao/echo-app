@@ -1,0 +1,445 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本号（如 v0.4.0）"
+        required: true
+        type: string
+      build_number:
+        description: "可选构建号（正整数；留空则基于 pubspec.yaml 自动递增）"
+        required: false
+        default: ""
+        type: string
+      prerelease:
+        description: "标记为预发布版本 (Pre-release)"
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: "保存为草稿 (Draft)"
+        required: false
+        default: false
+        type: boolean
+      notes:
+        description: "自定义发布说明（留空则由 GitHub 自动生成）"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare & Test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      build_number: ${{ steps.meta.outputs.build_number }}
+      flutter_version: ${{ steps.meta.outputs.flutter_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs & resolve build metadata
+        id: meta
+        shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+          RAW_BUILD_NUMBER: ${{ inputs.build_number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          v="${RAW_VERSION#v}"
+          if [[ ! "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::无效版本号 '${RAW_VERSION}'，请使用语义化版本，例如 v0.4.0 或 0.4.0"
+            exit 1
+          fi
+
+          tag="v$v"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release ${tag} 已存在，请更换版本号或先删除旧 Release"
+            exit 1
+          fi
+
+          if [ -n "$RAW_BUILD_NUMBER" ]; then
+            if [[ ! "$RAW_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::无效构建号 '${RAW_BUILD_NUMBER}'，请填写正整数或留空"
+              exit 1
+            fi
+            build_number="$RAW_BUILD_NUMBER"
+          else
+            pubspec_build="$(sed -nE 's/^version:[[:space:]]*[^+]+\+([0-9]+).*/\1/p' pubspec.yaml | head -n 1)"
+            pubspec_build="${pubspec_build:-12}"
+            build_number=$((pubspec_build + GITHUB_RUN_NUMBER))
+          fi
+
+          flutter_version="$(jq -r '.flutter // "3.38.9"' .fvmrc 2>/dev/null || echo '3.38.9')"
+
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "flutter_version=$flutter_version" >> "$GITHUB_OUTPUT"
+          echo "Prepared release ${tag} (build ${build_number}) with Flutter ${flutter_version}"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.meta.outputs.flutter_version }}
+          channel: stable
+          cache: true
+
+      - name: Analyze & Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  build-android:
+    name: Build Android (APK)
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate Android signing secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] || missing+=("ANDROID_KEYSTORE_BASE64")
+          [ -n "$ANDROID_KEYSTORE_PASSWORD" ] || missing+=("ANDROID_KEYSTORE_PASSWORD")
+          [ -n "$ANDROID_KEY_PASSWORD" ] || missing+=("ANDROID_KEY_PASSWORD")
+          [ -n "$ANDROID_KEY_ALIAS" ] || missing+=("ANDROID_KEY_ALIAS")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::缺少必要的 Android 签名 Secret: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.prepare.outputs.flutter_version }}
+          channel: stable
+          cache: true
+
+      - name: Configure Android release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > android/app/upload-keystore.jks
+          keytool -list -keystore android/app/upload-keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' \
+            "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_PASSWORD" "$ANDROID_KEY_ALIAS" > android/key.properties
+
+      - name: Install dependencies
+        shell: bash
+        run: flutter pub get
+
+      - name: Build Android Release APKs
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          flutter build apk --release \
+            --build-name="${VERSION}" \
+            --build-number="${BUILD_NUMBER}"
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/echo_${TAG}_android_universal.apk"
+
+          flutter build apk --release \
+            --target-platform android-arm64 \
+            --build-name="${VERSION}" \
+            --build-number="${BUILD_NUMBER}"
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/echo_${TAG}_android_arm64-v8a.apk"
+
+      - name: Verify R8 icon reachability & release signatures
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          grep -q "drawable/ic_stat_echo : reachable=true" build/app/outputs/mapping/release/resources.txt
+
+          APKSIGNER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -maxdepth 2 -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::未找到 apksigner 工具"
+            exit 1
+          fi
+
+          for apk in "dist/echo_${TAG}_android_universal.apk" "dist/echo_${TAG}_android_arm64-v8a.apk"; do
+            echo "=== Verifying ${apk} ==="
+            CERTS="$("$APKSIGNER" verify --print-certs "$apk")"
+            echo "$CERTS"
+            if grep -q "CN=Android Debug" <<< "$CERTS"; then
+              echo "::error::APK (${apk}) 使用了 debug 证书签名，已中止发布"
+              exit 1
+            fi
+          done
+
+      - name: Cleanup signing credentials
+        if: always()
+        shell: bash
+        run: rm -f android/key.properties android/app/upload-keystore.jks
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: dist/*.apk
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (x64)
+    needs: prepare
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.prepare.outputs.flutter_version }}
+          channel: stable
+          cache: true
+
+      - name: Build & Package Windows Release
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          flutter pub get
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          flutter build windows --release --build-name="$env:VERSION" --build-number="$env:BUILD_NUMBER"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $stage = "dist/echo_$($env:TAG)_windows_x64"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stage
+          Copy-Item -Recurse -Force "build/windows/x64/runner/Release" $stage
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip" -Force
+          Remove-Item -Recurse -Force $stage
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (Universal)
+    needs: prepare
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.prepare.outputs.flutter_version }}
+          channel: stable
+          cache: true
+
+      - name: Build macOS Release
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter build macos --release \
+            --build-name="${VERSION}" \
+            --build-number="${BUILD_NUMBER}"
+
+      - name: Package macOS DMG
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          APP_PATH="$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::未在 build/macos/Build/Products/Release 中找到 .app 产物"
+            exit 1
+          fi
+          echo "Found macOS bundle: ${APP_PATH}"
+
+          rm -rf dmg_stage
+          mkdir -p dmg_stage
+          cp -R "$APP_PATH" dmg_stage/
+          ln -s /Applications dmg_stage/Applications
+
+          DMG_OUT="dist/echo_${TAG}_macos_universal.dmg"
+          rm -f "$DMG_OUT"
+          for attempt in 1 2 3; do
+            if hdiutil create -volname "Echo ${TAG}" -srcfolder dmg_stage -ov -format UDZO "$DMG_OUT"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::hdiutil create 在 3 次尝试后仍然失败"
+              exit 1
+            fi
+            echo "hdiutil create failed (attempt ${attempt}), retrying in 5s..."
+            rm -f "$DMG_OUT"
+            sleep 5
+          done
+          rm -rf dmg_stage
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (x64)
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libsecret-1-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.prepare.outputs.flutter_version }}
+          channel: stable
+          cache: true
+
+      - name: Build & Package Linux Release
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter build linux --release \
+            --build-name="${VERSION}" \
+            --build-number="${BUILD_NUMBER}"
+
+          mkdir -p dist
+          STAGE="dist/echo_${TAG}_linux_x64"
+          rm -rf "$STAGE"
+          cp -a build/linux/x64/release/bundle "$STAGE"
+          tar -C dist -czf "dist/echo_${TAG}_linux_x64.tar.gz" "echo_${TAG}_linux_x64"
+          rm -rf "$STAGE"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build-android, build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums & publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          NOTES: ${{ inputs.notes }}
+          IS_DRAFT: ${{ inputs.draft }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum * > checksums.txt)
+          ls -lh dist/
+
+          ARGS=(
+            "$TAG"
+            dist/*
+            --repo "$GITHUB_REPOSITORY"
+            --title "Echo ${TAG}"
+            --target "${GITHUB_SHA}"
+          )
+
+          if [ "$IS_DRAFT" = "true" ]; then
+            ARGS+=(--draft)
+          fi
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          if [ -n "$NOTES" ]; then
+            ARGS+=(--notes "$NOTES")
+          else
+            ARGS+=(--generate-notes)
+          fi
+
+          gh release create "${ARGS[@]}"
