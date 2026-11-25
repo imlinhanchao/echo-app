@@ -563,7 +563,6 @@ html[data-theme="light"] .icon-moon { display: block; }
 .section-desc {
   margin: 0;
   color: var(--text-secondary);
-  max-width: 60ch;
 }
 
 /* Feature Grid */
