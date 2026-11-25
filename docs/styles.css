@@ -843,6 +843,7 @@ html[data-theme="light"] .icon-moon { display: block; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   height: 42px;
   padding: 0 14px;
   border-radius: var(--radius-control);
@@ -854,27 +855,35 @@ html[data-theme="light"] .icon-moon { display: block; }
   transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
-.download-btn:hover,
-.platform-card.is-recommended .download-btn {
+.download-btn .btn-size {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  opacity: 0.82;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-btn:not(.download-btn-secondary):hover,
+.platform-card.is-recommended .download-btn:not(.download-btn-secondary) {
   background: var(--primary);
   color: var(--on-primary);
   border-color: var(--primary);
 }
 
-.platform-card.is-recommended .download-btn:hover {
+.platform-card.is-recommended .download-btn:not(.download-btn-secondary):hover {
   background: var(--primary-hover);
 }
 
-.secondary-link {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  text-align: center;
-  padding: 2px 0;
-  transition: color 150ms ease;
+.download-btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--hairline);
 }
 
-.secondary-link:hover {
+.download-btn-secondary:hover {
+  background: var(--badge-bg);
   color: var(--primary);
+  border-color: var(--hairline-gold);
 }
 
 /* Release Notes */

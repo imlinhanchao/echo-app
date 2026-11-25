@@ -477,32 +477,42 @@
 
       var releaseHtmlUrl = currentRelease.html_url || LATEST_PAGE;
 
-      function bindAsset(key, asset, metaKey, fallbackMeta) {
+      function bindAsset(key, asset, metaKey, fallbackMeta, sizeKey, fallbackSize) {
         var link = document.querySelector('[data-download="' + key + '"]');
         var meta = metaKey ? document.querySelector('[data-meta="' + metaKey + '"]') : null;
+        var sizeBadge = sizeKey ? document.querySelector('[data-size="' + sizeKey + '"]') : null;
         if (link) {
           link.href = asset
             ? resolveDownloadUrl(asset.browser_download_url, useMirror)
             : releaseHtmlUrl;
         }
+        var sizeStr = asset ? formatBytes(asset.size) : '';
         if (meta) {
           if (asset) {
-            var sizeStr = formatBytes(asset.size);
             meta.textContent = asset.name + (sizeStr ? ' · ' + sizeStr : '');
           } else {
             meta.textContent = fallbackMeta;
           }
         }
+        if (sizeBadge) {
+          sizeBadge.textContent = sizeStr || fallbackSize || '';
+        }
       }
 
       var primaryAndroid = assets.androidArm64 || assets.androidUniversal;
-      bindAsset('androidArm64', primaryAndroid, 'android', '请前往 GitHub Releases 查看');
-      bindAsset(
-        'androidUniversal',
-        assets.androidUniversal,
-        'androidUniversal',
-        '前往 GitHub Releases 查看全架构 APK'
-      );
+      bindAsset('androidArm64', primaryAndroid, null, '', 'androidArm64', '推荐');
+      bindAsset('androidUniversal', assets.androidUniversal, null, '', 'androidUniversal', '全架构');
+      var androidMeta = document.querySelector('[data-meta="android"]');
+      if (androidMeta) {
+        if (assets.androidArm64 && assets.androidUniversal) {
+          androidMeta.textContent = 'ARM64 精简版 · Universal 全架构兼容';
+        } else if (primaryAndroid) {
+          var androidSize = formatBytes(primaryAndroid.size);
+          androidMeta.textContent = primaryAndroid.name + (androidSize ? ' · ' + androidSize : '');
+        } else {
+          androidMeta.textContent = '请前往 GitHub Releases 查看';
+        }
+      }
       bindAsset('macos', assets.macos, 'macos', '请前往 GitHub Releases 查看');
       bindAsset('windows', assets.windows, 'windows', '请前往 GitHub Releases 查看');
       bindAsset('linux', assets.linux, 'linux', '请前往 GitHub Releases 查看');
