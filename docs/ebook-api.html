@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ebook API 书源部署与使用指南 — Echo · 回声</title>
+  <meta name="description" content="了解如何在本地、服务器或 Docker 中自建 Ebook API 书源服务，并在 Echo（回声）客户端接入多书源搜书、加密凭据令牌、流式下载与 CDN 缓存加速。" />
+  <meta name="theme-color" content="#0D0E10" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Ebook API 书源部署与使用指南 — Echo · 回声" />
+  <meta property="og:description" content="纯 Go 零外部依赖书源服务：支持二进制、Docker Compose、systemd 与源码部署，以及 Echo 客户端完整接入说明。" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('echo-site-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.dataset.theme = saved;
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至正文内容</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="返回 Echo 回声首页">
+        <img class="brand-logo" src="logo.svg" alt="Echo Logo" width="34" height="34" />
+        <span class="brand-text">
+          <span class="brand-name">Echo · 回声</span>
+          <span class="brand-tagline">极简书房 · 书源指南</span>
+        </span>
+      </a>
+
+      <nav class="site-nav" aria-label="页面导航">
+        <a href="index.html">客户端首页</a>
+        <a href="#deploy">快速部署</a>
+        <a href="#connect">接入 Echo</a>
+        <a href="#config">配置参考</a>
+        <a href="#api">接口与排查</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="nav-pill-mobile" href="index.html">← 客户端</a>
+        <button
+          type="button"
+          id="theme-toggle"
+          class="icon-btn"
+          aria-label="切换浅色/深色主题"
+          title="切换羊皮纸浅色 / 暖墨黑深色"
+        >
+          <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        </button>
+
+        <a
+          class="icon-btn"
+          href="https://github.com/imlinhanchao/ebook-api"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="访问 Ebook API GitHub 仓库"
+          title="Ebook API GitHub 仓库"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero subpage-hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="version-pill" aria-live="polite">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span id="ebook-api-version-badge">正在查询 Ebook API 最新 Release…</span>
+          </div>
+
+          <h1 class="hero-title">自建 Ebook API<br />专属书源服务</h1>
+
+          <p class="hero-subtitle">
+            <code>ebook-api</code> 是为 Echo（回声）打造的独立多书源搜索与流式下载 HTTP 服务，采用纯 Go 标准库零依赖构建。Echo 默认可直接跳过配置、纯本地导入 EPUB / TXT 开读；当你需要在客户端内联搜书下载时，只需数分钟部署并填入服务地址。
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn-primary" href="#deploy">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="7" rx="2" />
+                <rect x="2" y="14" width="20" height="7" rx="2" />
+                <line x1="6" y1="6.5" x2="6.01" y2="6.5" />
+                <line x1="6" y1="17.5" x2="6.01" y2="17.5" />
+              </svg>
+              <span class="btn-label-group">
+                <span>开始部署</span>
+                <span class="btn-meta">二进制 / Docker Compose / systemd / 源码</span>
+              </span>
+            </a>
+
+            <a
+              class="btn-secondary"
+              href="https://github.com/imlinhanchao/ebook-api"
+              target="_blank"
+              rel="noopener noreferrer"
+            >GitHub 源码</a>
+          </div>
+
+          <ul class="hero-specs" aria-label="核心特性">
+            <li>Go 1.24+ 零外部依赖</li>
+            <li>AES-256-GCM 加密令牌</li>
+            <li>内置 Web 调试台</li>
+            <li>Linux / macOS / Windows / Docker</li>
+          </ul>
+        </div>
+
+        <div class="hero-visual">
+          <div class="arch-card" role="region" aria-label="Ebook API 请求与认证架构示意图">
+            <div class="arch-card-head">
+              <span class="arch-title">请求链路与无状态令牌</span>
+              <span class="arch-port">:8091</span>
+            </div>
+
+            <div class="arch-flow">
+              <div class="arch-node">
+                <span class="arch-node-label">Echo 客户端</span>
+                <span class="arch-node-desc">填写自建地址与可选 Key，凭据加密后本地保管</span>
+              </div>
+
+              <div class="arch-arrow" aria-hidden="true">
+                <span class="arch-arrow-badge">X-API-Key + X-Provider-Token (ebk1.*)</span>
+              </div>
+
+              <div class="arch-node arch-node-highlight">
+                <span class="arch-node-label">自建 ebook-api :8091</span>
+                <span class="arch-node-desc">AES-256-GCM 当场解封 · 流式透传文件与 ETag</span>
+              </div>
+
+              <div class="arch-arrow" aria-hidden="true">
+                <span class="arch-arrow-badge">上游检索 / 镜像自动故障切换</span>
+              </div>
+
+              <div class="arch-node">
+                <span class="arch-node-label">Z-Library / 可扩展书源</span>
+                <span class="arch-node-desc">内置 zlib · 按 Provider 接口扩展更多书源</span>
+              </div>
+            </div>
+
+            <div class="arch-json">
+              <div class="arch-json-head">GET /health</div>
+              <pre><code>{
+  "ok": true,
+  "default_provider": "zlib",
+  "providers": ["zlib"]
+}</code></pre>
+            </div>
+
+            <div class="arch-pills">
+              <span>无数据库</span>
+              <span>流式不落盘</span>
+              <span>不传明文密码</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="deploy" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">方式选择</span>
+          <h2 class="section-title">部署 Ebook API 服务</h2>
+          <p class="section-desc">
+            支持预编译单文件二进制、Docker Compose、Linux systemd 后台服务与源码编译运行，下载包实时拉取自 GitHub 最新 Release。
+          </p>
+        </div>
+
+        <div class="release-bar" aria-live="polite">
+          <div class="release-meta">
+            <span id="ebook-api-release-version" class="release-tag">待同步</span>
+            <span id="ebook-api-release-date" class="release-date">正在查询 GitHub Releases…</span>
+            <span id="ebook-api-release-tag-note" class="release-note-badge" hidden></span>
+          </div>
+
+          <div class="release-controls">
+            <a
+              id="ebook-api-checksums-link"
+              class="pill-link"
+              href="https://github.com/imlinhanchao/ebook-api/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              hidden
+            >SHA-256 校验清单</a>
+
+            <button
+              type="button"
+              id="mirror-toggle"
+              class="mirror-btn"
+              aria-pressed="false"
+              title="切换直连或 ghfast.top 国内加速镜像下载"
+            >
+              <span class="mirror-dot" aria-hidden="true"></span>
+              <span id="mirror-label">线路：GitHub 直连</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="binary-grid" aria-label="Ebook API 预编译安装包">
+          <a
+            class="binary-card"
+            data-ebook-download="linuxAmd64"
+            href="https://github.com/imlinhanchao/ebook-api/releases"
+          >
+            <span class="binary-name">Linux x64</span>
+            <span class="binary-meta">linux_amd64.tar.gz</span>
+            <span class="binary-size" data-ebook-size="linuxAmd64">tar.gz</span>
+          </a>
+
+          <a
+            class="binary-card"
+            data-ebook-download="linuxArm64"
+            href="https://github.com/imlinhanchao/ebook-api/releases"
+          >
+            <span class="binary-name">Linux ARM64</span>
+            <span class="binary-meta">linux_arm64.tar.gz</span>
+            <span class="binary-size" data-ebook-size="linuxArm64">tar.gz</span>
+          </a>
+
+          <a
+            class="binary-card"
+            data-ebook-download="darwinArm64"
+            href="https://github.com/imlinhanchao/ebook-api/releases"
+          >
+            <span class="binary-name">macOS Apple Silicon</span>
+            <span class="binary-meta">darwin_arm64.tar.gz</span>
+            <span class="binary-size" data-ebook-size="darwinArm64">tar.gz</span>
+          </a>
+
+          <a
+            class="binary-card"
+            data-ebook-download="darwinAmd64"
+            href="https://github.com/imlinhanchao/ebook-api/releases"
+          >
+            <span class="binary-name">macOS Intel</span>
+            <span class="binary-meta">darwin_amd64.tar.gz</span>
+            <span class="binary-size" data-ebook-size="darwinAmd64">tar.gz</span>
+          </a>
+
+          <a
+            class="binary-card"
+            data-ebook-download="windowsAmd64"
+            href="https://github.com/imlinhanchao/ebook-api/releases"
+          >
+            <span class="binary-name">Windows x64</span>
+            <span class="binary-meta">windows_amd64.zip</span>
+            <span class="binary-size" data-ebook-size="windowsAmd64">zip</span>
+          </a>
+        </div>
+
+        <div class="deploy-tabs">
+          <div class="tab-list" role="tablist" aria-label="选择部署方式">
+            <button
+              type="button"
+              id="tab-binary"
+              class="tab-btn"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-binary"
+              tabindex="0"
+            >预编译二进制（推荐）</button>
+            <button
+              type="button"
+              id="tab-docker"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-docker"
+              tabindex="-1"
+            >Docker Compose</button>
+            <button
+              type="button"
+              id="tab-systemd"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-systemd"
+              tabindex="-1"
+            >Linux systemd</button>
+            <button
+              type="button"
+              id="tab-source"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-source"
+              tabindex="-1"
+            >源码构建</button>
+          </div>
+
+          <div
+            id="panel-binary"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-binary"
+          >
+            <p class="tab-intro">
+              每个发行压缩包均已内置 <code>static/</code> 测试台、<code>.env.example</code> 与配置模板，解压即可单文件运行。若需局域网内手机或平板连接，请将 <code>EBOOK_ADDR</code> 设为 <code>0.0.0.0:8091</code>。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>Linux / macOS 解压与启动示例</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>tar -xzf ebook-api_<span data-ebook-cmd-tag>v0.1.0</span>_linux_amd64.tar.gz
+cd ebook-api_<span data-ebook-cmd-tag>v0.1.0</span>_linux_amd64
+cp .env.example .env
+
+# 需局域网/移动端访问时改监听 0.0.0.0（按需设置 EBOOK_API_KEY）
+sed -i 's/^EBOOK_ADDR=.*/EBOOK_ADDR=0.0.0.0:8091/' .env
+
+./ebook-api</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>启动后连通性自检</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>curl -s http://127.0.0.1:8091/health
+# 浏览器打开 http://&lt;你的设备或服务器IP&gt;:8091/ 可进入内置 Web 调试台</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-docker"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-docker"
+            hidden
+          >
+            <p class="tab-intro">
+              项目根目录自带多阶段构建 <code>Dockerfile</code> 与 <code>docker-compose.yml</code>（基于 <code>distroless/static-debian12:nonroot</code>，默认已监听 <code>0.0.0.0:8091</code> 并映射 <code>8091:8091</code>）。为避免容器重建后导致客户端缓存的 <code>ebk1.*</code> 令牌失效，建议固定 <code>EBOOK_SECRET</code> 或挂载 <code>/app/data</code> 卷。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>Docker Compose 一键启动</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>git clone https://github.com/imlinhanchao/ebook-api.git
+cd ebook-api
+cp .env.example .env
+docker compose up -d --build
+docker compose logs -f ebook-api</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>推荐：追加 docker-compose.override.yml 持久化 /app/data</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>services:
+  ebook-api:
+    volumes:
+      - ./data:/app/data</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-systemd"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-systemd"
+            hidden
+          >
+            <p class="tab-intro">
+              Linux 发行包与源码仓库内置 <code>deploy/ebook-api.service</code> 模板，可将 <code>__APP_DIR__</code> 替换为你的安装目录并托管为用户级常驻服务（日志自动写入 <code>.tmp/ebook-api.log</code>，默认读取可执行文件位于 <code>__APP_DIR__/bin/ebook-api</code>）。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>systemd --user 后台托管</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>mkdir -p ~/.config/systemd/user /opt/ebook-api/.tmp
+sed "s|__APP_DIR__|/opt/ebook-api|g" deploy/ebook-api.service &gt; ~/.config/systemd/user/ebook-api.service
+systemctl --user daemon-reload
+systemctl --user enable --now ebook-api
+systemctl --user status ebook-api</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>允许退出 SSH 会话后继续常驻运行</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>sudo loginctl enable-linger "$USER"
+tail -f /opt/ebook-api/.tmp/ebook-api.log</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-source"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-source"
+            hidden
+          >
+            <p class="tab-intro">
+              本地需安装 <strong>Go 1.24+</strong>。仓库无任何第三方 Go 模块依赖，可直接通过 <code>Makefile</code> 编译静态可执行文件或运行全套测试。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>Go 源码编译与测试</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>git clone https://github.com/imlinhanchao/ebook-api.git
+cd ebook-api
+cp .env.example .env
+
+# 校验与并发竞争测试
+make test
+
+# 编译至 bin/ebook-api 并运行
+make build
+./bin/ebook-api</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout-grid" aria-label="部署关键注意事项">
+          <div class="callout-card">
+            <h3>1. 局域网 / 手机端连接须改监听地址</h3>
+            <p>
+              <code>.env.example</code> 默认绑定 <code>127.0.0.1:8091</code>，仅限本机回环访问。手机等设备需连接时，请修改为 <code>EBOOK_ADDR=0.0.0.0:8091</code> 并放行服务器/系统防火墙的 <code>8091</code> 端口，或由 Nginx / Caddy 反向代理。
+            </p>
+          </div>
+          <div class="callout-card">
+            <h3>2. 公网暴露务必启用 API Key</h3>
+            <p>
+              面向公网部署时请设置强随机 <code>EBOOK_API_KEY</code>，并保持 <code>EBOOK_ALLOW_PLAIN_CRED_HEADERS=false</code>，确保客户端仅携带加密令牌请求服务。
+            </p>
+          </div>
+          <div class="callout-card">
+            <h3>3. 固定密钥以免加密令牌失效</h3>
+            <p>
+              未设置 <code>EBOOK_SECRET</code> 时服务会自动生成并持久化到 <code>&lt;EBOOK_DATA_DIR&gt;/secret.key</code>。多实例或容器重建场景建议显式填写 32 字节 <code>EBOOK_SECRET</code>（base64 或 hex）或挂载数据卷。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="connect" class="section section-tinted">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">客户端联动</span>
+          <h2 class="section-title">在 Echo 客户端接入使用</h2>
+          <p class="section-desc">
+            服务运行后，按以下四步即可完成连通性验证、客户端绑定与在线搜书；若暂无自建需求也可随时停用，保留纯本地导入。
+          </p>
+        </div>
+
+        <div class="steps-grid">
+          <article class="step-card">
+            <span class="step-num">01</span>
+            <h3>验证服务与内置调试台</h3>
+            <p>
+              先确认服务可访问：浏览器打开 <code>http://&lt;你的地址&gt;:8091/</code> 可直接测试书源登录与查书，或请求 <code>GET /health</code> 检查已启用书源列表中是否包含 <code>zlib</code>。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">02</span>
+            <h3>在 Echo 填写书源地址</h3>
+            <p>
+              首次启动引导第 1 步，或前往「我的 → <code>ebook-api 书源服务</code>」/「发现」页右上角「配置服务」，输入例如 <code>http://192.168.1.10:8091</code> 与可选 <code>API Key</code>，点击「测试连接」通过后保存。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">03</span>
+            <h3>配置书源账号与配额</h3>
+            <p>
+              进入「我的 → <code>书源账号</code>」，选择可用的 Z-Library 镜像域名，支持「邮箱密码」或粘贴浏览器 Cookie（<code>remix_userid</code> / <code>remix_userkey</code>）自动封装为加密 <code>ebk1.*</code> 令牌并验证配额。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">04</span>
+            <h3>在线搜书或随时切回本地</h3>
+            <p>
+              配置完成后「发现」页立即解锁搜索与格式/语言/年份筛选，支持下载入库或直接转有声书。若日后只想读本地书，可在设置页点击「跳过 / 清空书源配置（仅使用本地导入）」。
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="config" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">参数清单</span>
+          <h2 class="section-title">环境变量与反向代理配置</h2>
+          <p class="section-desc">
+            程序启动时自动加载同目录的 <code>.env</code> 文件，已设置的系统环境变量优先级更高。
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="tts-table">
+            <thead>
+              <tr>
+                <th>环境变量</th>
+                <th>默认值</th>
+                <th>说明与建议</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>EBOOK_ADDR</code></td>
+                <td class="mono">127.0.0.1:8091</td>
+                <td>HTTP 监听地址；局域网/容器访问请设为 <code>0.0.0.0:8091</code></td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_API_KEY</code></td>
+                <td class="mono">空（不鉴权）</td>
+                <td>服务级鉴权密钥；除 <code>/health</code> 外均校验 <code>Bearer</code> / <code>X-API-Key</code></td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_SECRET</code></td>
+                <td class="mono">自动生成</td>
+                <td>32 字节 AES-256-GCM 密钥（base64 或 hex），用于加解密 <code>credential_token</code></td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_DATA_DIR</code></td>
+                <td class="mono">data</td>
+                <td>数据目录；未指定 <code>EBOOK_SECRET</code> 时自动在此持久化 <code>secret.key</code></td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_STATIC_DIR</code></td>
+                <td class="mono">static</td>
+                <td>内置前端调试台目录（磁盘缺失自动回退内嵌资源；设为 <code>off</code> 可关闭 UI）</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_DEFAULT_PROVIDER</code></td>
+                <td class="mono">zlib</td>
+                <td>调用 <code>/v1/search</code> 未指定 <code>provider</code> 时使用的默认书源 ID</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_ENABLED_PROVIDERS</code></td>
+                <td class="mono">空（全部启用）</td>
+                <td>启用的书源白名单，逗号分隔（例如 <code>zlib</code>）</td>
+              </tr>
+              <tr>
+                <td><code>ZLIB_DOMAINS</code></td>
+                <td class="mono">https://z-lib.gd,...</td>
+                <td>Z-Library 镜像列表，逗号分隔并按优先级自动健康探测与故障切换</td>
+              </tr>
+              <tr>
+                <td><code>ZLIB_DOMAIN</code> / <code>ZLIB_REMIX_*</code></td>
+                <td class="mono">空</td>
+                <td>服务端默认 Z-Library 凭据（<code>ZLIB_REMIX_USERID</code> / <code>ZLIB_REMIX_USERKEY</code>），请求未带令牌时兜底</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_CRED_&lt;PROVIDER&gt;_&lt;KEY&gt;</code></td>
+                <td class="mono">空</td>
+                <td>任意自定义书源的通用默认凭据注入格式</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_PUBLIC_DOWNLOAD</code></td>
+                <td class="mono">false</td>
+                <td>设为 <code>true</code> 时 <code>GET</code> 下载接口放行无 <code>EBOOK_API_KEY</code> 校验，方便接入 CDN 回源</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_DOWNLOAD_CACHE_CONTROL</code></td>
+                <td class="mono">public, max-age=2592000, immutable</td>
+                <td>图书下载流响应的 <code>Cache-Control</code> 头，配合 <code>ETag</code> 减少重复下载与配额损耗</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_MAX_DOWNLOAD_MB</code></td>
+                <td class="mono">500</td>
+                <td>单本图书最大下载体积上限（MB），设为 <code>0</code> 表示不限制</td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_ALLOW_PLAIN_CRED_HEADERS</code></td>
+                <td class="mono">false</td>
+                <td>是否允许明文凭据请求头；生产环境强烈建议保持 <code>false</code></td>
+              </tr>
+              <tr>
+                <td><code>EBOOK_CORS_ORIGINS</code></td>
+                <td class="mono">空</td>
+                <td>允许跨域调用的 Origin 列表，逗号分隔（<code>*</code> 表示允许所有）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="config-extras">
+          <div class="code-block">
+            <div class="code-block-head">
+              <span>推荐公网部署 .env 示例</span>
+              <button type="button" class="copy-btn">复制</button>
+            </div>
+            <pre><code>EBOOK_ADDR=127.0.0.1:8091
+EBOOK_DATA_DIR=/opt/ebook-api/data
+EBOOK_API_KEY=请替换为高强度随机密钥
+# 生成示例：openssl rand -base64 32
+EBOOK_SECRET=请替换为32字节Base64或Hex密钥
+EBOOK_ALLOW_PLAIN_CRED_HEADERS=false
+EBOOK_MAX_DOWNLOAD_MB=500
+ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib.bz</code></pre>
+          </div>
+
+          <div class="code-block">
+            <div class="code-block-head">
+              <span>Nginx HTTPS 反向代理与 CDN 缓存提示</span>
+              <button type="button" class="copy-btn">复制</button>
+            </div>
+            <pre><code>location / {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # 大文件流式透传，关闭代理缓冲降低内存与首字节延迟
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+}
+
+# CDN 加速：/v1/providers/*/books/*/download 对同一本书 URL 固定
+# 在 .env 配好默认凭据并开启 EBOOK_PUBLIC_DOWNLOAD=true 后，
+# 让 CDN 忽略请求头按纯 URL 缓存即可共享文件流并节省上游配额</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="api" class="section section-tinted">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">开发与排错</span>
+          <h2 class="section-title">双层认证、API 速查与常见问题</h2>
+          <p class="section-desc">
+            便于二次开发自定义书源、使用 <code>curl</code> 调试接口，以及快速定位常见连接或上游异常。
+          </p>
+        </div>
+
+        <div class="feature-grid api-arch-grid">
+          <article class="feature-card">
+            <h3>双层分离认证设计</h3>
+            <p>
+              <strong>服务级鉴权</strong>由 <code>Authorization: Bearer &lt;EBOOK_API_KEY&gt;</code> 或 <code>X-API-Key</code> 控制；<strong>书源级凭据</strong>则由服务端用 AES-256-GCM 封装为绑定书源 ID 的 <code>ebk1.*</code> 不透明令牌，通过 <code>X-Provider-Token</code> 回传。合并优先级：<code>POST credential_token</code> &gt; <code>POST credentials</code> &gt; <code>X-Provider-Token</code> &gt; <code>X-Provider-Domain</code> &gt; <code>.env</code> 服务端默认凭据。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <h3>插件化扩展新书源</h3>
+            <p>
+              在 <code>internal/providers/&lt;source&gt;/</code> 实现 <code>Provider</code> 核心接口（<code>ID</code> / <code>DisplayName</code> / <code>Capabilities</code> / <code>Search</code> / <code>GetBook</code> / <code>OpenDownload</code>），按需实现 <code>InfoProvider</code>、<code>Verifier</code>、<code>PasswordAuthenticator</code>、<code>DomainProber</code> 等可选接口并在 <code>cmd/ebook-api/main.go</code> 的 <code>registerProviders</code> 注册，即可自动接入聚合搜索与加密令牌。
+            </p>
+          </article>
+        </div>
+
+        <div class="table-wrap api-table-wrap">
+          <table class="tts-table">
+            <thead>
+              <tr>
+                <th>方法</th>
+                <th>路径</th>
+                <th>用途</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="api-method api-method-get">GET</span></td>
+                <td><code>/</code> · <code>/health</code></td>
+                <td>内置前端测试台 · 健康检查（返回版本号与已启用书源列表）</td>
+              </tr>
+              <tr>
+                <td><span class="api-method api-method-get">GET</span></td>
+                <td><code>/v1/providers</code> · <code>/v1/providers/{id}</code></td>
+                <td>获取已注册书源及其支持的能力与凭据字段元数据</td>
+              </tr>
+              <tr>
+                <td><span class="api-method api-method-post">POST</span></td>
+                <td><code>/v1/providers/{id}/login</code> · <code>/seal</code></td>
+                <td>账密登录或封装已有 Cookie，生成加密 <code>credential_token</code></td>
+              </tr>
+              <tr>
+                <td><span class="api-method api-method-post">POST</span></td>
+                <td><code>/v1/providers/{id}/verify</code> · <code>/probe</code></td>
+                <td>校验令牌有效性及每日下载配额 · 探测上游镜像连通性</td>
+              </tr>
+              <tr>
+                <td><span class="api-method api-method-get">GET</span> <span class="api-method api-method-post">POST</span></td>
+                <td><code>/v1/search</code></td>
+                <td>搜索图书（支持 <code>ext</code> / <code>lang</code> / <code>year_from</code> / <code>order</code> 及 <code>provider=all</code> 聚合）</td>
+              </tr>
+              <tr>
+                <td><span class="api-method api-method-get">GET</span> <span class="api-method api-method-post">POST</span></td>
+                <td><code>/v1/providers/{id}/books/{ref}</code></td>
+                <td>获取单本图书简介、页数、体积、格式与可下载引用</td>
+              </tr>
+              <tr>
+                <td><span class="api-method api-method-get">GET</span> <span class="api-method api-method-post">POST</span></td>
+                <td><code>/v1/providers/{id}/books/{ref}/download</code></td>
+                <td>流式透传图书文件，响应附带确定性 <code>ETag</code> 与 <code>Cache-Control</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="code-block">
+          <div class="code-block-head">
+            <span>curl 端到端调试示例（封装令牌 + 搜书 + 下载）</span>
+            <button type="button" class="copy-btn">复制</button>
+          </div>
+          <pre><code># 1. 登录换取加密令牌（或调用 /seal 传入 Cookie）
+TOKEN=$(curl -s -X POST http://127.0.0.1:8091/v1/providers/zlib/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"your-password"}' | jq -r .credential_token)
+
+# 2. 搜索 EPUB 图书
+curl -s "http://127.0.0.1:8091/v1/search?q=%E4%B8%89%E4%BD%93&amp;provider=zlib&amp;ext=epub&amp;limit=10" \
+  -H "X-Provider-Token: $TOKEN"
+
+# 3. 按书源返回 ref 流式下载
+curl -L -J -O "http://127.0.0.1:8091/v1/providers/zlib/books/123456:abcdef/download" \
+  -H "X-Provider-Token: $TOKEN"</code></pre>
+        </div>
+
+        <div class="faq-stack" aria-label="常见问题与错误码排查">
+          <details class="release-notes">
+            <summary>
+              <span>手机客户端「测试连接」超时或无法连上自建服务？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li>检查 <code>EBOOK_ADDR</code> 是否仍为默认的 <code>127.0.0.1:8091</code>；手机与电脑处于同一局域网时请改为 <code>0.0.0.0:8091</code> 并使用电脑局域网 IP（如 <code>http://192.168.1.10:8091</code>）。</li>
+                <li>确认宿主机防火墙（如 <code>ufw</code> / 防火墙规则）或云服务器安全组已放行对应端口；公网环境建议使用域名搭配 HTTPS 反向代理。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="release-notes">
+            <summary>
+              <span>返回 <code>401 UNAUTHORIZED</code> 或 <code>SESSION_EXPIRED</code> 怎么办？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li><code>UNAUTHORIZED</code>：服务端启用了 <code>EBOOK_API_KEY</code>，请在 Echo 客户端的「ebook-api 书源服务」补填匹配的 API Key。</li>
+                <li><code>SESSION_EXPIRED</code>：常见于上游账号 Cookie 过期，或服务重启/重建容器后变更了 <code>EBOOK_SECRET</code>。请固定 <code>EBOOK_SECRET</code> 后在「书源账号」重新登录或导入 Cookie。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="release-notes">
+            <summary>
+              <span>返回 <code>403 QUOTA_EXCEEDED</code> 或 <code>409 PROVIDER_NOT_CONFIGURED</code>？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li><code>QUOTA_EXCEEDED</code>：当前账号今日在上游站点的免费下载额度已用完，可在「书源账号」更换账号，或借助 CDN 缓存热门书籍下载流。</li>
+                <li><code>PROVIDER_NOT_CONFIGURED</code>：请求未附带有效 <code>X-Provider-Token</code> 且服务端未配置 <code>ZLIB_REMIX_USERID</code> / <code>ZLIB_REMIX_USERKEY</code> 回退凭据，请前往 Echo「我的 → 书源账号」完成登录验证。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="release-notes">
+            <summary>
+              <span>遇到 <code>503 PROVIDER_BLOCKED</code> 或镜像不可达？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li>表示当前使用的镜像域名触发了 Cloudflare 或上游站点的风控拦截，或部署主机与该镜像之间网络受限。</li>
+                <li>建议在 Echo「书源账号」切换其他可用镜像域名，或编辑服务端的 <code>ZLIB_DOMAINS</code> 调整镜像优先级与备用列表。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="logo.svg" alt="" width="24" height="24" aria-hidden="true" />
+        <span>Echo · 回声 · MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Echo 官网首页</a>
+        <a href="https://github.com/imlinhanchao/ebook-api" target="_blank" rel="noopener noreferrer">Ebook API 源码</a>
+        <a href="https://github.com/imlinhanchao/ebook-api/releases" target="_blank" rel="noopener noreferrer">Ebook API Releases</a>
+        <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">Echo App 源码</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="ebook-api.js"></script>
+</body>
+</html>
