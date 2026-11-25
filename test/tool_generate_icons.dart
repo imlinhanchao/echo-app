@@ -6,9 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('Generate high fidelity Echo app icons', () async {
     const size = 1024.0;
-    final outDir = Directory(
-      '/home/hancel/project/audio_book/echo-app/assets/icon',
-    );
+    final outDir = Directory('assets/icon');
     if (!outDir.existsSync()) {
       outDir.createSync(recursive: true);
     }
