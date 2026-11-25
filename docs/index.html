@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Echo · 回声 — 静默阅读，随时聆听</title>
+  <meta name="description" content="Echo（回声）是一款采用极简书房美学的跨平台听看一体书客户端，内置端侧离线语音引擎、边听边看句级高亮、沉浸分页阅读与划线笔记，支持 Android、Windows、macOS 与 Linux。" />
+  <meta name="theme-color" content="#0D0E10" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Echo · 回声 — 静默阅读，随时聆听" />
+  <meta property="og:description" content="端侧离线语音驱动的跨平台听看一体书客户端，支持 Android / Windows / macOS / Linux。" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('echo-site-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.dataset.theme = saved;
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至正文内容</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#top" aria-label="Echo 回声首页">
+        <img class="brand-logo" src="logo.svg" alt="Echo Logo" width="34" height="34" />
+        <span class="brand-text">
+          <span class="brand-name">Echo · 回声</span>
+          <span class="brand-tagline">极简书房 · 听看一体</span>
+        </span>
+      </a>
+
+      <nav class="site-nav" aria-label="页面导航">
+        <a href="#features">核心体验</a>
+        <a href="#tts">端侧语音</a>
+        <a href="#download">全平台下载</a>
+      </nav>
+
+      <div class="header-actions">
+        <button
+          type="button"
+          id="theme-toggle"
+          class="icon-btn"
+          aria-label="切换浅色/深色主题"
+          title="切换羊皮纸浅色 / 暖墨黑深色"
+        >
+          <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        </button>
+
+        <a
+          class="icon-btn"
+          href="https://github.com/imlinhanchao/echo-app"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="访问 GitHub 仓库"
+          title="GitHub 仓库"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="version-pill" aria-live="polite">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span id="hero-version-badge">正在查询 GitHub 最新 Release…</span>
+          </div>
+
+          <h1 class="hero-title">静默阅读，<br />随时聆听</h1>
+
+          <p class="hero-subtitle">
+            Echo（回声）是以「极简书房」为灵魂打造的跨平台听看一体书客户端。纯本地解析 EPUB 与 TXT，借助端侧离线语音引擎实现边听边看、即时变速、划线笔记与系统级锁屏播控。
+          </p>
+
+          <div class="hero-actions">
+            <a
+              id="hero-primary-cta"
+              class="btn-primary"
+              href="https://github.com/imlinhanchao/echo-app/releases"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span class="btn-label-group">
+                <span id="hero-cta-label">前往 GitHub Releases</span>
+                <span id="hero-cta-meta" class="btn-meta">自动识别当前设备 · 直连最新正式版</span>
+              </span>
+            </a>
+
+            <a class="btn-secondary" href="#download">查看全部平台</a>
+          </div>
+
+          <ul class="hero-specs" aria-label="支持平台与核心特性">
+            <li>Android · Windows · macOS · Linux</li>
+            <li>EPUB 2/3 &amp; TXT 单机即用</li>
+            <li>5 档端侧离线 TTS</li>
+          </ul>
+        </div>
+
+        <div class="hero-visual">
+          <div id="reader-mockup" class="reader-mockup" role="region" aria-label="边听边看阅读器交互预览">
+            <div class="mockup-topbar">
+              <div class="mockup-book-info">
+                <span class="mockup-book-title">呐喊 · 自序</span>
+                <span class="mockup-chapter">第 1 / 15 章 · 3 / 18 页</span>
+              </div>
+              <div class="mockup-ink-swatches" aria-label="五色划线墨色预览" title="五色墨色划线">
+                <span class="swatch swatch-gold"></span>
+                <span class="swatch swatch-vermilion"></span>
+                <span class="swatch swatch-sage"></span>
+                <span class="swatch swatch-cobalt"></span>
+                <span class="swatch swatch-plum"></span>
+              </div>
+            </div>
+
+            <article class="mockup-paper">
+              <p class="mockup-paragraph">
+                <span class="cue-sentence is-active" data-cue="0">我在年轻时候也曾经做过许多梦，后来大半忘却了，但自己也并不以为可惜。</span>
+                <span class="cue-sentence" data-cue="1"><u class="ink-underline">所谓回忆者，虽说可以使人欢欣，有时也不免使人寂寞</u>，使精神的丝缕还牵着已逝的寂寞的时光，又有什么意味呢，而我偏苦于不能全忘却。</span>
+                <span class="cue-sentence" data-cue="2">这不能全忘的一部分，到现在便成了《呐喊》的来由。</span>
+              </p>
+              <div class="mockup-note-chip">
+                <span class="note-dot"></span>
+                <span>笔记 · 记忆与书写的起点</span>
+              </div>
+            </article>
+
+            <div class="mockup-footer">
+              <div class="mockup-minibar">
+                <button
+                  type="button"
+                  id="mockup-play-btn"
+                  class="mockup-play-btn"
+                  aria-pressed="true"
+                  aria-label="播放或暂停示例朗读"
+                >
+                  <svg class="icon-pause" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="5" width="4" height="14" rx="1.2" />
+                    <rect x="14" y="5" width="4" height="14" rx="1.2" />
+                  </svg>
+                  <svg class="icon-play" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                    <polygon points="7,5 19,12 7,19" />
+                  </svg>
+                </button>
+                <span id="mockup-cue-label" class="mockup-cue-label">边听边看 · 句级高亮联动</span>
+                <button
+                  type="button"
+                  id="mockup-speed-btn"
+                  class="mockup-speed-pill"
+                  aria-label="切换示例朗读倍速"
+                >1.0x</button>
+              </div>
+              <div class="mockup-progress-line" aria-hidden="true">
+                <span id="mockup-progress-fill" class="mockup-progress-fill"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">设计哲学</span>
+          <h2 class="section-title">为深度阅读与专注听书而生</h2>
+          <p class="section-desc">
+            去除音乐播放器的喧嚣霓虹与冗余装饰，用暖墨与纸白构建克制耐看的阅读容器。
+          </p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+              </svg>
+            </div>
+            <h3>极简书房与离线书库</h3>
+            <p>
+              暖墨黑（<code>#0D0E10</code>）与羊皮纸白（<code>#F8F5F0</code>）双色对偶，自动生成 2:3 复古布面兜底封面。内置纯 Dart EPUB 2/3 与 TXT 解析器，免部署服务器即可导入开读，也支持接入 Ebook API 搜书下载。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v20M17 5v14M7 7v10M21 9v6M3 10v4" />
+              </svg>
+            </div>
+            <h3>边听边看与即时倍速</h3>
+            <p>
+              边听边看状态下句级高亮平滑联动；支持 <code>0.5x–2.5x</code>（<code>0.05x</code> 步进）不重合成、不中断句子的即时变速不变调调节，并可一键按章在后台离线生成分块有声书。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+              </svg>
+            </div>
+            <h3>沉浸分页与无遮挡划线</h3>
+            <p>
+              按视口尺寸精确分页与缓存，阅读默认防锁屏常亮。长按选词触发五级智能避让浮动工具栏，彻底避免遮挡正文与拖动手柄，支持五色墨色下划线、笔记筛选与跨章直达。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+                <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+              </svg>
+            </div>
+            <h3>锁屏与耳机原生播控</h3>
+            <p>
+              通过系统级媒体会话接入 Android 锁屏卡片与通知栏播放器，保持音频焦点与前台服务稳态，支持蓝牙及线控耳机锁屏暂停与恢复，并在主动停播时自动撤销通知栏。
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="tts" class="section section-tinted">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">端侧语音</span>
+          <h2 class="section-title">完全运行在设备本地的语音引擎</h2>
+          <p class="section-desc">
+            支持本机系统引擎零下载即开即用，亦内置多款精选 Sherpa-ONNX 离线神经语音模型与国内加速镜像切换。
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="tts-table">
+            <thead>
+              <tr>
+                <th>引擎 / 模型</th>
+                <th>预估体积</th>
+                <th>架构与采样率</th>
+                <th>适用场景</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <span class="model-name">Android 系统语音</span>
+                  <span class="model-badge">免下载推荐</span>
+                </td>
+                <td class="mono">0 MB</td>
+                <td>本机引擎 / MultiTTS 接口</td>
+                <td>零流量直连系统已装音色，支持边听边看与离线转有声书</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="model-name">ZipVoice INT8 中英</span>
+                  <span class="model-badge">音色克隆</span>
+                </td>
+                <td class="mono">~156 MB</td>
+                <td>ZipVoice + Vocos 24kHz</td>
+                <td>零样本音色克隆，内置默认参考音色且支持导入 3–10 秒 WAV</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="model-name">MeloTTS 中英混读</span>
+                </td>
+                <td class="mono">~159 MB</td>
+                <td>VITS 多语种</td>
+                <td>韵律自然流畅，中英夹杂长篇小说表现出色</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="model-name">Matcha 中文播音女声</span>
+                  <span class="model-badge">长篇优选</span>
+                </td>
+                <td class="mono">~123 MB</td>
+                <td>Matcha + Vocos 22kHz</td>
+                <td>标贝标准女声，发音清晰饱满、RTF 极低</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="model-name">Matcha 中英混读</span>
+                </td>
+                <td class="mono">~127 MB</td>
+                <td>Matcha + Vocos 16kHz</td>
+                <td>非自回归流匹配架构，体积轻巧、中英均衡</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="download" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">获取客户端</span>
+          <h2 class="section-title">全平台下载</h2>
+          <p class="section-desc">
+            安装链接实时取自 GitHub 最新 Release（目前覆盖 Android 与三大桌面端，暂不包含 iOS）。
+          </p>
+        </div>
+
+        <div class="release-bar" aria-live="polite">
+          <div class="release-meta">
+            <span id="release-version" class="release-tag">待同步</span>
+            <span id="release-date" class="release-date">正在查询 GitHub Releases…</span>
+            <span id="release-tag-note" class="release-note-badge" hidden></span>
+          </div>
+
+          <div class="release-controls">
+            <a
+              id="checksums-link"
+              class="pill-link"
+              href="https://github.com/imlinhanchao/echo-app/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              hidden
+            >SHA-256 校验清单</a>
+
+            <button
+              type="button"
+              id="mirror-toggle"
+              class="mirror-btn"
+              aria-pressed="false"
+              title="切换直连或 ghfast.top 国内加速镜像下载"
+            >
+              <span class="mirror-dot" aria-hidden="true"></span>
+              <span id="mirror-label">线路：GitHub 直连</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="download-grid">
+          <article class="platform-card" data-platform-card="android">
+            <div class="card-top">
+              <div class="platform-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="6" y="2" width="12" height="20" rx="2.5" />
+                  <line x1="10.5" y1="18.5" x2="13.5" y2="18.5" />
+                </svg>
+              </div>
+              <span class="platform-rec-badge" hidden>推荐 · 当前设备</span>
+            </div>
+            <h3>Android</h3>
+            <p class="platform-desc">支持 Android 7.0+（API 24），含原生锁屏与后台播控服务。</p>
+            <p class="platform-asset-meta" data-meta="android">arm64-v8a APK · 适配现代手机与平板</p>
+            <div class="card-actions">
+              <a
+                class="download-btn"
+                data-download="androidArm64"
+                href="https://github.com/imlinhanchao/echo-app/releases"
+              >下载 ARM64 APK</a>
+              <a
+                class="secondary-link"
+                data-download="androidUniversal"
+                href="https://github.com/imlinhanchao/echo-app/releases"
+              >
+                <span data-meta="androidUniversal">或下载 Universal 全架构通用包</span>
+              </a>
+            </div>
+          </article>
+
+          <article class="platform-card" data-platform-card="macos">
+            <div class="card-top">
+              <div class="platform-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="4" width="20" height="14" rx="2" />
+                  <path d="M8 21h8M12 18v3" />
+                </svg>
+              </div>
+              <span class="platform-rec-badge" hidden>推荐 · 当前系统</span>
+            </div>
+            <h3>macOS</h3>
+            <p class="platform-desc">Universal 通用二进制 DMG，原生兼容 Apple Silicon 与 Intel。</p>
+            <p class="platform-asset-meta" data-meta="macos">echo_macos_universal.dmg</p>
+            <div class="card-actions">
+              <a
+                class="download-btn"
+                data-download="macos"
+                href="https://github.com/imlinhanchao/echo-app/releases"
+              >下载 Universal DMG</a>
+            </div>
+          </article>
+
+          <article class="platform-card" data-platform-card="windows">
+            <div class="card-top">
+              <div class="platform-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="8" height="8" rx="1" />
+                  <rect x="13" y="3" width="8" height="8" rx="1" />
+                  <rect x="3" y="13" width="8" height="8" rx="1" />
+                  <rect x="13" y="13" width="8" height="8" rx="1" />
+                </svg>
+              </div>
+              <span class="platform-rec-badge" hidden>推荐 · 当前系统</span>
+            </div>
+            <h3>Windows</h3>
+            <p class="platform-desc">x64 绿色便携压缩包，解压后直接运行 <code>echo.exe</code>。</p>
+            <p class="platform-asset-meta" data-meta="windows">echo_windows_x64.zip</p>
+            <div class="card-actions">
+              <a
+                class="download-btn"
+                data-download="windows"
+                href="https://github.com/imlinhanchao/echo-app/releases"
+              >下载 Windows x64 ZIP</a>
+            </div>
+          </article>
+
+          <article class="platform-card" data-platform-card="linux">
+            <div class="card-top">
+              <div class="platform-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+              </div>
+              <span class="platform-rec-badge" hidden>推荐 · 当前系统</span>
+            </div>
+            <h3>Linux</h3>
+            <p class="platform-desc">x64 压缩归档包，解压后运行 <code>./echo</code>（需 GTK 3 与 libsecret）。</p>
+            <p class="platform-asset-meta" data-meta="linux">echo_linux_x64.tar.gz</p>
+            <div class="card-actions">
+              <a
+                class="download-btn"
+                data-download="linux"
+                href="https://github.com/imlinhanchao/echo-app/releases"
+              >下载 Linux x64 tar.gz</a>
+            </div>
+          </article>
+        </div>
+
+        <details id="release-notes-details" class="release-notes">
+          <summary>
+            <span>查看最新版本更新说明</span>
+            <a
+              class="all-releases-link"
+              href="https://github.com/imlinhanchao/echo-app/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >全部历史版本 →</a>
+          </summary>
+          <div id="release-notes-body" class="release-notes-body">
+            <p class="notes-placeholder">正在加载最新版本发布说明…</p>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="logo.svg" alt="" width="24" height="24" aria-hidden="true" />
+        <span>Echo · 回声 · MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">GitHub 源码</a>
+        <a href="https://github.com/imlinhanchao/echo-app/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        <a href="https://github.com/imlinhanchao/ebook-api" target="_blank" rel="noopener noreferrer">Ebook API 配套书源</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
