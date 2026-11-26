@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/settings/standalone_config_store.dart';
@@ -210,19 +211,58 @@ class _UpdateInfoDialog extends ConsumerWidget {
                 ),
                 const SizedBox(height: 6),
                 Container(
-                  constraints: const BoxConstraints(maxHeight: 180),
+                  constraints: const BoxConstraints(maxHeight: 220),
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: cardBg,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      info.releaseNotes,
-                      style: textTheme.bodySmall?.copyWith(
+                  child: MarkdownBody(
+                    data: info.releaseNotes,
+                    onTapLink: (text, href, title) {
+                      if (href != null && href.isNotEmpty) {
+                        openExternalUrl(context, href);
+                      }
+                    },
+                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      p: textTheme.bodySmall?.copyWith(
                         color: textPrimary,
                         fontSize: 12,
                         height: 1.4,
+                      ),
+                      listBullet: textTheme.bodySmall?.copyWith(
+                        color: textSecondary,
+                        fontSize: 12,
+                      ),
+                      h1: textTheme.titleMedium?.copyWith(
+                        color: textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                      h2: textTheme.titleSmall?.copyWith(
+                        color: textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      h3: textTheme.bodyMedium?.copyWith(
+                        color: textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                      h4: textTheme.bodySmall?.copyWith(
+                        color: textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5,
+                      ),
+                      code: textTheme.bodySmall?.copyWith(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: accent,
+                        backgroundColor: tokens?.surfaceSubtle ?? Colors.black12,
+                      ),
+                      codeblockDecoration: BoxDecoration(
+                        color: tokens?.surfaceSubtle ?? Colors.black12,
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                   ),

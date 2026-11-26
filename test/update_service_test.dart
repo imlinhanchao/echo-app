@@ -207,5 +207,64 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('当前已是最新版本'), findsNothing);
     });
+
+    testWidgets('Renders Markdown release notes when update is available',
+        (tester) async {
+      final dio = Dio();
+      dio.httpClientAdapter = _FakeUpdateDioAdapter(
+        handler: (options) async {
+          if (options.path.contains('/releases/latest')) {
+            const body = '''
+            {
+              "tag_name": "v0.5.0",
+              "name": "Echo v0.5.0",
+              "body": "### 新增功能\\n- **Markdown 更新说明**支持\\n- 性能优化",
+              "html_url": "https://github.com/imlinhanchao/echo-app/releases/tag/v0.5.0",
+              "assets": [
+                {
+                  "name": "echo_v0.5.0_android_universal.apk",
+                  "size": 104857600,
+                  "browser_download_url": "https://github.com/imlinhanchao/echo-app/releases/download/v0.5.0/echo_v0.5.0_android_universal.apk"
+                }
+              ]
+            }
+            ''';
+            return ResponseBody.fromString(body, 200, headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+            });
+          }
+          if (options.path.contains('country.is')) {
+            return ResponseBody.fromString('{"ip":"1.1.1.1","country":"CN"}', 200, headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+            });
+          }
+          return ResponseBody.fromString('{}', 404);
+        },
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          updateServiceProvider.overrideWithValue(UpdateService(dio: dio)),
+        ],
+      );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: UpdateSettingsPage(currentVersion: '0.4.2'),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('check_update_now_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('发现新版本 v0.5.0'), findsOneWidget);
+      expect(find.text('更新说明：'), findsOneWidget);
+      expect(find.text('新增功能', findRichText: true), findsOneWidget);
+      expect(find.byKey(const Key('update_dialog_download_button')), findsOneWidget);
+    });
   });
 }
