@@ -216,8 +216,7 @@ class _DiscoverSettingsPageState extends ConsumerState<DiscoverSettingsPage> {
                     keyboardType: TextInputType.url,
                     decoration: const InputDecoration(
                       labelText: '规则 JSON URL（留空使用内置规则）',
-                      hintText:
-                          'https://raw.githubusercontent.com/.../discover-rules.json',
+                      hintText: 'https://echo.librejo.cn/discover-rules.json',
                       prefixIcon: Icon(Icons.link_rounded),
                     ),
                   ),

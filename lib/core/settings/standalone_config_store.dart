@@ -36,6 +36,13 @@ class StandaloneConfig {
         ? rawMirror
         : (legacyPreferCn ? 'ghfast' : 'github');
     final hasDiscoverUrl = json.containsKey('discover_config_url');
+    final rawDiscoverUrl =
+        (json['discover_config_url'] as String? ?? '').trim();
+    final discoverConfigUrl = !hasDiscoverUrl
+        ? DiscoverConfigDefaults.defaultRemoteUrl
+        : (rawDiscoverUrl == DiscoverConfigDefaults.legacyDefaultRemoteUrl
+            ? DiscoverConfigDefaults.defaultRemoteUrl
+            : rawDiscoverUrl);
     return StandaloneConfig(
       ebookApiBaseUrl: (json['ebook_api_base_url'] as String? ?? '').trim(),
       ebookApiKey: (json['ebook_api_key'] as String? ?? '').trim(),
@@ -58,9 +65,7 @@ class StandaloneConfig {
       systemTtsVoice: (json['system_tts_voice'] as String? ?? '').trim(),
       keepScreenOnWhileReading:
           json['keep_screen_on_while_reading'] as bool? ?? true,
-      discoverConfigUrl: hasDiscoverUrl
-          ? (json['discover_config_url'] as String? ?? '').trim()
-          : DiscoverConfigDefaults.defaultRemoteUrl,
+      discoverConfigUrl: discoverConfigUrl,
       discoverSourceId: (json['discover_source_id'] as String? ?? '').trim(),
       updateMirrorMode: (json['update_mirror_mode'] as String? ?? 'auto').trim(),
       customUpdateMirrorPrefix:

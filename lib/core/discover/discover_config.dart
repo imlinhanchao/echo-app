@@ -6,6 +6,10 @@ import 'package:flutter/foundation.dart';
 abstract final class DiscoverConfigDefaults {
   /// 默认远程规则地址（可直接通过修改仓库或自定义 URL 动态更新解析规则）。
   static const String defaultRemoteUrl =
+      'https://echo.librejo.cn/discover-rules.json';
+
+  /// 旧版 GitHub Raw 默认规则地址，用于在加载存量配置时平滑迁移。
+  static const String legacyDefaultRemoteUrl =
       'https://raw.githubusercontent.com/imlinhanchao/echo-app/main/assets/discover-rules.json';
 
   static const int supportedSchemaVersion = 1;
