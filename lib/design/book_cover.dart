@@ -1,5 +1,15 @@
-import 'dart:io' show File;
+import 'dart:async';
+import 'dart:io'
+    show
+        File,
+        HttpClient,
+        HttpClientRequest,
+        HttpClientResponse,
+        HttpOverrides,
+        HttpStatus;
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// 书籍封面组件：优先展示真实 cover_url（远端 CDN 或本地文件），
@@ -14,6 +24,7 @@ class BookCover extends StatelessWidget {
     this.height = 68,
     this.borderRadius,
     this.semanticLabel,
+    this.headers,
   });
 
   final String? url;
@@ -23,6 +34,7 @@ class BookCover extends StatelessWidget {
   final double height;
   final double? borderRadius;
   final String? semanticLabel;
+  final Map<String, String>? headers;
 
   static const List<({Color top, Color bottom, Color foil})> _clothPalettes = [
     (
@@ -75,13 +87,27 @@ class BookCover extends StatelessWidget {
     final coverUrl = url;
     if (coverUrl != null &&
         (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'))) {
-      imageWidget = Image.network(
-        coverUrl,
-        width: width,
-        height: height,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => fallback,
-      );
+      if (headers != null && headers!.isNotEmpty) {
+        imageWidget = Image(
+          image: EchoNetworkImage(
+            coverUrl,
+            headers: headers,
+            suppressUnhandledError: true,
+          ),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => fallback,
+        );
+      } else {
+        imageWidget = Image.network(
+          coverUrl,
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => fallback,
+        );
+      }
     } else if (coverUrl != null &&
         (coverUrl.startsWith('file://') || coverUrl.startsWith('/'))) {
       final path = coverUrl.startsWith('file://')
@@ -278,4 +304,154 @@ class _ClothCoverPlaceholder extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 严格按配置覆写 HTTP 请求头的网络图片 Provider：
+/// 使用 `HttpClient.userAgent = null` 与 `request.headers.set(...)`，
+/// 避免 Flutter 内置 [NetworkImage] 拼接 `Dart/3.x` UA 导致图床返回 403/418。
+@immutable
+class EchoNetworkImage extends ImageProvider<EchoNetworkImage> {
+  const EchoNetworkImage(
+    this.url, {
+    this.scale = 1.0,
+    this.headers,
+    this.suppressUnhandledError = false,
+  });
+
+  final String url;
+  final double scale;
+  final Map<String, String>? headers;
+  final bool suppressUnhandledError;
+
+  static HttpClient? _cachedHttpClient;
+
+  ({HttpClient client, bool ownsClient}) _resolveHttpClient() {
+    HttpClient? debugClient;
+    assert(() {
+      if (debugNetworkImageHttpClientProvider != null) {
+        debugClient = debugNetworkImageHttpClientProvider!();
+      }
+      return true;
+    }());
+    if (debugClient != null) {
+      return (client: debugClient!, ownsClient: false);
+    }
+    if (HttpOverrides.current != null) {
+      final client = HttpClient()
+        ..autoUncompress = false
+        ..userAgent = null;
+      return (client: client, ownsClient: true);
+    }
+    final client = _cachedHttpClient ??= (HttpClient()
+      ..autoUncompress = false
+      ..userAgent = null);
+    return (client: client, ownsClient: false);
+  }
+
+  @override
+  Future<EchoNetworkImage> obtainKey(ImageConfiguration configuration) {
+    return SynchronousFuture<EchoNetworkImage>(this);
+  }
+
+  @override
+  ImageStreamCompleter loadImage(
+    EchoNetworkImage key,
+    ImageDecoderCallback decode,
+  ) {
+    final StreamController<ImageChunkEvent> chunkEvents =
+        StreamController<ImageChunkEvent>();
+
+    final completer = MultiFrameImageStreamCompleter(
+      codec: _loadAsync(key, chunkEvents, decode: decode),
+      chunkEvents: chunkEvents.stream,
+      scale: key.scale,
+      debugLabel: key.url,
+      informationCollector: () => <DiagnosticsNode>[
+        DiagnosticsProperty<ImageProvider>('Image provider', this),
+        DiagnosticsProperty<EchoNetworkImage>('Image key', key),
+      ],
+    );
+    if (key.suppressUnhandledError) {
+      completer.addEphemeralErrorListener((_, _) {});
+    }
+    return completer;
+  }
+
+  Future<ui.Codec> _loadAsync(
+    EchoNetworkImage key,
+    StreamController<ImageChunkEvent> chunkEvents, {
+    required ImageDecoderCallback decode,
+  }) async {
+    final resolvedClient = _resolveHttpClient();
+    try {
+      assert(key == this);
+
+      final Uri resolved = Uri.base.resolve(key.url);
+      final HttpClientRequest request = await resolvedClient.client.getUrl(
+        resolved,
+      );
+
+      key.headers?.forEach((String name, String value) {
+        request.headers.set(name, value);
+      });
+
+      final HttpClientResponse response = await request.close();
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<List<int>>(<int>[]);
+        throw NetworkImageLoadException(
+          statusCode: response.statusCode,
+          uri: resolved,
+        );
+      }
+
+      final Uint8List bytes = await consolidateHttpClientResponseBytes(
+        response,
+        onBytesReceived: (int cumulative, int? total) {
+          chunkEvents.add(
+            ImageChunkEvent(
+              cumulativeBytesLoaded: cumulative,
+              expectedTotalBytes: total,
+            ),
+          );
+        },
+      );
+      if (bytes.lengthInBytes == 0) {
+        throw Exception('EchoNetworkImage is an empty file: $resolved');
+      }
+
+      return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+    } catch (e) {
+      scheduleMicrotask(() {
+        PaintingBinding.instance.imageCache.evict(key);
+      });
+      rethrow;
+    } finally {
+      unawaited(chunkEvents.close());
+      if (resolvedClient.ownsClient) {
+        resolvedClient.client.close(force: false);
+      }
+    }
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (other.runtimeType != runtimeType) return false;
+    return other is EchoNetworkImage &&
+        other.url == url &&
+        other.scale == scale &&
+        other.suppressUnhandledError == suppressUnhandledError &&
+        mapEquals(other.headers, headers);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    url,
+    scale,
+    suppressUnhandledError,
+    headers == null
+        ? 0
+        : Object.hashAllUnordered(
+            headers!.entries.map((e) => Object.hash(e.key, e.value)),
+          ),
+  );
 }

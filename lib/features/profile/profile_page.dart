@@ -14,7 +14,9 @@ import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
+import '../discover/discover_controller.dart';
 import '../providers/provider_account_page.dart';
+import '../settings/discover_settings_page.dart';
 import '../settings/ebook_api_settings_page.dart';
 import '../tts/tts_model_manager_page.dart';
 import 'offline_manager_page.dart';
@@ -253,6 +255,38 @@ class ProfilePage extends ConsumerWidget {
                 );
               },
             ),
+            Consumer(
+              builder: (context, ref, _) {
+                final dState = ref.watch(discoverControllerProvider);
+                final activeSource = dState.activeSource;
+                final ver = dState.snapshot?.config.configVersion ?? '';
+                final subtitle = activeSource != null
+                    ? '${activeSource.name}${ver.isNotEmpty ? " · v$ver" : ""}'
+                    : '多荐书源与远程规则热更新';
+                return ListTile(
+                  key: const Key('profile_discover_settings'),
+                  leading: Icon(
+                    Icons.explore_outlined,
+                    size: 20,
+                    color: tokens.textPrimary,
+                  ),
+                  title: const Text('荐书源与动态规则'),
+                  subtitle: Text(
+                    subtitle,
+                    style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    color: tokens.textDisabled,
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiscoverSettingsPage(),
+                    ),
+                  ),
+                );
+              },
+            ),
             ValueListenableBuilder<bool>(
               valueListenable: ThemeModeController.darkMode,
               builder: (context, dark, _) => ListTile(
@@ -285,7 +319,7 @@ class ProfilePage extends ConsumerWidget {
               ),
               title: const Text('关于回声'),
               subtitle: Text(
-                '回声 · 单机版 v0.3.10',
+                '回声 · 单机版 v0.4.1',
                 style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
               ),
             ),

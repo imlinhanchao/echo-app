@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       build_number:
-        description: "可选构建号（正整数；留空则基于 pubspec.yaml 自动递增）"
+        description: "可选构建号（正整数；留空则按版本号映射如 v0.4.0→400，且不低于 pubspec.yaml 构建号）"
         required: false
         default: ""
         type: string
@@ -78,9 +78,19 @@ jobs:
             fi
             build_number="$RAW_BUILD_NUMBER"
           else
+            core_v="${v%%-*}"
+            IFS='.' read -r v_major v_minor v_patch <<< "$core_v"
+            semver_build=$((10#$v_major * 10000 + 10#$v_minor * 100 + 10#$v_patch))
             pubspec_build="$(sed -nE 's/^version:[[:space:]]*[^+]+\+([0-9]+).*/\1/p' pubspec.yaml | head -n 1)"
-            pubspec_build="${pubspec_build:-12}"
-            build_number=$((pubspec_build + GITHUB_RUN_NUMBER))
+            pubspec_build="${pubspec_build:-0}"
+            if (( semver_build >= pubspec_build )); then
+              build_number="$semver_build"
+            else
+              build_number="$pubspec_build"
+            fi
+            if (( build_number < 1 )); then
+              build_number=1
+            fi
           fi
 
           flutter_version="$(jq -r '.flutter // "3.38.9"' .fvmrc 2>/dev/null || echo '3.38.9')"

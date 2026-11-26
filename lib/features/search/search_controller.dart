@@ -216,15 +216,23 @@ class SearchController extends StateNotifier<SearchState> {
     unawaited(_historyStore.save(const <String>[]));
   }
 
+  /// 清空当前搜索词与结果列表，返回初始荐书视图。
+  void clearSearch() {
+    state = SearchState(history: state.history);
+  }
+
   Future<void> loadMore() async {
     if (!state.hasMore || state.isLoading || state.lastQuery.isEmpty) return;
     state = state.copyWith(isLoading: true, clearError: true);
     await _fetch(page: state.page + 1, query: state.lastQuery, append: true);
   }
 
-  Future<void> setFilters(SearchFilters filters) async {
+  Future<void> setFilters(
+    SearchFilters filters, {
+    bool triggerSearch = true,
+  }) async {
     _filters = filters;
-    if (state.lastQuery.isNotEmpty) {
+    if (triggerSearch && state.lastQuery.isNotEmpty) {
       await search(state.lastQuery);
     }
   }

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../discover/discover_config.dart';
+
 /// 单机版全局配置（无内置写死服务地址，由首次启动引导或设置页配置）。
 @immutable
 class StandaloneConfig {
@@ -21,6 +23,8 @@ class StandaloneConfig {
     this.systemTtsEngine = '',
     this.systemTtsVoice = '',
     this.keepScreenOnWhileReading = true,
+    this.discoverConfigUrl = DiscoverConfigDefaults.defaultRemoteUrl,
+    this.discoverSourceId = '',
   });
 
   factory StandaloneConfig.fromJson(Map<String, dynamic> json) {
@@ -29,6 +33,7 @@ class StandaloneConfig {
     final mirrorId = rawMirror.isNotEmpty
         ? rawMirror
         : (legacyPreferCn ? 'ghfast' : 'github');
+    final hasDiscoverUrl = json.containsKey('discover_config_url');
     return StandaloneConfig(
       ebookApiBaseUrl: (json['ebook_api_base_url'] as String? ?? '').trim(),
       ebookApiKey: (json['ebook_api_key'] as String? ?? '').trim(),
@@ -51,6 +56,10 @@ class StandaloneConfig {
       systemTtsVoice: (json['system_tts_voice'] as String? ?? '').trim(),
       keepScreenOnWhileReading:
           json['keep_screen_on_while_reading'] as bool? ?? true,
+      discoverConfigUrl: hasDiscoverUrl
+          ? (json['discover_config_url'] as String? ?? '').trim()
+          : DiscoverConfigDefaults.defaultRemoteUrl,
+      discoverSourceId: (json['discover_source_id'] as String? ?? '').trim(),
     );
   }
 
@@ -67,6 +76,8 @@ class StandaloneConfig {
   final String systemTtsEngine;
   final String systemTtsVoice;
   final bool keepScreenOnWhileReading;
+  final String discoverConfigUrl;
+  final String discoverSourceId;
 
   bool get preferCnMirror => ttsDownloadMirror != 'github';
 
@@ -87,6 +98,8 @@ class StandaloneConfig {
     'system_tts_voice': systemTtsVoice,
     'prefer_cn_mirror': preferCnMirror,
     'keep_screen_on_while_reading': keepScreenOnWhileReading,
+    'discover_config_url': discoverConfigUrl,
+    'discover_source_id': discoverSourceId,
   };
 
   StandaloneConfig copyWith({
@@ -103,6 +116,8 @@ class StandaloneConfig {
     String? systemTtsEngine,
     String? systemTtsVoice,
     bool? keepScreenOnWhileReading,
+    String? discoverConfigUrl,
+    String? discoverSourceId,
   }) {
     return StandaloneConfig(
       ebookApiBaseUrl: ebookApiBaseUrl ?? this.ebookApiBaseUrl,
@@ -120,6 +135,8 @@ class StandaloneConfig {
       systemTtsVoice: systemTtsVoice ?? this.systemTtsVoice,
       keepScreenOnWhileReading:
           keepScreenOnWhileReading ?? this.keepScreenOnWhileReading,
+      discoverConfigUrl: discoverConfigUrl ?? this.discoverConfigUrl,
+      discoverSourceId: discoverSourceId ?? this.discoverSourceId,
     );
   }
 }
@@ -296,6 +313,16 @@ class StandaloneConfigController extends StateNotifier<StandaloneConfig> {
 
   Future<void> setKeepScreenOnWhileReading(bool enabled) =>
       _commit(state.copyWith(keepScreenOnWhileReading: enabled));
+
+  Future<void> setDiscoverConfigUrl(String url) =>
+      _commit(state.copyWith(discoverConfigUrl: url.trim()));
+
+  Future<void> resetDiscoverConfigUrl() => _commit(
+    state.copyWith(discoverConfigUrl: DiscoverConfigDefaults.defaultRemoteUrl),
+  );
+
+  Future<void> setDiscoverSourceId(String sourceId) =>
+      _commit(state.copyWith(discoverSourceId: sourceId.trim()));
 }
 
 final Provider<StandaloneConfigStorage> standaloneConfigStorageProvider =
