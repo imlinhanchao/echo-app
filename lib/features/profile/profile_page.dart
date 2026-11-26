@@ -18,6 +18,7 @@ import '../discover/discover_controller.dart';
 import '../providers/provider_account_page.dart';
 import '../settings/discover_settings_page.dart';
 import '../settings/ebook_api_settings_page.dart';
+import '../settings/update_settings_page.dart';
 import '../tts/tts_model_manager_page.dart';
 import 'offline_manager_page.dart';
 import 'playback_settings_page.dart';
@@ -313,14 +314,23 @@ class ProfilePage extends ConsumerWidget {
             ListTile(
               key: const Key('profile_about'),
               leading: Icon(
-                Icons.info_outline_rounded,
+                Icons.system_update_alt_rounded,
                 size: 20,
                 color: tokens.textPrimary,
               ),
-              title: const Text('关于回声'),
+              title: const Text('检查更新与下载镜像'),
               subtitle: Text(
-                '回声 · 单机版 v0.4.1',
+                '回声 · 单机版 v0.4.1 · 点击检查新版本',
                 style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
+              ),
+              trailing: Icon(
+                Icons.chevron_right_rounded,
+                color: tokens.textDisabled,
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const UpdateSettingsPage(currentVersion: '0.4.1'),
+                ),
               ),
             ),
           ],

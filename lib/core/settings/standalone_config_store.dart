@@ -25,6 +25,8 @@ class StandaloneConfig {
     this.keepScreenOnWhileReading = true,
     this.discoverConfigUrl = DiscoverConfigDefaults.defaultRemoteUrl,
     this.discoverSourceId = '',
+    this.updateMirrorMode = 'auto',
+    this.customUpdateMirrorPrefix = '',
   });
 
   factory StandaloneConfig.fromJson(Map<String, dynamic> json) {
@@ -60,6 +62,9 @@ class StandaloneConfig {
           ? (json['discover_config_url'] as String? ?? '').trim()
           : DiscoverConfigDefaults.defaultRemoteUrl,
       discoverSourceId: (json['discover_source_id'] as String? ?? '').trim(),
+      updateMirrorMode: (json['update_mirror_mode'] as String? ?? 'auto').trim(),
+      customUpdateMirrorPrefix:
+          (json['custom_update_mirror_prefix'] as String? ?? '').trim(),
     );
   }
 
@@ -78,6 +83,8 @@ class StandaloneConfig {
   final bool keepScreenOnWhileReading;
   final String discoverConfigUrl;
   final String discoverSourceId;
+  final String updateMirrorMode;
+  final String customUpdateMirrorPrefix;
 
   bool get preferCnMirror => ttsDownloadMirror != 'github';
 
@@ -100,6 +107,8 @@ class StandaloneConfig {
     'keep_screen_on_while_reading': keepScreenOnWhileReading,
     'discover_config_url': discoverConfigUrl,
     'discover_source_id': discoverSourceId,
+    'update_mirror_mode': updateMirrorMode,
+    'custom_update_mirror_prefix': customUpdateMirrorPrefix,
   };
 
   StandaloneConfig copyWith({
@@ -118,6 +127,8 @@ class StandaloneConfig {
     bool? keepScreenOnWhileReading,
     String? discoverConfigUrl,
     String? discoverSourceId,
+    String? updateMirrorMode,
+    String? customUpdateMirrorPrefix,
   }) {
     return StandaloneConfig(
       ebookApiBaseUrl: ebookApiBaseUrl ?? this.ebookApiBaseUrl,
@@ -137,6 +148,9 @@ class StandaloneConfig {
           keepScreenOnWhileReading ?? this.keepScreenOnWhileReading,
       discoverConfigUrl: discoverConfigUrl ?? this.discoverConfigUrl,
       discoverSourceId: discoverSourceId ?? this.discoverSourceId,
+      updateMirrorMode: updateMirrorMode ?? this.updateMirrorMode,
+      customUpdateMirrorPrefix:
+          customUpdateMirrorPrefix ?? this.customUpdateMirrorPrefix,
     );
   }
 }
@@ -323,6 +337,12 @@ class StandaloneConfigController extends StateNotifier<StandaloneConfig> {
 
   Future<void> setDiscoverSourceId(String sourceId) =>
       _commit(state.copyWith(discoverSourceId: sourceId.trim()));
+
+  Future<void> setUpdateMirrorMode(String modeId) =>
+      _commit(state.copyWith(updateMirrorMode: modeId.trim()));
+
+  Future<void> setCustomUpdateMirrorPrefix(String prefix) =>
+      _commit(state.copyWith(customUpdateMirrorPrefix: prefix.trim()));
 }
 
 final Provider<StandaloneConfigStorage> standaloneConfigStorageProvider =
