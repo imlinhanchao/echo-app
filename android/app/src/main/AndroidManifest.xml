@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- ZipVoice 克隆参考音色录制 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- 应用内下载更新安装 APK 所需权限 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:usesCleartextTraffic="true"
         android:label="回声"

@@ -90,6 +90,7 @@ class _UpdateSettingsPageState extends ConsumerState<UpdateSettingsPage> {
     final bgSurface = tokens?.surfaceBase ?? Theme.of(context).scaffoldBackgroundColor;
     final cardBg = tokens?.surfaceElevated ?? Theme.of(context).cardColor;
     final accent = tokens?.primary ?? Theme.of(context).colorScheme.primary;
+    final onPrimary = tokens?.textOnPrimary ?? Theme.of(context).colorScheme.onPrimary;
     final textPrimary = tokens?.textPrimary ?? Colors.black87;
     final textSecondary = tokens?.textSecondary ?? Colors.black54;
 
@@ -142,7 +143,7 @@ class _UpdateSettingsPageState extends ConsumerState<UpdateSettingsPage> {
                     key: const Key('check_update_now_button'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: accent,
-                      foregroundColor: Colors.white,
+                      foregroundColor: onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -150,12 +151,12 @@ class _UpdateSettingsPageState extends ConsumerState<UpdateSettingsPage> {
                     ),
                     onPressed: _isChecking ? null : _triggerCheck,
                     icon: _isChecking
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: onPrimary,
                             ),
                           )
                         : const Icon(Icons.sync_rounded, size: 18),
@@ -293,7 +294,7 @@ class _UpdateSettingsPageState extends ConsumerState<UpdateSettingsPage> {
                             key: const Key('update_custom_mirror_save'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: accent,
-                              foregroundColor: Colors.white,
+                              foregroundColor: onPrimary,
                             ),
                             onPressed: () {
                               ref
