@@ -6,7 +6,6 @@ import 'package:echo/core/settings/standalone_config_store.dart';
 import 'package:echo/core/update/update_models.dart';
 import 'package:echo/core/update/update_service.dart';
 import 'package:echo/features/settings/update_settings_page.dart';
-import 'package:echo/features/update/update_dialog.dart';
 
 class _FakeUpdateDioAdapter implements HttpClientAdapter {
   _FakeUpdateDioAdapter({

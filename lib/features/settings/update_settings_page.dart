@@ -219,7 +219,7 @@ class _UpdateSettingsPageState extends ConsumerState<UpdateSettingsPage> {
                       const SizedBox(height: 8),
                       DropdownButtonFormField<UpdateMirrorMode>(
                         key: const Key('update_mirror_dropdown'),
-                        value: mirrorMode,
+                        initialValue: mirrorMode,
                         isExpanded: true,
                         decoration: InputDecoration(
                           contentPadding: const EdgeInsets.symmetric(

@@ -52,25 +52,28 @@ String formatFileSize(int bytes) {
 
 /// 打开 URL（优先系统默认浏览器）
 Future<void> openExternalUrl(BuildContext context, String url) async {
+  final messenger = ScaffoldMessenger.of(context);
   final uri = Uri.tryParse(url.trim());
   if (uri == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       const SnackBar(content: Text('无效的下载链接')),
     );
     return;
   }
   try {
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched && context.mounted) {
+    if (!launched) {
       await Clipboard.setData(ClipboardData(text: url));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法自动打开浏览器，已将下载链接复制到剪贴板')),
-      );
+      if (context.mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('无法自动打开浏览器，已将下载链接复制到剪贴板')),
+        );
+      }
     }
   } catch (_) {
+    await Clipboard.setData(ClipboardData(text: url));
     if (context.mounted) {
-      await Clipboard.setData(ClipboardData(text: url));
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('打开失败，已将下载链接复制到剪贴板')),
       );
     }

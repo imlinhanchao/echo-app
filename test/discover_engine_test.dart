@@ -19,7 +19,6 @@ import 'package:echo/design/book_cover.dart';
 import 'package:echo/design/echo_theme.dart';
 import 'package:echo/design/echo_tokens.dart';
 import 'package:echo/features/auth/auth_controller.dart';
-import 'package:echo/features/discover/discover_book_detail_sheet.dart';
 import 'package:echo/features/discover/discover_section.dart';
 import 'package:echo/features/search/search_controller.dart' as search_ctrl;
 import 'package:echo/features/search/search_page.dart';
