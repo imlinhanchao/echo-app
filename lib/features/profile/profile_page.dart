@@ -320,7 +320,7 @@ class ProfilePage extends ConsumerWidget {
               ),
               title: const Text('检查更新与下载镜像'),
               subtitle: Text(
-                '回声 · 单机版 v0.4.1 · 点击检查新版本',
+                '回声 · 单机版 v0.4.2 · 点击检查新版本',
                 style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
               ),
               trailing: Icon(
@@ -329,7 +329,7 @@ class ProfilePage extends ConsumerWidget {
               ),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => const UpdateSettingsPage(currentVersion: '0.4.1'),
+                  builder: (_) => const UpdateSettingsPage(currentVersion: '0.4.2'),
                 ),
               ),
             ),

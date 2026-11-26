@@ -10,7 +10,7 @@ import '../update/update_dialog.dart';
 class UpdateSettingsPage extends ConsumerStatefulWidget {
   const UpdateSettingsPage({
     super.key,
-    this.currentVersion = '0.4.1',
+    this.currentVersion = '0.4.2',
   });
 
   final String currentVersion;
