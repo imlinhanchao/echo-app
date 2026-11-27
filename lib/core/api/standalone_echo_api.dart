@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../book_sources/book_source_manager.dart';
 import '../books/local_library_store.dart';
 import '../settings/standalone_config_store.dart';
 import '../tts/local_convert_service.dart';
@@ -18,7 +19,7 @@ import 'provider_token_store.dart';
 
 /// 单机版核心 API 实现（继承 [EchoApi] 契约，完全摆脱 `echo-service`）：
 /// - 书库与章节 -> [LocalLibraryStore]
-/// - 搜书、书源凭据与流式下载 -> [EbookApiClient] + [ProviderTokenStore]
+/// - 搜书、书源凭据与流式下载 -> [BookSourceManager]（兼容回退 [EbookApiClient] + [ProviderTokenStore]）
 /// - TTS 模型与音色 -> [TtsModelManager] + [TtsModelCatalog]
 /// - 本地下载 / 本地转有声书任务 -> 内存任务队列 + [LocalConvertService]
 /// - 云端同步 -> 静默空操作
@@ -30,6 +31,7 @@ class StandaloneEchoApi extends EchoApi {
     required TtsModelManager ttsModelManager,
     required LocalConvertService convertService,
     required StandaloneConfig Function() readConfig,
+    BookSourceManager? bookSourceManager,
     void Function()? onLibraryChanged,
   }) : _libraryStore = libraryStore,
        _readEbookApi = readEbookApi,
@@ -37,6 +39,7 @@ class StandaloneEchoApi extends EchoApi {
        _ttsModelManager = ttsModelManager,
        _convertService = convertService,
        _readConfig = readConfig,
+       _bookSourceManager = bookSourceManager,
        _onLibraryChanged = onLibraryChanged,
        super(baseUri: Uri.parse('http://localhost'));
 
@@ -46,7 +49,10 @@ class StandaloneEchoApi extends EchoApi {
   final TtsModelManager _ttsModelManager;
   final LocalConvertService _convertService;
   final StandaloneConfig Function() _readConfig;
+  final BookSourceManager? _bookSourceManager;
   final void Function()? _onLibraryChanged;
+
+  bool get usesBookSourceManager => _bookSourceManager != null;
 
   final List<JobInfo> _jobs = <JobInfo>[];
   final Map<int, CancelToken> _downloadCancelTokens = <int, CancelToken>{};
@@ -57,7 +63,17 @@ class StandaloneEchoApi extends EchoApi {
   final Map<String, SearchBook> _searchCache = <String, SearchBook>{};
 
   @override
-  String get baseUrl => _readConfig().ebookApiBaseUrl;
+  String get baseUrl {
+    final mgr = _bookSourceManager;
+    if (mgr != null) {
+      final active = mgr.currentState.activeSource;
+      if (active != null && active.effectiveDomains.isNotEmpty) {
+        return active.effectiveDomains.first;
+      }
+      return '';
+    }
+    return _readConfig().ebookApiBaseUrl;
+  }
 
   @override
   Future<Map<String, String>> authHeaders() async => const <String, String>{};
@@ -146,10 +162,14 @@ class StandaloneEchoApi extends EchoApi {
         .toList();
   }
 
-  // ---- ebook-api 书源与搜书 ----
+  // ---- 统一书源与搜书 ----
 
   @override
-  Future<List<ProviderInfo>> listProviders() => _readEbookApi().listProviders();
+  Future<List<ProviderInfo>> listProviders() {
+    final mgr = _bookSourceManager;
+    if (mgr != null) return mgr.listAsProviderInfos();
+    return _readEbookApi().listProviders();
+  }
 
   @override
   Future<ProviderAccountInfo> saveProviderAccount({
@@ -161,6 +181,21 @@ class StandaloneEchoApi extends EchoApi {
     String remixUserId = '',
     String remixUserKey = '',
   }) async {
+    final mgr = _bookSourceManager;
+    if (mgr != null) {
+      return mgr.authenticateSource(
+        sourceId: providerId,
+        modeId: mode,
+        inputs: <String, String>{
+          if (domain.trim().isNotEmpty) 'domain': domain.trim(),
+          if (email.trim().isNotEmpty) 'email': email.trim(),
+          if (password.isNotEmpty) 'password': password,
+          if (remixUserId.trim().isNotEmpty) 'remix_userid': remixUserId.trim(),
+          if (remixUserKey.trim().isNotEmpty)
+            'remix_userkey': remixUserKey.trim(),
+        },
+      );
+    }
     final api = _readEbookApi();
     final ProviderSealResult sealed;
     if (mode == 'cookies') {
@@ -198,12 +233,18 @@ class StandaloneEchoApi extends EchoApi {
   }
 
   @override
-  Future<ProviderAccountInfo> verifyProviderAccount(String providerId) =>
-      _readEbookApi().verifyProvider(providerId);
+  Future<ProviderAccountInfo> verifyProviderAccount(String providerId) {
+    final mgr = _bookSourceManager;
+    if (mgr != null) return mgr.verifySource(providerId);
+    return _readEbookApi().verifyProvider(providerId);
+  }
 
   @override
-  Future<void> deleteProviderAccount(String providerId) =>
-      _tokenStore.delete(providerId);
+  Future<void> deleteProviderAccount(String providerId) {
+    final mgr = _bookSourceManager;
+    if (mgr != null) return mgr.clearCredentials(providerId);
+    return _tokenStore.delete(providerId);
+  }
 
   @override
   Future<SearchPageInfo> search({
@@ -217,11 +258,30 @@ class StandaloneEchoApi extends EchoApi {
     int yearTo = 0,
     String order = '',
   }) async {
+    final mgr = _bookSourceManager;
+    if (mgr != null) {
+      final res = await mgr.search(
+        query: query,
+        provider: provider == 'zlib' ? '' : provider,
+        page: page,
+        limit: limit,
+        extensions: extensions,
+        languages: languages,
+        yearFrom: yearFrom,
+        yearTo: yearTo,
+        order: order,
+      );
+      for (final b in res.books) {
+        _searchCache['${b.provider}:${b.ref}'] = b;
+      }
+      return res;
+    }
+
     final api = _readEbookApi();
     if (!api.isConfigured) {
       throw const ApiException(
         code: 'EBOOK_API_NOT_CONFIGURED',
-        message: '已跳过书源配置，暂无法在线搜书，请先配置书源服务或直接导入本地书籍',
+        message: '已跳过书源配置，暂无法在线搜书，请先配置书源或直接导入本地书籍',
       );
     }
     final res = await api.search(
@@ -241,6 +301,27 @@ class StandaloneEchoApi extends EchoApi {
     return res;
   }
 
+  @override
+  Future<SearchBook> providerBook({
+    required String providerId,
+    required String ref,
+  }) async {
+    final mgr = _bookSourceManager;
+    if (mgr != null) {
+      final cached = _searchCache['$providerId:$ref'];
+      final enriched = await mgr.getBookDetail(
+        providerId,
+        ref,
+        baseBook: cached,
+      );
+      _searchCache['$providerId:$ref'] = enriched;
+      return enriched;
+    }
+    final cached = _searchCache['$providerId:$ref'];
+    if (cached != null) return cached;
+    return super.providerBook(providerId: providerId, ref: ref);
+  }
+
   // ---- 本地异步任务（下载 + 本地转有声书）----
 
   @override
@@ -248,12 +329,30 @@ class StandaloneEchoApi extends EchoApi {
     required String provider,
     required String ref,
   }) async {
+    final mgr = _bookSourceManager;
     final api = _readEbookApi();
-    if (!api.isConfigured) {
+    if (mgr == null && !api.isConfigured) {
       throw const ApiException(
         code: 'EBOOK_API_NOT_CONFIGURED',
-        message: '请先在「我的 → ebook-api 配置」填写服务地址',
+        message: '请先在「我的 → 书源管理」配置或启用在线书源',
       );
+    }
+
+    if (mgr != null) {
+      await mgr.ensureLoaded();
+      final src = mgr.currentState.sourceById(provider) ?? mgr.currentState.activeSource;
+      if (src == null || !src.isEnabled) {
+        throw const ApiException(
+          code: 'EBOOK_API_NOT_CONFIGURED',
+          message: '请先在「我的 → 书源管理」启用在线书源',
+        );
+      }
+      if (src.requiresAuthForDownload && !src.hasCredentials) {
+        throw ApiException(
+          code: 'PROVIDER_NOT_CONFIGURED',
+          message: '「${src.name}」下载需要先登录账号',
+        );
+      }
     }
 
     final jobId = _nextJobId++;
@@ -279,6 +378,7 @@ class StandaloneEchoApi extends EchoApi {
     unawaited(
       _runDownloadJob(
         jobId: jobId,
+        mgr: mgr,
         api: api,
         provider: provider,
         ref: ref,
@@ -291,6 +391,7 @@ class StandaloneEchoApi extends EchoApi {
 
   Future<void> _runDownloadJob({
     required int jobId,
+    BookSourceManager? mgr,
     required EbookApiClient api,
     required String provider,
     required String ref,
@@ -306,16 +407,31 @@ class StandaloneEchoApi extends EchoApi {
           : 'epub';
       tmpFile = File(p.join(tmpDir.path, 'echo_dl_$jobId.$safeExt'));
 
-      final downloaded = await api.downloadBook(
-        providerId: provider,
-        ref: ref,
-        savePath: tmpFile.path,
-        cancelToken: cancelToken,
-        onProgress: (received, total) {
-          final pct = total > 0 ? ((received / total) * 90).round() : 20;
-          _updateJob(jobId, progress: pct.clamp(1, 90));
-        },
-      );
+      final DownloadedBookFile downloaded;
+      if (mgr != null) {
+        downloaded = await mgr.downloadBook(
+          providerId: provider,
+          ref: ref,
+          savePath: tmpFile.path,
+          meta: meta,
+          cancelToken: cancelToken,
+          onProgress: (received, total) {
+            final pct = total > 0 ? ((received / total) * 90).round() : 20;
+            _updateJob(jobId, progress: pct.clamp(1, 90));
+          },
+        );
+      } else {
+        downloaded = await api.downloadBook(
+          providerId: provider,
+          ref: ref,
+          savePath: tmpFile.path,
+          cancelToken: cancelToken,
+          onProgress: (received, total) {
+            final pct = total > 0 ? ((received / total) * 90).round() : 20;
+            _updateJob(jobId, progress: pct.clamp(1, 90));
+          },
+        );
+      }
 
       _updateJob(jobId, progress: 92);
       final resolvedExt = downloaded.format.isNotEmpty

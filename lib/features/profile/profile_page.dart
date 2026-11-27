@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/models.dart';
 import '../../core/audio/chunked_player_controller.dart';
 import '../../core/audio/live_tts_player_controller.dart';
+import '../../core/book_sources/book_source_manager.dart';
 import '../../core/offline/offline_store.dart';
 import '../../core/settings/standalone_config_store.dart';
 import '../../core/settings/theme_mode_controller.dart';
@@ -16,10 +17,9 @@ import '../../design/echo_ambient.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
+import '../book_sources/book_sources_page.dart';
 import '../discover/discover_controller.dart';
-import '../providers/provider_account_page.dart';
 import '../settings/discover_settings_page.dart';
-import '../settings/ebook_api_settings_page.dart';
 import '../settings/translation_model_page.dart';
 import '../settings/update_settings_page.dart';
 import '../tts/tts_model_manager_page.dart';
@@ -240,46 +240,22 @@ class ProfilePage extends ConsumerWidget {
           children: [
             Consumer(
               builder: (context, ref, _) {
-                final cfg = ref.watch(standaloneConfigProvider);
+                final bsState = ref.watch(bookSourceControllerProvider);
+                final active = bsState.activeSource;
+                final enabledCount = bsState.enabledSources.length;
+                final subtitle = enabledCount == 0
+                    ? '未启用在线书源（仅使用本地导入）'
+                    : '当前：${active?.name ?? "未选"} · 已启用 $enabledCount 个书源';
                 return ListTile(
-                  key: const Key('profile_server_address'),
-                  leading: Icon(
-                    Icons.dns_outlined,
-                    size: 20,
-                    color: tokens.textPrimary,
-                  ),
-                  title: const Text('ebook-api 书源服务'),
-                  subtitle: Text(
-                    cfg.hasEbookApi ? cfg.ebookApiBaseUrl : '未配置（仅使用本地导入）',
-                    style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
-                  ),
-                  trailing: Icon(
-                    Icons.chevron_right_rounded,
-                    color: tokens.textDisabled,
-                  ),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const EbookApiSettingsPage(),
-                    ),
-                  ),
-                );
-              },
-            ),
-            Consumer(
-              builder: (context, ref, _) {
-                final cfg = ref.watch(standaloneConfigProvider);
-                return ListTile(
-                  key: const Key('profile_providers'),
+                  key: const Key('profile_book_sources'),
                   leading: Icon(
                     Icons.source_outlined,
                     size: 20,
                     color: tokens.textPrimary,
                   ),
-                  title: const Text('书源账号'),
+                  title: const Text('书源管理'),
                   subtitle: Text(
-                    cfg.hasEbookApi
-                        ? 'zlib 镜像 / 邮箱密码 / Cookie 凭证'
-                        : '未配置书源服务（可跳过，仅使用本地导入）',
+                    subtitle,
                     style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
                   ),
                   trailing: Icon(
@@ -288,7 +264,7 @@ class ProfilePage extends ConsumerWidget {
                   ),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => const ProviderAccountPage(),
+                      builder: (_) => const BookSourcesPage(),
                     ),
                   ),
                 );

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/api/standalone_echo_api.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/book_sources/book_source_manager.dart';
+import '../../core/book_sources/book_source_models.dart';
 import '../../design/book_cover.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
@@ -10,21 +13,124 @@ import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
+import '../book_sources/book_source_detail_page.dart';
+import '../book_sources/book_sources_page.dart';
 import '../jobs/jobs_controller.dart';
 import '../providers/provider_account_page.dart';
 import 'search_controller.dart';
 
-/// 弹出高级筛选条件（语言 / 年份 / 排序），支持控制应用后是否立即重新发起搜索。
+/// 弹出书源单源切换底部面板，支持快速切换当前活跃搜书源或进入书源管理。
+Future<void> showBookSourceSwitcherSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  Future<void> Function(String sourceId)? onSourceSelected,
+}) async {
+  final tokens = Theme.of(context).extension<EchoTokens>()!;
+  final textTheme = Theme.of(context).textTheme;
+  final bsState = ref.read(bookSourceControllerProvider);
+  final manager = ref.read(bookSourceControllerProvider.notifier);
+  final enabled = bsState.enabledSources;
+  final activeId = bsState.activeSource?.id ?? '';
+
+  await showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetCtx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          EchoMetrics.pagePadding,
+          4,
+          EchoMetrics.pagePadding,
+          EchoMetrics.space3,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const EchoSheetDragHandle(),
+            Row(
+              children: [
+                Text(
+                  '选择搜书书源',
+                  style: textTheme.titleMedium?.copyWith(
+                    color: tokens.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  key: const Key('search_open_book_sources'),
+                  onPressed: () {
+                    Navigator.of(sheetCtx).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const BookSourcesPage(),
+                      ),
+                    );
+                  },
+                  child: const Text('管理书源'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (enabled.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  '暂无已启用的在线书源，点击右上角「管理书源」启用或添加。',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
+                ),
+              )
+            else
+              for (final src in enabled)
+                ListTile(
+                  key: Key('switch_book_source_${src.id}'),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  leading: Icon(
+                    src.id == activeId
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                    color: src.id == activeId
+                        ? tokens.primary
+                        : tokens.textSecondary,
+                  ),
+                  title: Text(src.name),
+                  subtitle: Text(
+                    '${src.driver.displayLabel} · ${src.statusSummary}',
+                    style: textTheme.bodySmall?.copyWith(fontSize: 12),
+                  ),
+                  onTap: () async {
+                    Navigator.of(sheetCtx).pop();
+                    await manager.setActiveSource(src.id);
+                    if (onSourceSelected != null) {
+                      await onSourceSelected(src.id);
+                    }
+                  },
+                ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// 弹出高级筛选条件（按当前书源声明的筛选能力动态渲染）。
 Future<void> showSearchFiltersSheet(
   BuildContext context,
   SearchControllerImpl controller, {
   bool triggerSearch = true,
+  BookSourceFiltersConfig? filterCapabilities,
 }) async {
   final tokens = Theme.of(context).extension<EchoTokens>()!;
   var languages = List<String>.of(controller.filters.languages);
   var yearFrom = controller.filters.yearFrom;
   var yearTo = controller.filters.yearTo;
   var order = controller.filters.order;
+
+  final showLang = filterCapabilities?.supportsLanguages ?? true;
+  final showYear = filterCapabilities?.supportsYearRange ?? true;
+  final showOrder = filterCapabilities?.supportsOrder ?? true;
 
   const languageOptions = <String, String>{
     'chinese': '中文',
@@ -35,11 +141,14 @@ Future<void> showSearchFiltersSheet(
     'spanish': '西班牙文',
     'russian': '俄文',
   };
-  const orderOptions = <String, String>{
-    '': '相关度',
-    'popular': '最热',
-    'date': '最新',
-  };
+  final customOrderOpts = filterCapabilities?.order?.options ?? const [];
+  final orderOptions = customOrderOpts.isNotEmpty
+      ? <String, String>{for (final o in customOrderOpts) o.value: o.label}
+      : const <String, String>{
+          '': '相关度',
+          'popular': '最热',
+          'date': '最新',
+        };
 
   await showModalBottomSheet<void>(
     context: context,
@@ -65,84 +174,90 @@ Future<void> showSearchFiltersSheet(
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: EchoMetrics.space2),
-              Text(
-                '语言',
-                style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
-                  color: tokens.textSecondary,
-                ),
-              ),
-              const SizedBox(height: EchoMetrics.space1),
-              Wrap(
-                spacing: EchoMetrics.space1,
-                runSpacing: EchoMetrics.space1,
-                children: [
-                  for (final entry in languageOptions.entries)
-                    FilterChip(
-                      key: Key('filter_lang_${entry.key}'),
-                      label: Text(entry.value),
-                      selected: languages.contains(entry.key),
-                      onSelected: (v) => setSheetState(() {
-                        v
-                            ? languages.add(entry.key)
-                            : languages.remove(entry.key);
-                      }),
-                    ),
-                ],
-              ),
-              const SizedBox(height: EchoMetrics.space2),
-              Text(
-                '出版年份',
-                style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
-                  color: tokens.textSecondary,
-                ),
-              ),
-              const SizedBox(height: EchoMetrics.space1),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      key: const Key('filter_year_from'),
-                      initialValue: yearFrom > 0 ? '$yearFrom' : '',
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(hintText: '起始年'),
-                      onChanged: (v) => yearFrom = int.tryParse(v) ?? 0,
-                    ),
+              if (showLang) ...[
+                const SizedBox(height: EchoMetrics.space2),
+                Text(
+                  '语言',
+                  style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
+                    color: tokens.textSecondary,
                   ),
-                  const SizedBox(width: EchoMetrics.space2),
-                  Expanded(
-                    child: TextFormField(
-                      key: const Key('filter_year_to'),
-                      initialValue: yearTo > 0 ? '$yearTo' : '',
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(hintText: '结束年'),
-                      onChanged: (v) => yearTo = int.tryParse(v) ?? 0,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: EchoMetrics.space2),
-              Text(
-                '排序',
-                style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
-                  color: tokens.textSecondary,
                 ),
-              ),
-              const SizedBox(height: EchoMetrics.space1),
-              Wrap(
-                spacing: EchoMetrics.space1,
-                children: [
-                  for (final entry in orderOptions.entries)
-                    ChoiceChip(
-                      key: Key(
-                        'filter_order_${entry.key.isEmpty ? 'relevance' : entry.key}',
+                const SizedBox(height: EchoMetrics.space1),
+                Wrap(
+                  spacing: EchoMetrics.space1,
+                  runSpacing: EchoMetrics.space1,
+                  children: [
+                    for (final entry in languageOptions.entries)
+                      FilterChip(
+                        key: Key('filter_lang_${entry.key}'),
+                        label: Text(entry.value),
+                        selected: languages.contains(entry.key),
+                        onSelected: (v) => setSheetState(() {
+                          v
+                              ? languages.add(entry.key)
+                              : languages.remove(entry.key);
+                        }),
                       ),
-                      label: Text(entry.value),
-                      selected: order == entry.key,
-                      onSelected: (_) => setSheetState(() => order = entry.key),
+                  ],
+                ),
+              ],
+              if (showYear) ...[
+                const SizedBox(height: EchoMetrics.space2),
+                Text(
+                  '出版年份',
+                  style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: EchoMetrics.space1),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        key: const Key('filter_year_from'),
+                        initialValue: yearFrom > 0 ? '$yearFrom' : '',
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(hintText: '起始年'),
+                        onChanged: (v) => yearFrom = int.tryParse(v) ?? 0,
+                      ),
                     ),
-                ],
-              ),
+                    const SizedBox(width: EchoMetrics.space2),
+                    Expanded(
+                      child: TextFormField(
+                        key: const Key('filter_year_to'),
+                        initialValue: yearTo > 0 ? '$yearTo' : '',
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(hintText: '结束年'),
+                        onChanged: (v) => yearTo = int.tryParse(v) ?? 0,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (showOrder) ...[
+                const SizedBox(height: EchoMetrics.space2),
+                Text(
+                  '排序',
+                  style: Theme.of(sheetCtx).textTheme.labelMedium?.copyWith(
+                    color: tokens.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: EchoMetrics.space1),
+                Wrap(
+                  spacing: EchoMetrics.space1,
+                  children: [
+                    for (final entry in orderOptions.entries)
+                      ChoiceChip(
+                        key: Key(
+                          'filter_order_${entry.key.isEmpty ? 'relevance' : entry.key}',
+                        ),
+                        label: Text(entry.value),
+                        selected: order == entry.key,
+                        onSelected: (_) => setSheetState(() => order = entry.key),
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: EchoMetrics.space3),
               Row(
                 children: [
@@ -277,9 +392,43 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
       }
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(
-          context,
-        )?.showSnackBar(SnackBar(content: Text(e.message)));
+        final api = ref.read(echoApiProvider);
+        final useBookSourceMgr =
+            api is StandaloneEchoApi && api.usesBookSourceManager;
+        final needsAuth =
+            e.code == 'PROVIDER_NOT_CONFIGURED' || e.code == 'SESSION_EXPIRED';
+        final targetSourceId = provider.isNotEmpty
+            ? provider
+            : (useBookSourceMgr
+                  ? (ref
+                            .read(bookSourceControllerProvider)
+                            .activeSource
+                            ?.id ??
+                        '')
+                  : '');
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            action: needsAuth
+                ? SnackBarAction(
+                    label: '去登录',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => useBookSourceMgr
+                              ? (targetSourceId.isNotEmpty
+                                    ? BookSourceDetailPage(
+                                        sourceId: targetSourceId,
+                                      )
+                                    : const BookSourcesPage())
+                              : const ProviderAccountPage(),
+                        ),
+                      );
+                    },
+                  )
+                : null,
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -307,6 +456,22 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
     final textTheme = Theme.of(context).textTheme;
     final state = ref.watch(searchControllerProvider);
     final controller = ref.read(searchControllerProvider.notifier);
+    final api = ref.watch(echoApiProvider);
+    final useBookSourceMgr =
+        api is StandaloneEchoApi && api.usesBookSourceManager;
+    final bsState = useBookSourceMgr
+        ? ref.watch(bookSourceControllerProvider)
+        : null;
+    final activeSource = bsState?.activeSource;
+    final filterCaps = activeSource?.definition.search?.filters;
+    final showEpubFilter =
+        !useBookSourceMgr || (filterCaps?.supportsExtensions ?? false);
+    final showAdvancedFilter =
+        !useBookSourceMgr ||
+        (filterCaps != null &&
+            (filterCaps.supportsLanguages ||
+                filterCaps.supportsYearRange ||
+                filterCaps.supportsOrder));
     final hairline = echoHairlineColor(context, darkAlpha: 0.06);
     final epubOnly = controller.filters.extensions.contains('EPUB');
     final bottomPadding = ref.watch(chunkedPlayerProvider).hasBook
@@ -396,55 +561,95 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
       body: EchoAmbientBackground(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                EchoMetrics.pagePadding,
-                4,
-                EchoMetrics.pagePadding,
-                6,
-              ),
-              child: Row(
-                children: [
-                  FilterChip(
-                    key: const Key('search_results_epub_filter'),
-                    visualDensity: VisualDensity.compact,
-                    label: const Text('仅 EPUB'),
-                    selected: epubOnly,
-                    onSelected: (v) {
-                      controller.setFilters(
-                        controller.filters.copyWith(
-                          extensions: v ? const ['EPUB'] : const [],
-                        ),
-                        triggerSearch: true,
-                      );
-                      setState(() {});
-                    },
+            if ((useBookSourceMgr && activeSource != null) ||
+                showEpubFilter ||
+                showAdvancedFilter)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  EchoMetrics.pagePadding,
+                  4,
+                  EchoMetrics.pagePadding,
+                  6,
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        if (useBookSourceMgr && activeSource != null) ...[
+                          ActionChip(
+                            key: const Key('search_results_source_switcher'),
+                            visualDensity: VisualDensity.compact,
+                            avatar: const Icon(
+                              Icons.menu_book_outlined,
+                              size: 16,
+                            ),
+                            label: Text('${activeSource.name} ▾'),
+                            onPressed: () => showBookSourceSwitcherSheet(
+                              context,
+                              ref,
+                              onSourceSelected: (_) async {
+                                final q = _controller.text.trim().isNotEmpty
+                                    ? _controller.text.trim()
+                                    : state.lastQuery;
+                                if (q.isNotEmpty) {
+                                  await controller.search(q);
+                                }
+                              },
+                            ),
+                          ),
+                          if (showEpubFilter || showAdvancedFilter)
+                            const SizedBox(width: EchoMetrics.space1),
+                        ],
+                        if (showEpubFilter) ...[
+                          FilterChip(
+                            key: const Key('search_results_epub_filter'),
+                            visualDensity: VisualDensity.compact,
+                            label: const Text('仅 EPUB'),
+                            selected: epubOnly,
+                            onSelected: (v) {
+                              controller.setFilters(
+                                controller.filters.copyWith(
+                                  extensions: v ? const ['EPUB'] : const [],
+                                ),
+                                triggerSearch: true,
+                              );
+                              setState(() {});
+                            },
+                          ),
+                          if (showAdvancedFilter)
+                            const SizedBox(width: EchoMetrics.space1),
+                        ],
+                        if (showAdvancedFilter)
+                          ActionChip(
+                            key: const Key('search_results_filter_button'),
+                            visualDensity: VisualDensity.compact,
+                            avatar: Icon(
+                              Icons.tune_rounded,
+                              size: 16,
+                              color: controller.filters.activeCount > 0
+                                  ? tokens.primary
+                                  : tokens.textSecondary,
+                            ),
+                            label: Text(
+                              controller.filters.activeCount == 0
+                                  ? '筛选'
+                                  : '筛选 ${controller.filters.activeCount}',
+                            ),
+                            onPressed: () => showSearchFiltersSheet(
+                              context,
+                              controller,
+                              triggerSearch: true,
+                              filterCapabilities:
+                                  useBookSourceMgr ? filterCaps : null,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: EchoMetrics.space1),
-                  ActionChip(
-                    key: const Key('search_results_filter_button'),
-                    visualDensity: VisualDensity.compact,
-                    avatar: Icon(
-                      Icons.tune_rounded,
-                      size: 16,
-                      color: controller.filters.activeCount > 0
-                          ? tokens.primary
-                          : tokens.textSecondary,
-                    ),
-                    label: Text(
-                      controller.filters.activeCount == 0
-                          ? '筛选'
-                          : '筛选 ${controller.filters.activeCount}',
-                    ),
-                    onPressed: () => showSearchFiltersSheet(
-                      context,
-                      controller,
-                      triggerSearch: true,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
             if (state.error != null)
               Container(
                 key: const Key('search_error_banner'),
@@ -478,10 +683,20 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
                       key: const Key('search_go_configure'),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => const ProviderAccountPage(),
+                          builder: (_) => useBookSourceMgr
+                              ? (activeSource != null
+                                    ? BookSourceDetailPage(
+                                        sourceId: activeSource.id,
+                                      )
+                                    : const BookSourcesPage())
+                              : const ProviderAccountPage(),
                         ),
                       ),
-                      child: const Text('去配置账号'),
+                      child: Text(
+                        useBookSourceMgr
+                            ? (activeSource != null ? '查看书源设置' : '去管理书源')
+                            : '去配置账号',
+                      ),
                     ),
                   ],
                 ),
@@ -597,6 +812,7 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
                               children: [
                                 BookCover(
                                   url: book.coverUrl,
+                                  headers: book.imageHeaders,
                                   title: book.title,
                                   author: authorText,
                                   width: 50,
@@ -819,6 +1035,7 @@ class _SearchBookDetailPageState extends ConsumerState<SearchBookDetailPage> {
                   children: [
                     BookCover(
                       url: data.coverUrl,
+                      headers: data.imageHeaders,
                       title: data.title,
                       author: authorText,
                       width: 88,

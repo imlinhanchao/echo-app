@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/api/echo_api.dart';
 import '../../core/api/models.dart';
+import '../../core/book_sources/book_source_manager.dart';
 import '../auth/auth_controller.dart';
 
 /// 搜索筛选条件（对应 GET /api/search 查询参数）。
@@ -159,20 +160,23 @@ class MemorySearchHistoryStore implements SearchHistoryStore {
   }
 }
 
-/// 搜索控制器：发起查询、分页加载更多、筛选切换。
+/// 搜索控制器：发起查询、分页加载更多、筛选切换、支持单源切换。
 class SearchController extends StateNotifier<SearchState> {
   SearchController(
     this._api, {
     SearchFilters filters = const SearchFilters(),
     SearchHistoryStore? historyStore,
+    String Function()? readActiveProviderId,
   }) : _filters = filters,
        _historyStore = historyStore ?? SecureSearchHistoryStore(),
+       _readActiveProviderId = readActiveProviderId,
        super(const SearchState()) {
     _initHistory();
   }
 
   final EchoApi _api;
   final SearchHistoryStore _historyStore;
+  final String Function()? _readActiveProviderId;
   SearchFilters _filters;
 
   SearchFilters get filters => _filters;
@@ -243,15 +247,27 @@ class SearchController extends StateNotifier<SearchState> {
     required bool append,
   }) async {
     try {
-      final result = await _api.search(
-        query: query,
-        page: page,
-        extensions: _filters.extensions,
-        languages: _filters.languages,
-        yearFrom: _filters.yearFrom,
-        yearTo: _filters.yearTo,
-        order: _filters.order,
-      );
+      final activeProvider = _readActiveProviderId?.call() ?? '';
+      final result = activeProvider.isNotEmpty
+          ? await _api.search(
+              query: query,
+              provider: activeProvider,
+              page: page,
+              extensions: _filters.extensions,
+              languages: _filters.languages,
+              yearFrom: _filters.yearFrom,
+              yearTo: _filters.yearTo,
+              order: _filters.order,
+            )
+          : await _api.search(
+              query: query,
+              page: page,
+              extensions: _filters.extensions,
+              languages: _filters.languages,
+              yearFrom: _filters.yearFrom,
+              yearTo: _filters.yearTo,
+              order: _filters.order,
+            );
       state = state.copyWith(
         books: append ? [...state.books, ...result.books] : result.books,
         page: result.page,
@@ -277,7 +293,11 @@ class SearchController extends StateNotifier<SearchState> {
 final StateNotifierProvider<SearchController, SearchState>
 searchControllerProvider = StateNotifierProvider<SearchController, SearchState>(
   (ref) {
-    return SearchController(ref.watch(echoApiProvider));
+    return SearchController(
+      ref.watch(echoApiProvider),
+      readActiveProviderId: () =>
+          ref.read(bookSourceControllerProvider).activeSource?.id ?? '',
+    );
   },
 );
 

@@ -15,9 +15,9 @@ import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
+import '../book_sources/book_sources_page.dart';
 import '../player/player_sheet.dart' show formatDurationMs, openPlayer;
 import '../reader/reader_page.dart';
-import '../settings/ebook_api_settings_page.dart';
 import '../shell/echo_shell.dart' show EchoShell;
 import 'book_detail_page.dart';
 import 'convert_sheet.dart';
@@ -335,7 +335,7 @@ class BookshelfTab extends ConsumerWidget {
                       key: const Key('bookshelf_configure_source_button'),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => const EbookApiSettingsPage(),
+                          builder: (_) => const BookSourcesPage(),
                         ),
                       ),
                       child: const Text('配置在线书源'),

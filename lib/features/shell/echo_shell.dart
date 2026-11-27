@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/models.dart';
+import '../../core/book_sources/book_source_manager.dart';
 import '../../core/sync/progress_sync_service.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_breakpoints.dart';
@@ -48,6 +49,9 @@ class EchoShellState extends ConsumerState<EchoShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(progressSyncServiceProvider.notifier).syncAll();
+      ref
+          .read(bookSourceControllerProvider.notifier)
+          .maybeRefreshSubscriptionsInBackground();
     });
   }
 

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/api/ebook_api_client.dart';
-import '../../core/api/models.dart';
+import '../../core/book_sources/book_source_manager.dart';
 import '../../core/settings/standalone_config_store.dart';
 import '../../core/tts/tts_model_catalog.dart';
 import '../../core/tts/tts_model_manager.dart';
@@ -10,9 +9,10 @@ import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
+import '../book_sources/book_sources_page.dart';
 
 /// 单机版首次启动两步引导页（极简书房 Editorial Minimalism）：
-/// Step 1：配置 ebook-api 书源服务地址；
+/// Step 1：启用内置公版书源，或导入自定义书源/自建 ebook-api；
 /// Step 2：选择系统语音引擎或下载端侧离线 TTS 模型。
 class OnboardingPage extends ConsumerStatefulWidget {
   const OnboardingPage({super.key});
@@ -23,102 +23,34 @@ class OnboardingPage extends ConsumerStatefulWidget {
 
 class _OnboardingPageState extends ConsumerState<OnboardingPage> {
   int _step = 0;
-  final TextEditingController _urlCtrl = TextEditingController();
-  final TextEditingController _keyCtrl = TextEditingController();
-  bool _testing = false;
-  String? _testMessage;
-  bool _testOk = false;
 
   @override
-  void dispose() {
-    _urlCtrl.dispose();
-    _keyCtrl.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    Future<void>.microtask(
+      () => ref.read(bookSourceControllerProvider.notifier).ensureLoaded(),
+    );
   }
 
-  Future<void> _testEbookApi() async {
-    final err = validateEbookApiUrl(_urlCtrl.text);
-    if (err != null) {
-      setState(() {
-        _testOk = false;
-        _testMessage = err;
-      });
-      return;
+  Future<void> _continueWithSources() async {
+    final manager = ref.read(bookSourceControllerProvider.notifier);
+    await manager.ensureLoaded();
+    if (ref.read(bookSourceControllerProvider).enabledSources.isEmpty) {
+      await manager.enableBundledSources();
     }
-    setState(() {
-      _testing = true;
-      _testMessage = null;
-    });
-    try {
-      final client = EbookApiClient(
-        baseUrl: _urlCtrl.text,
-        apiKey: _keyCtrl.text,
-      );
-      final health = await client.checkHealth();
-      if (!mounted) return;
-      setState(() {
-        _testing = false;
-        _testOk = health.ok;
-        _testMessage = health.ok
-            ? '连接成功（可用书源：${health.providers.join(", ")}）'
-            : '服务响应异常';
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _testing = false;
-        _testOk = false;
-        _testMessage = '连接失败：${e.message}';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _testing = false;
-        _testOk = false;
-        _testMessage = '连接失败：$e';
-      });
-    }
-  }
-
-  Future<void> _saveApiAndNext() async {
-    final raw = _urlCtrl.text.trim();
-    if (raw.isEmpty) {
-      await _skipApiStep();
-      return;
-    }
-    final err = validateEbookApiUrl(raw);
-    if (err != null) {
-      setState(() {
-        _testOk = false;
-        _testMessage = err;
-      });
-      return;
-    }
-    await ref
-        .read(standaloneConfigProvider.notifier)
-        .setEbookApi(baseUrl: raw, apiKey: _keyCtrl.text.trim());
     if (!mounted) return;
-    setState(() {
-      _testMessage = null;
-      _step = 1;
-    });
+    setState(() => _step = 1);
   }
 
-  Future<void> _skipApiStep() async {
-    _urlCtrl.clear();
-    _keyCtrl.clear();
+  Future<void> _skipSourcesStep() async {
+    await ref.read(bookSourceControllerProvider.notifier).disableAllSources();
     await ref.read(standaloneConfigProvider.notifier).clearEbookApi();
     if (!mounted) return;
-    setState(() {
-      _testMessage = null;
-      _testOk = false;
-      _step = 1;
-    });
+    setState(() => _step = 1);
   }
 
   Future<void> _skipAllToBookshelf() async {
-    _urlCtrl.clear();
-    _keyCtrl.clear();
+    await ref.read(bookSourceControllerProvider.notifier).disableAllSources();
     await ref.read(standaloneConfigProvider.notifier).clearEbookApi();
     await ref.read(standaloneConfigProvider.notifier).completeOnboarding();
   }
@@ -197,7 +129,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                   const SizedBox(height: 6),
                   Text(
                     _step == 0
-                        ? '第 1 步 · 配置在线书源服务（可选）'
+                        ? '第 1 步 · 选择在线书源（可选）'
                         : '第 2 步 · 准备端侧语音模型（可选）',
                     textAlign: TextAlign.center,
                     style: textTheme.bodySmall?.copyWith(
@@ -223,6 +155,10 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
     EchoTokens tokens,
     TextTheme textTheme,
   ) {
+    final bsState = ref.watch(bookSourceControllerProvider);
+    final enabledCount = bsState.enabledSources.length;
+    final totalCount = bsState.sources.length;
+
     return Container(
       padding: const EdgeInsets.all(EchoMetrics.pagePadding),
       decoration: echoElevatedCardDecoration(context, radius: 18),
@@ -230,7 +166,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '连接 ebook-api 搜书服务',
+            '内置公版书源，开箱即用',
             style: textTheme.titleMedium?.copyWith(
               color: tokens.textPrimary,
               fontWeight: FontWeight.w600,
@@ -238,66 +174,116 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '应用不内置服务地址。填写自建 ebook-api 地址即可在线搜书；也可以跳过此步（将暂不启用在线搜书），直接导入本地 EPUB / TXT 书籍。',
+            '无需部署后端服务，App 已内置古登堡公版书库、Standard Ebooks 与文硕阁，可直接在线搜书下载；也支持导入外部书源订阅或连接自建 ebook-api。',
             style: textTheme.bodySmall?.copyWith(color: tokens.textSecondary),
           ),
-          const SizedBox(height: EchoMetrics.space3),
-          TextField(
-            key: const Key('onboarding_url_field'),
-            controller: _urlCtrl,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: 'ebook-api 地址',
-              hintText: 'http://192.168.1.10:8091',
-              prefixIcon: Icon(Icons.dns_outlined),
+          const SizedBox(height: EchoMetrics.space2),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: echoElevatedCardDecoration(
+              context,
+              radius: 14,
+              color: tokens.surfaceBase,
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('onboarding_key_field'),
-            controller: _keyCtrl,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'API Key（可选）',
-              prefixIcon: Icon(Icons.key_outlined),
-            ),
-          ),
-          if (_testMessage != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              _testMessage!,
-              style: textTheme.bodySmall?.copyWith(
-                color: _testOk ? tokens.success : tokens.error,
-              ),
-            ),
-          ],
-          const SizedBox(height: EchoMetrics.space3),
-          Row(
-            children: [
-              EchoSecondaryButton(
-                onPressed: _testing ? null : _testEbookApi,
-                label: _testing ? '测试中...' : '测试连接',
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: EchoPrimaryButton(
-                  key: const Key('onboarding_next_button'),
-                  onPressed: _saveApiAndNext,
-                  label: '下一步',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.auto_stories_outlined,
+                      size: 16,
+                      color: tokens.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '当前书源（已启用 $enabledCount / $totalCount）',
+                      style: textTheme.labelMedium?.copyWith(
+                        color: tokens.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 8),
+                for (final src in bsState.sources)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          src.isEnabled
+                              ? Icons.check_circle_rounded
+                              : Icons.radio_button_unchecked_rounded,
+                          size: 15,
+                          color: src.isEnabled
+                              ? tokens.success
+                              : tokens.textDisabled,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            src.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: textTheme.bodySmall?.copyWith(
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          src.requiresAuthForDownload
+                              ? '搜书免登·下载需账号'
+                              : src.driver.displayLabel,
+                          style: textTheme.labelSmall?.copyWith(
+                            color: tokens.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: EchoMetrics.space2),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('onboarding_import_source_button'),
+                onPressed: () =>
+                    showAddBookSourceSheet(context, ref, initialTab: 0),
+                icon: const Icon(Icons.add_link_rounded, size: 18),
+                label: const Text('导入书源 / 订阅'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('onboarding_ebook_api_button'),
+                onPressed: () =>
+                    showAddBookSourceSheet(context, ref, initialTab: 3),
+                icon: const Icon(Icons.dns_outlined, size: 18),
+                label: const Text('连接自建 ebook-api'),
               ),
             ],
+          ),
+          const SizedBox(height: EchoMetrics.space3),
+          EchoPrimaryButton(
+            key: const Key('onboarding_next_button'),
+            onPressed: _continueWithSources,
+            icon: Icons.arrow_forward_rounded,
+            label: '启用书源并继续',
           ),
           const SizedBox(height: 8),
           TextButton(
             key: const Key('onboarding_skip_api_button'),
-            onPressed: _skipApiStep,
-            child: const Text('暂不配置，跳过此步'),
+            onPressed: _skipSourcesStep,
+            child: const Text('暂不用在线书源，仅用本地导入'),
           ),
           TextButton(
             key: const Key('onboarding_skip_all_button'),
             onPressed: _skipAllToBookshelf,
-            child: const Text('跳过配置，直接导入本地书'),
+            child: const Text('跳过配置，直接进入书架'),
           ),
         ],
       ),

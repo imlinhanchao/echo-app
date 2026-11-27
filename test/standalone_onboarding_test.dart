@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:echo/core/api/models.dart';
 import 'package:echo/core/api/provider_token_store.dart';
 import 'package:echo/core/audio/chunked_player_controller.dart';
+import 'package:echo/core/book_sources/book_source_manager.dart';
+import 'package:echo/core/book_sources/book_source_models.dart';
+import 'package:echo/core/book_sources/book_source_stores.dart';
 import 'package:echo/core/books/local_library_store.dart';
 import 'package:echo/core/reader/reading_store.dart';
 import 'package:echo/core/settings/standalone_config_store.dart';
@@ -51,6 +55,10 @@ void main() {
         Brightness.dark,
         EchoTokens.fromColors(darkColors, Brightness.dark),
       );
+      final regStore = MemoryBookSourceRegistryStore();
+      final userStore = MemoryBookSourceUserStateStore();
+      final credStore = MemoryBookSourceCredentialStore();
+
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -59,6 +67,10 @@ void main() {
             providerTokenStoreProvider.overrideWithValue(
               MemoryProviderTokenStore(),
             ),
+            bookSourceRegistryStoreProvider.overrideWithValue(regStore),
+            bookSourceUserStateStoreProvider.overrideWithValue(userStore),
+            bookSourceCredentialStoreProvider.overrideWithValue(credStore),
+            bookSourceDioProvider.overrideWithValue(Dio()),
             progressStoreProvider.overrideWithValue(MemoryProgressStore()),
             readingStoreProvider.overrideWithValue(MemoryReadingStore()),
             audioEngineProvider.overrideWithValue(FakeAudioEngine()),
@@ -74,19 +86,19 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 首次启动应停在两步引导页，而不是旧版登录页
+      // 首次启动应停在两步引导页，展示内置公版书源与快捷导入/自建入口
       expect(find.byKey(const Key('standalone_onboarding_page')), findsOneWidget);
-      expect(find.byKey(const Key('onboarding_url_field')), findsOneWidget);
+      expect(find.byKey(const Key('onboarding_import_source_button')), findsOneWidget);
+      expect(find.byKey(const Key('onboarding_ebook_api_button')), findsOneWidget);
+      expect(find.byKey(const Key('onboarding_next_button')), findsOneWidget);
 
-      // 第 1 步：填写一个自定义 ebook-api 地址后进入第 2 步
-      await tester.enterText(
-        find.byKey(const Key('onboarding_url_field')),
-        'http://192.168.1.99:8091',
-      );
+      // 第 1 步：点击「启用书源并继续」进入第 2 步
+      await tester.ensureVisible(find.byKey(const Key('onboarding_next_button')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('onboarding_next_button')));
       await tester.pumpAndSettle();
 
-      // 第 2 步：展示离线语音模型卡片，滚动到底部点击跳过进入书架
+      // 第 2 步：展示离线语音模型卡片，滚动到底部进入书架
       expect(find.text('选择一个离线语音模型'), findsOneWidget);
       await tester.ensureVisible(find.byKey(const Key('onboarding_finish_button')));
       await tester.pumpAndSettle();
@@ -94,9 +106,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('echo_home')), findsOneWidget);
+      final homeElem = tester.element(find.byKey(const Key('echo_home')));
+      final container = ProviderScope.containerOf(homeElem);
+      expect(container.read(onlineSearchAvailableProvider), isTrue);
+      expect(
+        container.read(bookSourceControllerProvider).enabledSources.map((s) => s.id),
+        containsAll(<String>['gutendex', 'standard_ebooks', 'wenshuoge']),
+      );
       final saved = await storage.read();
       expect(saved.onboardingCompleted, isTrue);
-      expect(saved.ebookApiBaseUrl, 'http://192.168.1.99:8091');
     });
 
     testWidgets(
@@ -132,6 +150,16 @@ void main() {
               providerTokenStoreProvider.overrideWithValue(
                 MemoryProviderTokenStore(),
               ),
+              bookSourceRegistryStoreProvider.overrideWithValue(
+                MemoryBookSourceRegistryStore(),
+              ),
+              bookSourceUserStateStoreProvider.overrideWithValue(
+                MemoryBookSourceUserStateStore(),
+              ),
+              bookSourceCredentialStoreProvider.overrideWithValue(
+                MemoryBookSourceCredentialStore(),
+              ),
+              bookSourceDioProvider.overrideWithValue(Dio()),
               progressStoreProvider.overrideWithValue(MemoryProgressStore()),
               readingStoreProvider.overrideWithValue(MemoryReadingStore()),
               audioEngineProvider.overrideWithValue(FakeAudioEngine()),
@@ -234,11 +262,28 @@ void main() {
     );
 
     testWidgets(
-      'configuring ebook-api later unlocks search and clearing locks it again',
+      'enabling book source in BookSourcesPage unlocks search and disabling via ProfilePage locks it again',
       (tester) async {
         const initialCfg = StandaloneConfig(onboardingCompleted: true);
         final storage = MemoryStandaloneConfigStorage(initialCfg);
         StandaloneConfigStore.setForTest(initialCfg, storage: storage);
+
+        const disabledOverlays = BookSourceUserState(
+          overlays: <String, BookSourceUserOverlay>{
+            'gutendex': BookSourceUserOverlay(
+              sourceId: 'gutendex',
+              enabled: false,
+            ),
+            'standard_ebooks': BookSourceUserOverlay(
+              sourceId: 'standard_ebooks',
+              enabled: false,
+            ),
+            'wenshuoge': BookSourceUserOverlay(
+              sourceId: 'wenshuoge',
+              enabled: false,
+            ),
+          },
+        );
 
         final theme = buildEchoTheme(
           Brightness.dark,
@@ -252,6 +297,16 @@ void main() {
               providerTokenStoreProvider.overrideWithValue(
                 MemoryProviderTokenStore(),
               ),
+              bookSourceRegistryStoreProvider.overrideWithValue(
+                MemoryBookSourceRegistryStore(),
+              ),
+              bookSourceUserStateStoreProvider.overrideWithValue(
+                MemoryBookSourceUserStateStore(disabledOverlays),
+              ),
+              bookSourceCredentialStoreProvider.overrideWithValue(
+                MemoryBookSourceCredentialStore(),
+              ),
+              bookSourceDioProvider.overrideWithValue(Dio()),
               progressStoreProvider.overrideWithValue(MemoryProgressStore()),
               readingStoreProvider.overrideWithValue(MemoryReadingStore()),
               audioEngineProvider.overrideWithValue(FakeAudioEngine()),
@@ -276,7 +331,7 @@ void main() {
         );
         expect(find.byKey(const Key('search_field')), findsNothing);
 
-        // 点击「配置书源服务」保存地址，返回后搜索立即解锁
+        // 点击「管理 / 启用书源」进入书源管理页并启用 Standard Ebooks，返回后搜索立即解锁
         await tester.ensureVisible(
           find.byKey(const Key('search_disabled_configure_button')),
         );
@@ -286,11 +341,16 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.enterText(
-          find.byKey(const Key('ebook_api_url_field')),
-          'http://192.168.1.99:8091',
+        expect(find.byKey(const Key('book_sources_page')), findsOneWidget);
+        final stdSwitch = find.byKey(
+          const Key('book_source_switch_standard_ebooks'),
         );
-        await tester.tap(find.byKey(const Key('ebook_api_save_button')));
+        await tester.ensureVisible(stdSwitch);
+        await tester.pumpAndSettle();
+        await tester.tap(stdSwitch);
+        await tester.pumpAndSettle();
+
+        await tester.pageBack();
         await tester.pumpAndSettle();
 
         expect(
@@ -299,15 +359,40 @@ void main() {
         );
         expect(find.byKey(const Key('search_field')), findsOneWidget);
 
-        // 再点击右上角「书源服务」清空跳过，返回后应恢复禁用态
-        await tester.tap(find.text('书源服务'));
+        // 通过「我的 → 书源管理」关闭最后一个已启用书源，返回发现页后恢复禁用态
+        await tester.tap(find.text('我的'));
         await tester.pumpAndSettle();
-        await tester.ensureVisible(
-          find.byKey(const Key('ebook_api_clear_button')),
+        final profileEntry = find.byKey(const Key('profile_book_sources'));
+        await tester.scrollUntilVisible(
+          profileEntry,
+          200,
+          scrollable: find.descendant(
+            of: find.byKey(const Key('profile_page')),
+            matching: find.byType(Scrollable),
+          ).first,
         );
-        await tester.tap(find.byKey(const Key('ebook_api_clear_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(profileEntry);
         await tester.pumpAndSettle();
 
+        expect(find.byKey(const Key('book_sources_page')), findsOneWidget);
+        await tester.scrollUntilVisible(
+          stdSwitch,
+          200,
+          scrollable: find.descendant(
+            of: find.byKey(const Key('book_sources_page')),
+            matching: find.byType(Scrollable),
+          ).first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(stdSwitch);
+        await tester.pumpAndSettle();
+
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('发现'));
+        await tester.pumpAndSettle();
         expect(find.byKey(const Key('search_field')), findsNothing);
         expect(
           find.byKey(const Key('search_source_disabled_card')),

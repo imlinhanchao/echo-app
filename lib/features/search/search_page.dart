@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/standalone_echo_api.dart';
 import '../../core/audio/chunked_player_controller.dart';
+import '../../core/book_sources/book_source_manager.dart';
 import '../../design/echo_ambient.dart';
 import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_tokens.dart';
 import '../auth/auth_controller.dart';
+import '../book_sources/book_sources_page.dart';
 import '../discover/discover_section.dart';
 import '../library/bookshelf_tab.dart' show importLocalBook;
-import '../settings/ebook_api_settings_page.dart';
 import 'search_controller.dart';
 import 'search_results_page.dart';
 
@@ -64,10 +66,20 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  void _openEbookApiSettings() {
+  void _openBookSourcesPage() {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const EbookApiSettingsPage()),
+      MaterialPageRoute<void>(builder: (_) => const BookSourcesPage()),
     );
+  }
+
+  void _openSourcePickerOrSettings() {
+    final api = ref.read(echoApiProvider);
+    final useMgr = api is StandaloneEchoApi && api.usesBookSourceManager;
+    if (!useMgr) {
+      _openBookSourcesPage();
+      return;
+    }
+    showBookSourceSwitcherSheet(context, ref);
   }
 
   @override
@@ -77,15 +89,29 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final state = ref.watch(searchControllerProvider);
     final controller = ref.read(searchControllerProvider.notifier);
     final searchAvailable = ref.watch(onlineSearchAvailableProvider);
+    final api = ref.watch(echoApiProvider);
+    final useBookSourceMgr =
+        api is StandaloneEchoApi && api.usesBookSourceManager;
+    final bsState = ref.watch(bookSourceControllerProvider);
+    final activeSource = useBookSourceMgr ? bsState.activeSource : null;
+    final filterCaps = useBookSourceMgr
+        ? activeSource?.filterCapabilities
+        : null;
+    final supportsExtensions =
+        !useBookSourceMgr || (filterCaps?.supportsExtensions ?? false);
+    final supportsAnyFilter =
+        !useBookSourceMgr || (filterCaps?.hasAnyFilter ?? false);
+
     final disableAnimations = MediaQuery.disableAnimationsOf(context);
     final bottomPadding = ref.watch(chunkedPlayerProvider).hasBook
         ? 112.0
         : EchoMetrics.space3;
     final epubOnly = controller.filters.extensions.contains('EPUB');
     final showSearchFilters =
-        _searchFocusNode.hasFocus ||
-        _controller.text.isNotEmpty ||
-        controller.filters.activeCount > 0;
+        (supportsExtensions || supportsAnyFilter) &&
+        (_searchFocusNode.hasFocus ||
+            _controller.text.isNotEmpty ||
+            controller.filters.activeCount > 0);
 
     return CustomScrollView(
       slivers: [
@@ -116,10 +142,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 const SizedBox(width: EchoMetrics.space1),
                 Semantics(
                   button: true,
-                  label: searchAvailable ? '书源服务已就绪' : '配置书源服务',
+                  label: searchAvailable
+                      ? (activeSource != null
+                            ? '当前书源：${activeSource.name}'
+                            : '书源服务已就绪')
+                      : '配置书源',
                   child: InkWell(
+                    key: const Key('search_source_switcher_pill'),
                     borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
-                    onTap: _openEbookApiSettings,
+                    onTap: _openSourcePickerOrSettings,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -143,13 +174,29 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            searchAvailable ? '书源服务' : '配置服务',
-                            style: textTheme.labelSmall?.copyWith(
-                              color: tokens.textPrimary,
-                              fontWeight: FontWeight.w600,
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 120),
+                            child: Text(
+                              searchAvailable
+                                  ? (activeSource?.name ?? '书源服务')
+                                  : '配置书源',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: textTheme.labelSmall?.copyWith(
+                                color: tokens.textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
+                          if (useBookSourceMgr &&
+                              bsState.enabledSources.isNotEmpty) ...[
+                            const SizedBox(width: 2),
+                            Icon(
+                              Icons.expand_more_rounded,
+                              size: 14,
+                              color: tokens.textSecondary,
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -200,7 +247,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           ),
                           const SizedBox(height: EchoMetrics.space1),
                           Text(
-                            '已跳过书源配置，暂无法使用搜索',
+                            '已停用在线书源，暂无法使用搜索',
                             textAlign: TextAlign.center,
                             style: textTheme.titleMedium?.copyWith(
                               color: tokens.textPrimary,
@@ -209,7 +256,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           ),
                           const SizedBox(height: EchoMetrics.spaceHalf),
                           Text(
-                            '你仍可直接导入本地 EPUB / TXT 书籍进行阅读与听书，或先逛逛下方精选荐书；如需在线搜书下载，请先配置 ebook-api 书源服务。',
+                            '你仍可直接导入本地 EPUB / TXT 书籍进行阅读与听书，或先逛逛下方精选荐书；如需在线搜书下载，可在「书源管理」启用内置公版源或导入书源。',
                             textAlign: TextAlign.center,
                             style: textTheme.bodySmall?.copyWith(
                               color: tokens.textSecondary,
@@ -229,9 +276,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           const SizedBox(height: EchoMetrics.space1),
                           EchoSecondaryButton(
                             key: const Key('search_disabled_configure_button'),
-                            icon: Icons.dns_outlined,
-                            label: '配置书源服务',
-                            onPressed: _openEbookApiSettings,
+                            icon: Icons.source_outlined,
+                            label: '管理与启用书源',
+                            onPressed: _openBookSourcesPage,
                           ),
                         ],
                       ),
@@ -241,7 +288,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 const SizedBox(height: EchoMetrics.space2),
                 DiscoverSection(
                   searchAvailable: false,
-                  onConfigureEbookApi: _openEbookApiSettings,
+                  onConfigureEbookApi: _openBookSourcesPage,
                 ),
               ],
             ),
@@ -270,7 +317,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           textInputAction: TextInputAction.search,
                           onSubmitted: (_) => _submit(),
                           decoration: InputDecoration(
-                            hintText: '搜索书名、作者（zlib 书源）',
+                            hintText: activeSource != null
+                                ? '搜索书名、作者（${activeSource.name}）'
+                                : '搜索书名、作者',
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -329,7 +378,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           ),
                         ),
                       ),
-                      if (!showSearchFilters) ...[
+                      if (!showSearchFilters && supportsAnyFilter) ...[
                         const SizedBox(width: EchoMetrics.space1),
                         _InlineFilterButton(
                           key: const Key('search_filter_button'),
@@ -338,6 +387,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                             context,
                             controller,
                             triggerSearch: false,
+                            filterCapabilities: filterCaps,
                           ),
                         ),
                       ],
@@ -356,45 +406,49 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                             ),
                             child: Row(
                               children: [
-                                FilterChip(
-                                  key: const Key('search_epub_filter'),
-                                  visualDensity: VisualDensity.compact,
-                                  label: const Text('仅 EPUB'),
-                                  selected: epubOnly,
-                                  onSelected: (v) {
-                                    controller.setFilters(
-                                      controller.filters.copyWith(
-                                        extensions: v
-                                            ? const ['EPUB']
-                                            : const [],
-                                      ),
+                                if (supportsExtensions) ...[
+                                  FilterChip(
+                                    key: const Key('search_epub_filter'),
+                                    visualDensity: VisualDensity.compact,
+                                    label: const Text('仅 EPUB'),
+                                    selected: epubOnly,
+                                    onSelected: (v) {
+                                      controller.setFilters(
+                                        controller.filters.copyWith(
+                                          extensions: v
+                                              ? const ['EPUB']
+                                              : const [],
+                                        ),
+                                        triggerSearch: false,
+                                      );
+                                      setState(() {});
+                                    },
+                                  ),
+                                  const SizedBox(width: EchoMetrics.space1),
+                                ],
+                                if (supportsAnyFilter)
+                                  ActionChip(
+                                    key: const Key('search_filter_button'),
+                                    visualDensity: VisualDensity.compact,
+                                    avatar: Icon(
+                                      Icons.tune_rounded,
+                                      size: 16,
+                                      color: controller.filters.activeCount > 0
+                                          ? tokens.primary
+                                          : tokens.textSecondary,
+                                    ),
+                                    label: Text(
+                                      controller.filters.activeCount == 0
+                                          ? '筛选'
+                                          : '筛选 ${controller.filters.activeCount}',
+                                    ),
+                                    onPressed: () => showSearchFiltersSheet(
+                                      context,
+                                      controller,
                                       triggerSearch: false,
-                                    );
-                                    setState(() {});
-                                  },
-                                ),
-                                const SizedBox(width: EchoMetrics.space1),
-                                ActionChip(
-                                  key: const Key('search_filter_button'),
-                                  visualDensity: VisualDensity.compact,
-                                  avatar: Icon(
-                                    Icons.tune_rounded,
-                                    size: 16,
-                                    color: controller.filters.activeCount > 0
-                                        ? tokens.primary
-                                        : tokens.textSecondary,
+                                      filterCapabilities: filterCaps,
+                                    ),
                                   ),
-                                  label: Text(
-                                    controller.filters.activeCount == 0
-                                        ? '筛选'
-                                        : '筛选 ${controller.filters.activeCount}',
-                                  ),
-                                  onPressed: () => showSearchFiltersSheet(
-                                    context,
-                                    controller,
-                                    triggerSearch: false,
-                                  ),
-                                ),
                               ],
                             ),
                           )

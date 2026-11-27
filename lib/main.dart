@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'core/api/models.dart';
 import 'core/audio/audio_service_engine.dart';
+import 'core/book_sources/book_source_manager.dart';
 import 'core/notes/note_store.dart';
 import 'core/offline/offline_store.dart';
 import 'core/stats/stats_store.dart';
@@ -47,6 +48,8 @@ Future<void> main() async {
   await ThemeModeController.init();
   // 恢复单机版全局配置（ebook-api 地址、引导完成状态、默认 TTS 模型）
   await StandaloneConfigStore.init();
+  // 预加载内置书源定义
+  await BookSourceBootstrap.init();
   // 恢复旧服务地址缓存（保留兼容）
   await ServerAddressStore.init();
   // 深色为品牌基准态；亮色为同一 Token 体系的双态对偶。
