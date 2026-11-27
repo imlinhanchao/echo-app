@@ -4,11 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Echo · 回声 — 静默阅读，随时聆听</title>
-  <meta name="description" content="Echo（回声）是一款采用极简书房美学的跨平台听看一体书客户端，内置端侧离线语音引擎、边听边看句级高亮、沉浸分页阅读与划线笔记，支持 Android、Windows、macOS 与 Linux。" />
+  <meta name="description" content="Echo（回声）是一款采用极简书房美学的跨平台听看一体书客户端，内置端侧离线语音与 HY-MT1.5 实时双语翻译引擎、免部署声明式书源（规则 / OPDS / Ebook API）、发现荐书、沉浸分页阅读与划线笔记，支持 Android、Windows、macOS 与 Linux。" />
   <meta name="theme-color" content="#0D0E10" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Echo · 回声 — 静默阅读，随时聆听" />
-  <meta property="og:description" content="端侧离线语音驱动的跨平台听看一体书客户端，支持 Android / Windows / macOS / Linux。" />
+  <meta property="og:description" content="端侧离线语音与 HY-MT1.5 翻译驱动的跨平台听看一体书客户端，支持免部署书源与全平台下载。" />
   <link rel="icon" type="image/svg+xml" href="logo.svg" />
   <script>
     (function () {
@@ -37,13 +37,15 @@
 
       <nav class="site-nav" aria-label="页面导航">
         <a href="#features">核心体验</a>
-        <a href="#tts">端侧语音</a>
+        <a href="#ai-engines">端侧 AI</a>
+        <a href="#book-sources">书源生态</a>
         <a href="#download">全平台下载</a>
-        <a href="ebook-api.html">书源部署</a>
+        <a href="book-sources.html">书源制作</a>
+        <a href="ebook-api.html">自建 API</a>
       </nav>
 
       <div class="header-actions">
-        <a class="nav-pill-mobile" href="ebook-api.html">书源部署</a>
+        <a class="nav-pill-mobile" href="book-sources.html">书源制作</a>
         <button
           type="button"
           id="theme-toggle"
@@ -88,7 +90,7 @@
           <h1 class="hero-title">静默阅读，<br />随时聆听</h1>
 
           <p class="hero-subtitle">
-            Echo（回声）是以「极简书房」为灵魂打造的跨平台听看一体书客户端。纯本地解析 EPUB 与 TXT，借助端侧离线语音引擎实现边听边看、即时变速、划线笔记与系统级锁屏播控。
+            Echo（回声）是以「极简书房」为灵魂打造的跨平台听看一体书客户端。纯本地解析 EPUB 与 TXT，开箱内置公版声明式书源与发现荐书引擎；借助端侧离线语音与 HY-MT1.5 实时双语翻译，带来边听边看、即时变速、划线笔记与系统级锁屏播控体验。
           </p>
 
           <div class="hero-actions">
@@ -108,18 +110,19 @@
               </span>
             </a>
 
-            <a class="btn-secondary" href="#download">查看全部平台</a>
+            <a class="btn-secondary" href="book-sources.html">书源制作与 Skill</a>
           </div>
 
           <ul class="hero-specs" aria-label="支持平台与核心特性">
             <li>Android · Windows · macOS · Linux</li>
-            <li>EPUB 2/3 &amp; TXT 单机即用</li>
-            <li>5 档端侧离线 TTS</li>
+            <li>EPUB 2/3 &amp; TXT · 声明式书源</li>
+            <li>端侧离线 TTS &amp; HY-MT1.5 翻译</li>
+            <li>发现荐书 · 后台静默更新</li>
           </ul>
         </div>
 
         <div class="hero-visual">
-          <div id="reader-mockup" class="reader-mockup" role="region" aria-label="边听边看阅读器交互预览">
+          <div id="reader-mockup" class="reader-mockup" role="region" aria-label="边听边看与双语阅读器交互预览">
             <div class="mockup-topbar">
               <div class="mockup-book-info">
                 <span class="mockup-book-title">呐喊 · 自序</span>
@@ -136,9 +139,18 @@
 
             <article class="mockup-paper">
               <p class="mockup-paragraph">
-                <span class="cue-sentence is-active" data-cue="0">我在年轻时候也曾经做过许多梦，后来大半忘却了，但自己也并不以为可惜。</span>
-                <span class="cue-sentence" data-cue="1"><u class="ink-underline">所谓回忆者，虽说可以使人欢欣，有时也不免使人寂寞</u>，使精神的丝缕还牵着已逝的寂寞的时光，又有什么意味呢，而我偏苦于不能全忘却。</span>
-                <span class="cue-sentence" data-cue="2">这不能全忘的一部分，到现在便成了《呐喊》的来由。</span>
+                <span class="cue-pair is-active" data-cue="0">
+                  <span class="cue-sentence is-active">我在年轻时候也曾经做过许多梦，后来大半忘却了，但自己也并不以为可惜。</span>
+                  <span class="cue-translation">In my youth I too had many dreams; most of them have since been forgotten, yet I feel no regret.</span>
+                </span>
+                <span class="cue-pair" data-cue="1">
+                  <span class="cue-sentence"><u class="ink-underline">所谓回忆者，虽说可以使人欢欣，有时也不免使人寂寞</u>，使精神的丝缕还牵着已逝的寂寞的时光，又有什么意味呢，而我偏苦于不能全忘却。</span>
+                  <span class="cue-translation">Though memories can bring joy, at times they also bring loneliness — yet I cannot wholly forget them.</span>
+                </span>
+                <span class="cue-pair" data-cue="2">
+                  <span class="cue-sentence">这不能全忘的一部分，到现在便成了《呐喊》的来由。</span>
+                  <span class="cue-translation">That part which I could not wholly forget has now become the origin of Call to Arms.</span>
+                </span>
               </p>
               <div class="mockup-note-chip">
                 <span class="note-dot"></span>
@@ -166,6 +178,14 @@
                 <span id="mockup-cue-label" class="mockup-cue-label">边听边看 · 句级高亮联动</span>
                 <button
                   type="button"
+                  id="mockup-bilingual-btn"
+                  class="mockup-speed-pill mockup-bilingual-btn"
+                  aria-pressed="false"
+                  aria-label="切换双语对照预览"
+                  title="点击体验 HY-MT1.5 双语对照排版"
+                >双语</button>
+                <button
+                  type="button"
                   id="mockup-speed-btn"
                   class="mockup-speed-pill"
                   aria-label="切换示例朗读倍速"
@@ -186,20 +206,51 @@
           <span class="eyebrow">设计哲学</span>
           <h2 class="section-title">为深度阅读与专注听书而生</h2>
           <p class="section-desc">
-            去除音乐播放器的喧嚣霓虹与冗余装饰，用暖墨与纸白构建克制耐看的阅读容器。
+            去除音乐播放器的喧嚣霓虹与冗余装饰，用暖墨与纸白构建克制耐看的阅读容器，并持续进化全链路端侧 AI 与书源生态。
           </p>
         </div>
 
-        <div class="feature-grid">
+        <div class="feature-grid feature-grid-3">
           <article class="feature-card">
             <div class="feature-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
               </svg>
             </div>
-            <h3>极简书房与离线书库</h3>
+            <h3>极简书房与静默更新</h3>
             <p>
-              暖墨黑（<code>#0D0E10</code>）与羊皮纸白（<code>#F8F5F0</code>）双色对偶，自动生成 2:3 复古布面兜底封面。内置纯 Dart EPUB 2/3 与 TXT 解析器，支持跳过书源配置直接本地导入开读，也支持接入自建 <a class="inline-link" href="ebook-api.html">Ebook API 书源服务</a> 在线搜书下载。
+              暖墨黑（<code>#0D0E10</code>）与羊皮纸白（<code>#F8F5F0</code>）双色对偶，自动生成 2:3 复古布面兜底封面，纯 Dart 解析 EPUB 2/3 与 TXT；内置按 IP 地区自动切换加速镜像的更新检查、Markdown 更新日志与 Android 后台保活静默下载。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.35-4.35" />
+                <path d="M11 8v6M8 11h6" />
+              </svg>
+            </div>
+            <h3>免部署书源与发现荐书</h3>
+            <p>
+              全新 <code>book-sources.v1</code> 端侧书源引擎支持规则、OPDS 书库与自建 <code>ebook-api</code> 三驱动，开箱内置 3 个公版书库；「发现」页集成托管荐书榜单（<code>discover-rules.json</code>），支持一键联动搜书。参阅 <a class="inline-link" href="book-sources.html">书源制作与 Skill 指南</a>。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m5 8 6 6" />
+                <path d="m4 14 6-6 2-3" />
+                <path d="M2 5h12" />
+                <path d="M7 2h1" />
+                <path d="m22 22-5-10-5 10" />
+                <path d="M14 18h6" />
+              </svg>
+            </div>
+            <h3>端侧离线翻译与双语对照</h3>
+            <p>
+              集成腾讯 <strong>HY-MT1.5-1.8B</strong> 离线神经翻译引擎（<code>~440 MB</code> 1.25-bit 极速量化版 / Q4_K_M / 本地导入 GGUF），Android ARM64 原生 <code>llama.cpp</code> FFI 离线推理；支持原文 / 双语对照 / 仅译文三模式、9 种语言与译文联动朗读。
             </p>
           </article>
 
@@ -209,9 +260,9 @@
                 <path d="M12 2v20M17 5v14M7 7v10M21 9v6M3 10v4" />
               </svg>
             </div>
-            <h3>边听边看与即时倍速</h3>
+            <h3>边听边看与现场音色克隆</h3>
             <p>
-              边听边看状态下句级高亮平滑联动；支持 <code>0.5x–2.5x</code>（<code>0.05x</code> 步进）不重合成、不中断句子的即时变速不变调调节，并可一键按章在后台离线生成分块有声书。
+              边听边看句级高亮平滑联动，支持 <code>0.5x–2.5x</code>（<code>0.05x</code> 步进）不重合成即时变速不变调与按章转有声书；ZipVoice 新增应用内参考音色现场录制页（引导台词、24 柱实时声波与试听），零门槛克隆声音。
             </p>
           </article>
 
@@ -244,77 +295,241 @@
       </div>
     </section>
 
-    <section id="tts" class="section section-tinted">
+    <section id="ai-engines" class="section section-tinted">
+      <span id="tts" aria-hidden="true"></span>
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">端侧语音</span>
-          <h2 class="section-title">完全运行在设备本地的语音引擎</h2>
+          <span class="eyebrow">端侧 AI 引擎</span>
+          <h2 class="section-title">完全运行在设备本地的语音与翻译模型</h2>
           <p class="section-desc">
-            支持本机系统引擎零下载即开即用，亦内置多款精选 Sherpa-ONNX 离线神经语音模型与国内加速镜像切换。
+            零云端依赖、不上传文本隐私。支持系统语音、Sherpa-ONNX 离线音色与腾讯 HY-MT1.5 端侧离线翻译模型，均支持国内加速镜像、自定义反代前缀与断点续传。
           </p>
         </div>
 
-        <div class="table-wrap">
-          <table class="tts-table">
-            <thead>
-              <tr>
-                <th>引擎 / 模型</th>
-                <th>预估体积</th>
-                <th>架构与采样率</th>
-                <th>适用场景</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>
-                  <span class="model-name">Android 系统语音</span>
-                  <span class="model-badge">免下载推荐</span>
-                </td>
-                <td class="mono">0 MB</td>
-                <td>本机引擎 / MultiTTS 接口</td>
-                <td>零流量直连系统已装音色，支持边听边看与离线转有声书</td>
-              </tr>
-              <tr>
-                <td>
-                  <span class="model-name">ZipVoice INT8 中英</span>
-                  <span class="model-badge">音色克隆</span>
-                </td>
-                <td class="mono">~156 MB</td>
-                <td>ZipVoice + Vocos 24kHz</td>
-                <td>零样本音色克隆，内置默认参考音色且支持导入 3–10 秒 WAV</td>
-              </tr>
-              <tr>
-                <td>
-                  <span class="model-name">MeloTTS 中英混读</span>
-                </td>
-                <td class="mono">~159 MB</td>
-                <td>VITS 多语种</td>
-                <td>韵律自然流畅，中英夹杂长篇小说表现出色</td>
-              </tr>
-              <tr>
-                <td>
-                  <span class="model-name">Matcha 中文播音女声</span>
-                  <span class="model-badge">长篇优选</span>
-                </td>
-                <td class="mono">~123 MB</td>
-                <td>Matcha + Vocos 22kHz</td>
-                <td>标贝标准女声，发音清晰饱满、RTF 极低</td>
-              </tr>
-              <tr>
-                <td>
-                  <span class="model-name">Matcha 中英混读</span>
-                </td>
-                <td class="mono">~127 MB</td>
-                <td>Matcha + Vocos 16kHz</td>
-                <td>非自回归流匹配架构，体积轻巧、中英均衡</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="deploy-tabs">
+          <div class="tab-list" role="tablist" aria-label="切换端侧 AI 引擎列表">
+            <button
+              type="button"
+              id="tab-tts"
+              class="tab-btn"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-tts"
+              tabindex="0"
+            >端侧离线语音（TTS）</button>
+            <button
+              type="button"
+              id="tab-mt"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-mt"
+              tabindex="-1"
+            >端侧离线翻译（HY-MT1.5）</button>
+          </div>
+
+          <div
+            id="panel-tts"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-tts"
+          >
+            <div class="table-wrap">
+              <table class="tts-table">
+                <thead>
+                  <tr>
+                    <th>引擎 / 模型</th>
+                    <th>预估体积</th>
+                    <th>架构与采样率</th>
+                    <th>适用场景</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <span class="model-name">Android 系统语音</span>
+                      <span class="model-badge">免下载推荐</span>
+                    </td>
+                    <td class="mono">0 MB</td>
+                    <td>本机引擎 / MultiTTS 接口</td>
+                    <td>零流量直连系统已装音色，支持边听边看与离线转有声书</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="model-name">ZipVoice INT8 中英</span>
+                      <span class="model-badge">音色克隆</span>
+                    </td>
+                    <td class="mono">~156 MB</td>
+                    <td>ZipVoice + Vocos 24kHz</td>
+                    <td>零样本音色克隆，支持应用内现场录音（24 柱实时电平 + 引导台词）或导入 3–10 秒 WAV</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="model-name">MeloTTS 中英混读</span>
+                    </td>
+                    <td class="mono">~159 MB</td>
+                    <td>VITS 多语种</td>
+                    <td>韵律自然流畅，中英夹杂长篇小说表现出色</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="model-name">Matcha 中文播音女声</span>
+                      <span class="model-badge">长篇优选</span>
+                    </td>
+                    <td class="mono">~123 MB</td>
+                    <td>Matcha + Vocos 22kHz</td>
+                    <td>标贝标准女声，发音清晰饱满、RTF 极低</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="model-name">Matcha 中英混读</span>
+                    </td>
+                    <td class="mono">~127 MB</td>
+                    <td>Matcha + Vocos 16kHz</td>
+                    <td>非自回归流匹配架构，体积轻巧、中英均衡</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="tab-intro">
+              下载加速：在「TTS 模型管理」可自由切换国内加速镜像、GitHub 官方直连或自定义前缀，并支持 Android 下载前台保活。
+            </p>
+          </div>
+
+          <div
+            id="panel-mt"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-mt"
+            hidden
+          >
+            <div class="table-wrap">
+              <table class="tts-table">
+                <thead>
+                  <tr>
+                    <th>模型版本</th>
+                    <th>预估体积</th>
+                    <th>量化架构</th>
+                    <th>适用场景与特性</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <span class="model-name">HY-MT1.5-1.8B · 1.25-bit</span>
+                      <span class="model-badge">推荐 · 手机首选</span>
+                    </td>
+                    <td class="mono">~440 MB</td>
+                    <td>Tencent Sherry STQ1_0 / llama.cpp FFI</td>
+                    <td>极速量化低内存占用，Android ARM64 自动按 CPU 指令集（<code>dotprod</code> / <code>i8mm</code>）调度</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="model-name">HY-MT1.5-1.8B · Q4_K_M</span>
+                      <span class="model-badge">高精度备选</span>
+                    </td>
+                    <td class="mono">~1.06 GB</td>
+                    <td>标准 4-bit K-Quant GGUF</td>
+                    <td>旗舰机型追求更高文学译文精度时选用</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="model-name">本地导入 GGUF</span>
+                      <span class="model-badge">自定义</span>
+                    </td>
+                    <td class="mono">按模型文件</td>
+                    <td>GGUF 量化模型</td>
+                    <td>直接从设备存储选取已有 GGUF，下载亦支持 HF-Mirror 国内镜像与自定义反代前缀</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="tab-intro">
+              支持简体中文、繁体中文、英语、日语、韩语、法语、德语、西班牙语、俄语 9 种目标语种，阅读器提供「原文 / 双语对照 / 仅译文」三种显示模式与短语级对齐（一期离线 FFI 推理面向 Android ARM64）。
+            </p>
+          </div>
         </div>
       </div>
     </section>
 
-    <section id="download" class="section">
+    <section id="book-sources" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">书源生态 · book-sources.v1</span>
+          <h2 class="section-title">开箱即用的公版书库，随时扩展任意合规书源</h2>
+          <p class="section-desc">
+            无需自建后端即可运行 <code>book-sources.v1</code> 声明式书源；客户端采用「规则注册表 / 用户覆盖 / 凭据保险箱」3 层隔离存储，订阅刷新绝不覆盖个人镜像选择与反代设置，单源导出自动脱敏。
+          </p>
+        </div>
+
+        <div class="ecosystem-grid">
+          <article class="source-card">
+            <div class="source-card-top">
+              <h3>古登堡公版书库</h3>
+              <span class="model-badge">免登直下</span>
+            </div>
+            <p>
+              基于 Gutendex 开放 JSON API，汇集 7 万+多语种世界公版名著，支持语言、格式（EPUB / TXT）与热门排序筛选。
+            </p>
+            <div class="source-tags">
+              <span class="source-tag">driver: rule</span>
+              <span class="source-tag">JSON API</span>
+              <span class="source-tag">EPUB / TXT</span>
+            </div>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-top">
+              <h3>Standard Ebooks</h3>
+              <span class="model-badge">精排 EPUB</span>
+            </div>
+            <p>
+              采用两步 HTML 提取规则抓取人工精校公版英文名著，自动解析简介与直链，获得出版级排版 EPUB 体验。
+            </p>
+            <div class="source-tags">
+              <span class="source-tag">driver: rule</span>
+              <span class="source-tag">HTML 两步</span>
+              <span class="source-tag">EPUB</span>
+            </div>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-top">
+              <h3>文硕阁</h3>
+              <span class="model-badge">中文公版</span>
+            </div>
+            <p>
+              结合 OpenAPI v2 与 JSON-LD 详情提取，搜书免登录且支持游标翻页；下载 EPUB 支持免费账号登录、异步生成轮询与每日额度校验。
+            </p>
+            <div class="source-tags">
+              <span class="source-tag">OpenAPI + 轮询</span>
+              <span class="source-tag">游标分页</span>
+              <span class="source-tag">EPUB</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="ecosystem-cta-grid">
+          <a class="route-banner-card is-primary" href="book-sources.html">
+            <span class="route-banner-body">
+              <span class="route-banner-title">制作自定义书源 &amp; AI Skill 指南</span>
+              <span class="route-banner-desc">教 AI 自动评估网站并生成 JSON 规则，内置 OPDS / HTML / JSON 模板与浏览器本地校验器</span>
+            </span>
+            <span class="route-banner-arrow" aria-hidden="true">→</span>
+          </a>
+
+          <a class="route-banner-card" href="ebook-api.html">
+            <span class="route-banner-body">
+              <span class="route-banner-title">自建 Ebook API 后端（可选扩展）</span>
+              <span class="route-banner-desc">适合重度风控中转、多设备共享加密令牌或配合 CDN 缓存省配额，支持 Docker / NAS 3 分钟部署</span>
+            </span>
+            <span class="route-banner-arrow" aria-hidden="true">→</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section id="download" class="section section-tinted">
       <div class="container">
         <div class="section-head">
           <span class="eyebrow">获取客户端</span>
@@ -366,7 +581,7 @@
               <span class="platform-rec-badge" hidden>推荐 · 当前设备</span>
             </div>
             <h3>Android</h3>
-            <p class="platform-desc">支持 Android 7.0+（API 24），含原生锁屏与后台播控服务。</p>
+            <p class="platform-desc">支持 Android 7.0+（API 24），含原生锁屏播控、端侧翻译与后台静默更新。</p>
             <p class="platform-asset-meta" data-meta="android">ARM64 精简版（推荐）· Universal 全架构版</p>
             <div class="card-actions">
               <a
@@ -465,6 +680,10 @@
             <p class="notes-placeholder">正在加载最新版本发布说明…</p>
           </div>
         </details>
+
+        <p class="tabs-footnote">
+          应用内自动更新：在 Echo「我的 → 检查更新与下载镜像」支持按 IP 地区自动切换国内加速镜像或 GitHub 直连，支持查看 Markdown 排版更新日志与 Android 后台保活静默下载安装包。
+        </p>
       </div>
     </section>
   </main>
@@ -476,7 +695,8 @@
         <span>Echo · 回声 · MIT License</span>
       </div>
       <div class="footer-links">
-        <a href="ebook-api.html">书源部署指南</a>
+        <a href="book-sources.html">书源制作与 Skill</a>
+        <a href="ebook-api.html">自建 Ebook API</a>
         <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">GitHub 源码</a>
         <a href="https://github.com/imlinhanchao/echo-app/releases" target="_blank" rel="noopener noreferrer">Releases</a>
         <a href="https://github.com/imlinhanchao/ebook-api" target="_blank" rel="noopener noreferrer">Ebook API 源码</a>

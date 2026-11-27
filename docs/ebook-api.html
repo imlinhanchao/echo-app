@@ -37,6 +37,7 @@
 
       <nav class="site-nav" aria-label="页面导航">
         <a href="index.html">客户端首页</a>
+        <a href="book-sources.html">书源制作</a>
         <a href="#deploy">选择部署</a>
         <a href="#env">生成配置</a>
         <a href="#proxy">公网反代</a>
@@ -87,10 +88,10 @@
             <span id="ebook-api-version-badge">正在查询 Ebook API 最新 Release…</span>
           </div>
 
-          <h1 class="hero-title">三分钟部署书源服务<br />解锁 Echo 在线搜书</h1>
+          <h1 class="hero-title">三分钟部署书源后端<br />解锁强风控与 CDN 中转</h1>
 
           <p class="hero-subtitle">
-            <code>ebook-api</code> 是专为 Echo 打造的单一 Go 可执行服务，无需安装数据库、零外部依赖。Echo 默认可直接跳过配置、纯本地导入 EPUB / TXT 开读；随时按本页步骤自建书源服务后，即可直接在客户端搜索与流式下载电子书。
+            新版 Echo 客户端已自带公版声明式书源（<code>book-sources.v1</code>），普通用户无需部署服务端即可开箱搜书（见<a class="inline-link" href="book-sources.html">书源制作指南</a>）。当你需要服务端抗风控中转、多设备共享加密凭据令牌或 CDN 缓存省下载配额时，部署单一零依赖 Go 服务 <code>ebook-api</code> 即可接入 Echo。
           </p>
 
           <div class="hero-actions">
@@ -107,7 +108,7 @@
               </span>
             </a>
 
-            <a class="btn-secondary" href="#env">生成 .env 配置</a>
+            <a class="btn-secondary" href="book-sources.html">免部署制作客户端书源</a>
           </div>
 
           <ul class="hero-specs" aria-label="部署特性">
@@ -144,11 +145,11 @@
                 <span class="scenario-arrow" aria-hidden="true">→</span>
               </a>
 
-              <a class="scenario-item" href="index.html#download">
-                <span class="scenario-badge">零部署</span>
+              <a class="scenario-item" href="book-sources.html">
+                <span class="scenario-badge">免部署</span>
                 <span class="scenario-body">
-                  <span class="scenario-title">只读本地 EPUB / TXT</span>
-                  <span class="scenario-desc">无需搭建任何服务，在 Echo 内点击「跳过书源配置」直接使用</span>
+                  <span class="scenario-title">客户端直接导入书源 / 纯本地阅读</span>
+                  <span class="scenario-desc">无需搭建服务器，使用内置公版书源或按指南导入自定义规则与 OPDS 书库</span>
                 </span>
                 <span class="scenario-arrow" aria-hidden="true">→</span>
               </a>
@@ -166,6 +167,13 @@
           <p class="section-desc">
             下载预编译包解压即可运行；若部署在 NAS 或云服务器，推荐使用 Docker Compose 或 <code>systemd</code> 长期守护。
           </p>
+        </div>
+
+        <div class="callout-banner" role="note">
+          <span class="callout-banner-text">
+            <strong>轻度用户提示：</strong>仅需读取公版书库、自建 OPDS（Calibre / Komga）或常规网站时，无需自建后端服务，可直接在客户端加载 <code>book-sources.v1</code> 书源配置。
+          </span>
+          <a class="callout-banner-link" href="book-sources.html">查看免部署书源与 Skill 指南 →</a>
         </div>
 
         <div class="release-bar" aria-live="polite">
@@ -623,9 +631,9 @@ ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib
 
           <article class="step-card">
             <span class="step-num">02</span>
-            <h3>在 Echo 填入服务地址</h3>
+            <h3>在 Echo 添加 ebook-api 书源</h3>
             <p>
-              在首次引导第 1 步，或「我的 → <code>ebook-api 书源服务</code>」/「发现 → 配置服务」输入服务 URL 与可选 <code>API Key</code>，点击「测试连接」显示可用书源后保存。
+              在首次引导第 1 步，或「我的 → <code>书源管理</code> → 右上角 <code>+</code>（添加书源）→ 切换至 <code>ebook-api</code> 标签」输入服务 URL、可选 <code>API Key</code> 与远端书源 ID（默认 <code>zlib</code>），点击「测试连接」通过后保存。
             </p>
           </article>
 
@@ -633,7 +641,7 @@ ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib
             <span class="step-num">03</span>
             <h3>登录书源开始搜书</h3>
             <p>
-              前往「我的 → <code>书源账号</code>」选择可用镜像并完成账密或 Cookie 登录即可搜书；若后续只想纯本地读导入书，可在设置页点击「跳过 / 清空书源配置」。
+              在「<code>书源管理</code>」点击刚添加的书源进入详情页，选择可用镜像并完成账密或 Cookie 登录即可在搜索页切换使用；也可随时启用内置公版源，或在右上角菜单「全部停用」仅用本地导入。
             </p>
           </article>
         </div>
@@ -670,7 +678,7 @@ ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib
             <div class="release-notes-body">
               <ul>
                 <li>每次重新生成容器且未挂载 <code>/app/data</code> 时，服务端会生成新的随机密钥，导致客户端本地保存的 <code>ebk1.*</code> 加密令牌无法解封。</li>
-                <li>请在 <code>docker-compose.yml</code> 挂载 <code>./data:/app/data</code>，或在 <code>.env</code> 显式固定 32 字节的 <code>EBOOK_SECRET</code> 后在 Echo「书源账号」重新保存一次即可一劳永逸。</li>
+                <li>请在 <code>docker-compose.yml</code> 挂载 <code>./data:/app/data</code>，或在 <code>.env</code> 显式固定 32 字节的 <code>EBOOK_SECRET</code> 后在 Echo「书源管理 → 书源详情」重新保存一次即可一劳永逸。</li>
               </ul>
             </div>
           </details>
@@ -692,7 +700,7 @@ ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib
             </summary>
             <div class="release-notes-body">
               <ul>
-                <li>这通常说明当前选中的 Z-Library 镜像与部署主机之间连通受阻或触发站点风控；请在 Echo「我的 → 书源账号」测试并切换其他可用镜像，或在服务端 <code>.env</code> 调整 <code>ZLIB_DOMAINS</code> 顺位。</li>
+                <li>这通常说明当前选中的 Z-Library 镜像与部署主机之间连通受阻或触发站点风控；请在 Echo「我的 → 书源管理」进入该书源详情页测试并切换其他可用镜像，或在服务端 <code>.env</code> 调整 <code>ZLIB_DOMAINS</code> 顺位。</li>
               </ul>
             </div>
           </details>
@@ -714,6 +722,7 @@ ZLIB_DOMAINS=https://z-lib.gd,https://z-lib.gl,https://z-library.ec,https://zlib
       </div>
       <div class="footer-links">
         <a href="index.html">Echo 官网首页</a>
+        <a href="book-sources.html">书源制作与 Skill</a>
         <a href="https://github.com/imlinhanchao/ebook-api" target="_blank" rel="noopener noreferrer">Ebook API 源码</a>
         <a href="https://github.com/imlinhanchao/ebook-api/releases" target="_blank" rel="noopener noreferrer">Ebook API Releases</a>
         <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">Echo App 源码</a>

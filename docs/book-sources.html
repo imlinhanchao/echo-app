@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>书源制作与 Skill 指南 — Echo · 回声</title>
+  <meta name="description" content="零部署为 Echo 制作并导入声明式书源（book-sources.v1）：涵盖 echo-book-source-author AI Skill 一键评估生成、OPDS/HTML/JSON 规则模板、网站可行性矩阵、浏览器本地 JSON 校验器与安全脱敏规范。" />
+  <meta name="theme-color" content="#0D0E10" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="书源制作与 Skill 指南 — Echo · 回声" />
+  <meta property="og:description" content="使用 AI Skill 或手写 book-sources.v1 配置，零后端部署扩展 Echo 客户端书库。" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('echo-site-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.dataset.theme = saved;
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至正文内容</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="返回 Echo 回声首页">
+        <img class="brand-logo" src="logo.svg" alt="Echo Logo" width="34" height="34" />
+        <span class="brand-text">
+          <span class="brand-name">Echo · 回声</span>
+          <span class="brand-tagline">极简书房 · 书源与 Skill</span>
+        </span>
+      </a>
+
+      <nav class="site-nav" aria-label="页面导航">
+        <a href="index.html">客户端首页</a>
+        <a href="#skill">AI Skill</a>
+        <a href="#feasibility">可行性判定</a>
+        <a href="#schema">规则与模板</a>
+        <a href="#validator">本地校验</a>
+        <a href="#import">导入管理</a>
+        <a href="ebook-api.html">自建 API</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="nav-pill-mobile" href="index.html">← 首页</a>
+        <button
+          type="button"
+          id="theme-toggle"
+          class="icon-btn"
+          aria-label="切换浅色/深色主题"
+          title="切换羊皮纸浅色 / 暖墨黑深色"
+        >
+          <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        </button>
+
+        <a
+          class="icon-btn"
+          href="https://github.com/imlinhanchao/echo-app/tree/standalone/.agents/skills/echo-book-source-author"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="查看 GitHub 书源 Skill 源码"
+          title="GitHub 书源 Skill 目录"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero subpage-hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="version-pill">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span>book-sources.v1 · 声明式书源引擎 &amp; Agent Skill</span>
+          </div>
+
+          <h1 class="hero-title">免部署制作书源<br />用 AI Skill 一键评估与校验</h1>
+
+          <p class="hero-subtitle">
+            Echo 客户端直接内置声明式书源解析引擎与 OPDS 书库支持，无需部署后端服务器即可通过 JSON 或远程订阅扩展书库。仓库随附 <code>echo-book-source-author</code> Skill 与纯 Dart 校验工具，无论交给 AI 代理自动编写，还是参考模板手写规则，都能快速完成验证并安全导入。
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn-primary" href="#skill">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3Z" />
+              </svg>
+              <span class="btn-label-group">
+                <span>使用 AI Skill 制作</span>
+                <span class="btn-meta">Antigravity / Claude Code / Codex / Cursor / 网页 AI</span>
+              </span>
+            </a>
+
+            <a class="btn-secondary" href="#validator">在线本地校验 JSON</a>
+          </div>
+
+          <ul class="hero-specs" aria-label="书源核心特性">
+            <li>零服务端部署</li>
+            <li>3 种驱动（rule / opds / ebook_api）</li>
+            <li>3 层隔离不泄密</li>
+            <li>纯 Dart CLI + 网页自检</li>
+          </ul>
+        </div>
+
+        <div class="hero-visual">
+          <div class="scenario-card" role="region" aria-label="按你的场景选制作路线">
+            <div class="scenario-head">
+              <span class="scenario-heading">按你的需求选制作路线</span>
+              <span class="scenario-port">v1</span>
+            </div>
+
+            <div class="scenario-list">
+              <a class="scenario-item" href="#skill">
+                <span class="scenario-badge">AI Skill</span>
+                <span class="scenario-body">
+                  <span class="scenario-title">有目标站点，让 AI 自动评估并生成书源</span>
+                  <span class="scenario-desc">自动抓取分析界面或 API，生成规则并用 CLI 干跑验证</span>
+                </span>
+                <span class="scenario-arrow" aria-hidden="true">→</span>
+              </a>
+
+              <a class="scenario-item" href="#schema">
+                <span class="scenario-badge">手写模板</span>
+                <span class="scenario-body">
+                  <span class="scenario-title">接入 Calibre/Komga OPDS 或自编规则</span>
+                  <span class="scenario-desc">直接套用 OPDS / HTML 两步 / JSON API + 轮询标准模板</span>
+                </span>
+                <span class="scenario-arrow" aria-hidden="true">→</span>
+              </a>
+
+              <a class="scenario-item" href="#validator">
+                <span class="scenario-badge">即时自检</span>
+                <span class="scenario-body">
+                  <span class="scenario-title">已有 JSON，在浏览器本地校验与脱敏审计</span>
+                  <span class="scenario-desc">即时检查 Schema、模板变量、Dart 正则兼容性与硬编码凭据</span>
+                </span>
+                <span class="scenario-arrow" aria-hidden="true">→</span>
+              </a>
+
+              <a class="scenario-item" href="ebook-api.html">
+                <span class="scenario-badge">自建后端</span>
+                <span class="scenario-body">
+                  <span class="scenario-title">站点有强人机挑战或需 CDN 缓存省配额</span>
+                  <span class="scenario-desc">改用 Go 单二进制 <code>ebook-api</code> 桥接（三分钟部署）</span>
+                </span>
+                <span class="scenario-arrow" aria-hidden="true">→</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="skill" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Step 1 · AI Skill 实战</span>
+          <h2 class="section-title">用 <code>echo-book-source-author</code> Skill 自动写书源</h2>
+          <p class="section-desc">
+            Skill 内置于仓库 <code>.agents/skills/echo-book-source-author/</code>，教 AI 严格按「网络嗅探判定 → 规则生成 → CLI 校验干跑 → 安全脱敏审计」四步工作，不会瞎编无法运行的规则。
+          </p>
+        </div>
+
+        <div class="deploy-tabs">
+          <div class="tab-list" role="tablist" aria-label="选择 AI Skill 使用方式">
+            <button
+              type="button"
+              id="tab-skill-repo"
+              class="tab-btn"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-skill-repo"
+              tabindex="0"
+            >克隆仓库 + CLI 校验（推荐）</button>
+            <button
+              type="button"
+              id="tab-skill-global"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-skill-global"
+              tabindex="-1"
+            >安装到 AI 工具全局目录</button>
+            <button
+              type="button"
+              id="tab-skill-web"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-skill-web"
+              tabindex="-1"
+            >纯网页 AI 对话用法</button>
+          </div>
+
+          <div
+            id="panel-skill-repo"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-skill-repo"
+          >
+            <p class="tab-intro">
+              在 <strong>Antigravity、Claude Code、Codex、Cursor 或 OpenCode</strong> 中打开 <code>echo-app</code> 仓库时，Agent 会自动发现 <code>.agents/skills/echo-book-source-author/</code>，并可直接调用仓库自带的纯 Dart CLI 对网络连通性与真实搜书结果做端到端干跑校验（无需启动模拟器）。
+            </p>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>1. 克隆仓库并进入工作区（Skill 自动生效）</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>git clone https://github.com/imlinhanchao/echo-app.git
+cd echo-app</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>2. 使用内置纯 Dart CLI 执行严格校验与只读搜书干跑（不消耗下载配额）</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code># 静态 Schema + 模板变量 + Dart RegExp + 敏感头脱敏校验
+dart run .agents/skills/echo-book-source-author/scripts/validate_source.dart \
+  path/to/your-source.json --strict
+
+# 附带镜像探测与真实只读搜书 + 详情页提取测试
+dart run .agents/skills/echo-book-source-author/scripts/validate_source.dart \
+  path/to/your-source.json --source your_source_id --search "红楼梦" --probe --strict</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-skill-global"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-skill-global"
+            hidden
+          >
+            <p class="tab-intro">
+              如果希望在其他项目或空目录里也随时调用 <code>echo-book-source-author</code>，可以通过 <code>npx skills</code> 一键安装，或将技能目录复制到对应客户端的全局 Skills 目录。注意：纯 Dart <code>validate_source.dart</code> CLI 仍需在已拉取 <code>echo-app</code> 依赖的仓库中运行，或使用本页下方<a class="inline-link" href="#validator">浏览器校验器</a>做静默语法检测。
+            </p>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>方式 A：通过 Skills CLI 安装</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code>npx skills add https://github.com/imlinhanchao/echo-app --skill echo-book-source-author</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>方式 B：手动复制到各工具全局 Skills 目录（按实际工具任选一行）</span>
+                <button type="button" class="copy-btn">复制</button>
+              </div>
+              <pre><code># 克隆仓库后复制到你使用的 Agent 工具全局目录：
+cp -r .agents/skills/echo-book-source-author ~/.claude/skills/echo-book-source-author
+cp -r .agents/skills/echo-book-source-author ~/.cursor/skills/echo-book-source-author
+cp -r .agents/skills/echo-book-source-author ~/.codex/skills/echo-book-source-author
+cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-book-source-author</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-skill-web"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-skill-web"
+            hidden
+          >
+            <p class="tab-intro">
+              使用 ChatGPT、Gemini 或 Claude 网页版对话时，可直接打开或上传仓库里的 Skill 规范文档与模板，再附上目标网站在浏览器 F12（Network 面板）中的请求样本，AI 即可产出合格 JSON；拿到 JSON 后粘贴到本页<a class="inline-link" href="#validator">本地校验器</a>验证即可导入 App。
+            </p>
+
+            <div class="callout-banner">
+              <span class="callout-banner-text">
+                必备参考文件（点击打开后可复制全文或保存上传给网页 AI）：
+                <a class="inline-link" href="https://github.com/imlinhanchao/echo-app/blob/standalone/.agents/skills/echo-book-source-author/SKILL.md" target="_blank" rel="noopener noreferrer">SKILL.md 规范</a> ·
+                <a class="inline-link" href="https://github.com/imlinhanchao/echo-app/blob/standalone/.agents/skills/echo-book-source-author/references/schema-v1.md" target="_blank" rel="noopener noreferrer">schema-v1.md 字段字典</a> ·
+                <a class="inline-link" href="https://github.com/imlinhanchao/echo-app/tree/standalone/.agents/skills/echo-book-source-author/examples" target="_blank" rel="noopener noreferrer">examples/ 模板库</a>
+              </span>
+              <a class="callout-banner-link" href="#validator">去校验 AI 生成结果 ↓</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="prompt-grid" aria-label="一键复制给 AI 的实战提示词">
+          <div class="code-block">
+            <div class="code-block-head">
+              <span>提示词 1 · 判断网站能否转书源</span>
+              <button type="button" class="copy-btn">复制</button>
+            </div>
+            <pre><code>请使用 echo-book-source-author 技能，先不要写规则。请用 curl 或浏览器请求分析 https://example.org 的探针页、搜书接口、详情页与下载接口，按可行性决策矩阵判断它是否可以转化为 Echo book-sources.v1 客户端书源，列出支持与阻塞点（如反爬、登录态、文件格式）。</code></pre>
+          </div>
+
+          <div class="code-block">
+            <div class="code-block-head">
+              <span>提示词 2 · 生成新书源并做 CLI 干跑</span>
+              <button type="button" class="copy-btn">复制</button>
+            </div>
+            <pre><code>请用 echo-book-source-author 技能为 https://example.org 编写符合 book-sources.v1 的书源 JSON。要求只包含纯声明式规则、绝不写入任何账号密码或 Cookie；生成后运行 validate_source.dart --search "关键词" --probe --strict 完成校验并汇报结果。</code></pre>
+          </div>
+
+          <div class="code-block">
+            <div class="code-block-head">
+              <span>提示词 3 · 排查搜书/登录/下载报错</span>
+              <button type="button" class="copy-btn">复制</button>
+            </div>
+            <pre><code>这是我编写的 Echo 书源配置（附 JSON）和报错信息（附日志/响应体）。请对照 echo-book-source-author 与 schema-v1.md 排查问题：重点检查 CSS 选择器 / JSON 路径、Dart RegExp 语法、auth.verify 失效判定、same_origin_credentials 与镜像头配置，并用 validate_source.dart --strict 复测。</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="feasibility" class="section section-tinted">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Step 2 · 可行性评估</span>
+          <h2 class="section-title">动手前先判可行性：网站可行性决策矩阵</h2>
+          <p class="section-desc">
+            建议先用浏览器 DevTools（Network 面板）或 <code>curl</code> 观察目标站的「探针 → 搜书 → 详情 → 登录 → 下载」5 个阶段，再决定采用哪种方案。
+          </p>
+        </div>
+
+        <div class="callout-banner" role="note">
+          <span class="callout-banner-text">
+            <strong>架构安全边界：</strong>Echo 的 <code>rule</code> 引擎是纯声明式引擎，<strong>刻意不内置 JS 执行器（QuickJS / V8）与隐藏 WebView</strong>；且书架本地导入当前仅支持 <strong><code>.epub</code></strong> 与 <strong><code>.txt</code></strong> 格式。
+          </span>
+          <a class="callout-banner-link" href="ebook-api.html">重度风控转 ebook-api →</a>
+        </div>
+
+        <div class="table-wrap">
+          <table class="tts-table">
+            <thead>
+              <tr>
+                <th>目标站点网络特征</th>
+                <th>判定结论</th>
+                <th>推荐方案</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>标准 <code>/opds</code> Atom XML 或 OPDS 2.0 JSON（如 Calibre / Komga）</td>
+                <td><span class="verdict-badge verdict-ok">直接可转</span></td>
+                <td>选用 <code>driver: "opds"</code>，填写目录地址与可选 Basic 认证即可工作</td>
+              </tr>
+              <tr>
+                <td>明文 JSON API / OpenAPI v2（支持 <code>cursor</code> 游标分页、CSRF 登录与轮询）</td>
+                <td><span class="verdict-badge verdict-ok">直接可转</span></td>
+                <td>选用 <code>driver: "rule"</code>（<code>mode: "json"</code> + <code>auth</code> + <code>poll</code>）</td>
+              </tr>
+              <tr>
+                <td>服务端直出 HTML（搜索列表 + 详情页 + <code>&lt;script type="application/ld+json"&gt;</code> / 直链）</td>
+                <td><span class="verdict-badge verdict-ok">直接可转</span></td>
+                <td>选用 <code>driver: "rule"</code>（<code>mode: "html"</code> + 两步 <code>download.steps</code>），建议设 <code>min_request_interval_ms >= 800</code></td>
+              </tr>
+              <tr>
+                <td>校验常规浏览器 <code>User-Agent</code> + <code>Origin</code> / <code>Referer</code>，无 JS 挑战</td>
+                <td><span class="verdict-badge verdict-warn">可转（需补头）</span></td>
+                <td>在顶层 <code>headers</code> 与 <code>image_headers</code> 配置贴近浏览器的常规请求头</td>
+              </tr>
+              <tr>
+                <td>存在 Cloudflare Turnstile / hCaptcha / 滑块或每次登录下载强制图形验证码</td>
+                <td><span class="verdict-badge verdict-no">不可直接转</span></td>
+                <td>静态规则无法自动过人机验证，请优先使用官方开放 API 或转用 <code>ebook-api</code></td>
+              </tr>
+              <tr>
+                <td>参数或下载链接依赖混淆 JS 签名（动态 AES / WASM Token）或 DRM 加密</td>
+                <td><span class="verdict-badge verdict-no">不可转规则</span></td>
+                <td>切勿硬拼脆弱正则；若无开放接口，应诚实标注为「不支持」</td>
+              </tr>
+              <tr>
+                <td>全站仅有加密在线阅读或仅提供 <code>.pdf</code> / <code>.azw3</code> 且无 <code>.epub</code> / <code>.txt</code></td>
+                <td><span class="verdict-badge verdict-no">不适于有声书</span></td>
+                <td>Echo 书架目前仅支持导入 <code>.epub</code> 与 <code>.txt</code>，不建议制作该源</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="schema" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Step 3 · 规则结构与模板</span>
+          <h2 class="section-title"><code>book-sources.v1</code> 三种驱动与标准范例</h2>
+          <p class="section-desc">
+            支持导入单条书源对象（Single Source）或合集（Bundle，含 <code>config_version</code> 与 <code>config_ttl_hours</code>）。以下全部模板均使用 <code>example.org</code> 占位并可通过严格校验。
+          </p>
+        </div>
+
+        <div class="steps-grid steps-grid-3" style="margin-bottom: 24px;">
+          <article class="step-card">
+            <span class="step-num">driver: rule</span>
+            <h3>通用规则引擎</h3>
+            <p>
+              解析 JSON / HTML CSS / JSON-LD / XML，内置多镜像故障转移（健康节点缓存 10 分钟）、CSRF 预处理、游标分页与异步轮询下载。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">driver: opds</span>
+            <h3>OPDS 原生书库</h3>
+            <p>
+              原生兼容 OPDS 1.2（Atom XML + OpenSearch）与 OPDS 2.0 JSON，自动发现搜索模板并按 <code>prefer_formats</code> 选择 <code>epub</code> / <code>txt</code>。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">driver: ebook_api</span>
+            <h3>Ebook API 兼容桥接</h3>
+            <p>
+              与任意自建 <code>ebook-api</code> 后端互通，统一收纳到「书源管理」与单源搜索切换器中（旧版设置首次启动自动迁移）。
+            </p>
+          </article>
+        </div>
+
+        <div class="deploy-tabs">
+          <div class="tab-list" role="tablist" aria-label="选择书源模板范例">
+            <button
+              type="button"
+              id="tab-tpl-opds"
+              class="tab-btn"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-tpl-opds"
+              tabindex="0"
+            >OPDS 书库（极简 30 行）</button>
+            <button
+              type="button"
+              id="tab-tpl-html"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-tpl-html"
+              tabindex="-1"
+            >HTML 两步提取</button>
+            <button
+              type="button"
+              id="tab-tpl-json"
+              class="tab-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-tpl-json"
+              tabindex="-1"
+            >JSON API + CSRF + 轮询</button>
+          </div>
+
+          <div
+            id="panel-tpl-opds"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-tpl-opds"
+          >
+            <p class="tab-intro">
+              适合自建 Calibre-Web、Komga、Audiobookshelf OPDS 或标准 OPDS 目录，一般只需填写域名与可选认证模式即可。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>examples/opds-catalog.json</span>
+                <span class="code-block-actions">
+                  <button type="button" class="copy-btn" data-load-sample="opds">载入校验器</button>
+                  <button type="button" class="copy-btn">复制</button>
+                </span>
+              </div>
+              <pre><code>{
+  "schema_version": 1,
+  "id": "example_opds_catalog",
+  "name": "示例 OPDS 书库",
+  "description": "连接自建 Calibre / Komga / 标准 OPDS 1.2 或 OPDS 2.0 书库（支持 OpenSearch 自动发现与 Basic 认证）",
+  "driver": "opds",
+  "enabled": true,
+  "domains": [
+    "https://opds.example.org/opds"
+  ],
+  "probe": {
+    "path": "",
+    "timeout_ms": 8000
+  },
+  "auth": {
+    "required": false,
+    "modes": [
+      {
+        "id": "basic",
+        "label": "Basic Auth 账号",
+        "fields": [
+          { "key": "username", "label": "用户名", "type": "text" },
+          { "key": "password", "label": "密码", "type": "password" }
+        ]
+      }
+    ]
+  },
+  "opds": {
+    "prefer_formats": ["epub", "txt"]
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-tpl-html"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-tpl-html"
+            hidden
+          >
+            <p class="tab-intro">
+              适合服务端直出 HTML 的网站：搜索页用 CSS 选择器提取条目，<code>detail</code> 补全简介大图，<code>download.steps</code> 先抓详情页链接再请求文件流（注意跨域外链将 <code>same_origin_credentials</code> 设为 <code>false</code>）。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>examples/html-two-step.json</span>
+                <span class="code-block-actions">
+                  <button type="button" class="copy-btn" data-load-sample="html">载入校验器</button>
+                  <button type="button" class="copy-btn">复制</button>
+                </span>
+              </div>
+              <pre><code>{
+  "schema_version": 1,
+  "id": "example_html_two_step",
+  "name": "示例 HTML 两步提取书源",
+  "description": "演示 HTML 搜索列表抓取、详情页提取与两步 EPUB 下载链（使用 example.org 占位）",
+  "driver": "rule",
+  "enabled": true,
+  "domains": [
+    "https://ebooks.example.org"
+  ],
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+  },
+  "image_headers": {
+    "Referer": "https://ebooks.example.org/"
+  },
+  "min_request_interval_ms": 800,
+  "supported_formats": ["epub"],
+  "probe": { "path": "/ebooks", "timeout_ms": 8000 },
+  "auth": { "required": false },
+  "search": {
+    "request": {
+      "method": "GET",
+      "path": "/ebooks",
+      "query": { "query": "{{query.q}}", "page": "{{query.page}}" },
+      "page_size": 12
+    },
+    "filters": {
+      "order": {
+        "param": "sort",
+        "options": [
+          { "value": "", "label": "默认" },
+          { "value": "newest", "label": "最新" },
+          { "value": "author", "label": "作者" }
+        ]
+      }
+    },
+    "response": {
+      "mode": "html",
+      "items_selector": "ol.book-list > li.book-item",
+      "pagination": { "next_page_selector": "nav a[rel='next']" },
+      "fields": {
+        "ref": { "attr": "data-book-path" },
+        "title": { "selector": "h3.book-title a" },
+        "authors": { "selector": "p.book-author span.author", "all": true },
+        "language": { "const_value": "English" },
+        "format": { "const_value": "epub" },
+        "cover_url": { "selector": "img.cover", "attr": "src", "resolve_url": true },
+        "source_url": { "attr": "data-book-path", "resolve_url": true }
+      }
+    }
+  },
+  "detail": {
+    "method": "GET",
+    "path": "{{book.ref}}",
+    "response_mode": "html",
+    "fields": {
+      "description": { "selector": "div.book-summary", "preserve_paragraphs": true },
+      "cover_url": { "selector": "img.hero-cover", "attr": "src", "resolve_url": true }
+    }
+  },
+  "download": {
+    "steps": [
+      {
+        "id": "detail_page",
+        "method": "GET",
+        "path": "{{book.ref}}",
+        "response_mode": "html",
+        "extract": {
+          "url": {
+            "selectors": [
+              "a.download-epub[href$='.epub']",
+              "a[download][href$='.epub']"
+            ],
+            "attr": "href",
+            "resolve_url": true
+          }
+        }
+      }
+    ],
+    "file_request": {
+      "url": "{{step.detail_page.url}}",
+      "same_origin_credentials": false,
+      "headers": { "Referer": "{{origin}}{{book.ref}}" }
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <div
+            id="panel-tpl-json"
+            class="tab-panel"
+            role="tabpanel"
+            aria-labelledby="tab-tpl-json"
+            hidden
+          >
+            <p class="tab-intro">
+              覆盖完整工业级场景：<code>required_for: ["download"]</code>（搜书免登、下载登录）、<code>pre_steps</code> 先取 CSRF、<code>verify.steps</code> 先查 <code>401</code> 配额再查状态、<code>cursor</code> 游标翻页、JSON-LD 详情补充以及异步任务 <code>poll</code>。
+            </p>
+            <div class="code-block">
+              <div class="code-block-head">
+                <span>examples/json-api-auth.json</span>
+                <span class="code-block-actions">
+                  <button type="button" class="copy-btn" data-load-sample="json">载入校验器</button>
+                  <button type="button" class="copy-btn">复制</button>
+                </span>
+              </div>
+              <pre><code>{
+  "schema_version": 1,
+  "id": "example_json_api_auth",
+  "name": "示例 JSON API（含 CSRF 登录与异步轮询）",
+  "description": "演示 cursor 游标分页、pre_steps CSRF 登录、配额校验与 async poll 下载（使用 example.org 占位）",
+  "driver": "rule",
+  "enabled": true,
+  "domains": [
+    "https://api.example.org"
+  ],
+  "headers": {
+    "Accept": "application/json",
+    "Origin": "https://api.example.org",
+    "Referer": "https://api.example.org/"
+  },
+  "min_request_interval_ms": 500,
+  "supported_formats": ["epub"],
+  "probe": { "path": "/api/v1/health", "timeout_ms": 8000 },
+  "auth": {
+    "required": false,
+    "required_for": ["download"],
+    "inject": {
+      "cookies": { "session_id": "{{cred.session_id}}" }
+    },
+    "modes": [
+      {
+        "id": "password",
+        "label": "邮箱密码",
+        "fields": [
+          { "key": "email", "label": "邮箱", "type": "email" },
+          { "key": "password", "label": "密码", "type": "password" }
+        ],
+        "login": {
+          "pre_steps": [
+            {
+              "id": "csrf",
+              "method": "GET",
+              "path": "/api/v1/auth/csrf",
+              "extract": { "token": { "path": "data.token" } },
+              "extract_cookies": { "csrf_cookie": "csrf_token" }
+            }
+          ],
+          "method": "POST",
+          "path": "/api/v1/auth/login",
+          "content_type": "json",
+          "headers": { "X-CSRF-Token": "{{step.csrf.token}}" },
+          "cookies": { "csrf_token": "{{step.csrf.csrf_cookie}}" },
+          "body": { "email": "{{input.email}}", "password": "{{input.password}}" },
+          "save_credentials": { "email": { "path": "data.user.email" } },
+          "save_cookie_credentials": { "session_id": "session_id" }
+        }
+      },
+      {
+        "id": "cookies",
+        "label": "Cookie 导入",
+        "fields": [
+          { "key": "session_id", "label": "session_id", "type": "password", "hint": "从浏览器 Cookie 复制 session_id 值" }
+        ]
+      }
+    ],
+    "verify": {
+      "steps": [
+        {
+          "id": "quota",
+          "method": "GET",
+          "path": "/api/v1/downloads/quota",
+          "extract": {
+            "daily_used": { "path": "data.used" },
+            "daily_limit": { "path": "data.limit" },
+            "daily_remaining": { "path": "data.remaining" }
+          }
+        },
+        {
+          "id": "profile",
+          "method": "GET",
+          "path": "/api/v1/auth/status",
+          "extract": { "email": { "path": "data.user.email" } }
+        }
+      ],
+      "fields": {
+        "email": { "template": "{{step.profile.email}}" },
+        "daily_used": { "template": "{{step.quota.daily_used}}" },
+        "daily_limit": { "template": "{{step.quota.daily_limit}}" },
+        "daily_remaining": { "template": "{{step.quota.daily_remaining}}" }
+      }
+    }
+  },
+  "errors": {
+    "bot_protection": { "statuses": [403, 503], "html_body": true },
+    "envelope": { "error_path": "error.message", "error_code_path": "error.code" },
+    "rules": [
+      { "code": "QUOTA_EXCEEDED", "statuses": [429], "error_code_regex": "download_daily_limit|quota" },
+      { "code": "SESSION_EXPIRED", "statuses": [401], "error_code_regex": "login_required|unauthorized" }
+    ]
+  },
+  "search": {
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/catalog",
+      "query": { "q": "{{query.q}}", "limit": "{{query.limit}}" },
+      "page_size": 20
+    },
+    "response": {
+      "mode": "json",
+      "items_path": "data.books",
+      "pagination": {
+        "total_count_path": "meta.total",
+        "page_size": 20,
+        "cursor_param": "cursor",
+        "next_cursor_path": "meta.nextCursor"
+      },
+      "fields": {
+        "ref": { "path": "id" },
+        "title": { "path": "title" },
+        "authors": { "path": "author", "split_regex": "\\s*[,、，;]\\s*" },
+        "format": { "const_value": "epub" },
+        "source_url": { "template": "{{origin}}/book/{{fields.ref}}" }
+      }
+    }
+  },
+  "detail": {
+    "method": "GET",
+    "path": "/book/{{book.ref}}",
+    "headers": { "Accept": "text/html,application/xhtml+xml,*/*;q=0.8" },
+    "response_mode": "html",
+    "fields": {
+      "description": { "selector": "script[type='application/ld+json']", "json_path": "description" },
+      "cover_url": { "selector": "script[type='application/ld+json']", "json_path": "image", "resolve_url": true }
+    }
+  },
+  "download": {
+    "steps": [
+      {
+        "id": "authorize",
+        "method": "POST",
+        "path": "/api/v1/downloads/authorize",
+        "content_type": "json",
+        "body": { "bookId": "{{book.ref}}", "requestId": "{{rand.uuid}}" },
+        "extract": {
+          "state": { "path": "data.state" },
+          "intent": { "path": "data.intent" },
+          "url": { "path": "data.url", "resolve_url": true }
+        },
+        "poll": {
+          "method": "GET",
+          "path": "/api/v1/downloads/status?intent={{step.authorize.intent}}",
+          "interval_ms": 3000,
+          "max_attempts": 40,
+          "until_path": "data.state",
+          "until_value": "ready",
+          "fail_path": "data.state",
+          "fail_value": "failed",
+          "fail_message_path": "data.message",
+          "extract": { "url": { "path": "data.url", "resolve_url": true } }
+        }
+      }
+    ],
+    "file_request": {
+      "url": "{{step.authorize.url}}",
+      "same_origin_credentials": true,
+      "headers": { "Referer": "{{origin}}/book/{{book.ref}}", "Accept": "*/*" }
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="cheat-grid">
+          <div class="cheat-card">
+            <h3>模板变量命名空间速查（<code>{{...}}</code>）</h3>
+            <ul class="cheat-list">
+              <li><code>{{origin}}</code>：当前选中的镜像基地址（自动去除末尾斜杠）。</li>
+              <li><code>{{query.q}}</code> / <code>{{query.page}}</code> / <code>{{query.limit}}</code> / <code>{{query.offset}}</code>：搜索词与分页参数。</li>
+              <li><code>{{book.ref}}</code> / <code>{{book.ref_parts.0}}</code> / <code>{{book.var.&lt;key&gt;}}</code>：书籍引用 ID、按 <code>ref_separator</code>（默认 <code>:</code>）拆分片段，以及预提取变量（缺失时自动调 <code>detail</code> 补全）。</li>
+              <li><code>{{input.&lt;key&gt;}}</code> / <code>{{cred.&lt;key&gt;}}</code>：登录表单输入值与保险箱已保存凭据。</li>
+              <li><code>{{step.&lt;step_id&gt;.&lt;key&gt;}}</code>：前置步骤或轮询提取的值（也可用 <code>{{step.last.&lt;key&gt;}}</code>）。</li>
+              <li><code>{{vars.&lt;key&gt;}}</code> / <code>{{fields.&lt;key&gt;}}</code>：单条记录解析阶段内先求值的中间变量或标准字段。</li>
+              <li><code>{{rand.uuid}}</code> / <code>{{rand.id_24}}</code>：随机 UUID v4 与 24 位字母数字串（同次请求内缓存复用）。</li>
+            </ul>
+          </div>
+
+          <div class="cheat-card">
+            <h3>提取器定位与后处理管道（<code>BookSourceExtractRule</code>）</h3>
+            <ul class="cheat-list">
+              <li><strong>JSON 定位</strong>：<code>path</code>（点分路径）、<code>paths</code>（回退列表）、<code>path_segments</code>（精准键名数组，适合 <code>application/epub+zip</code> 等含 <code>/</code> 或 <code>.</code> 的键）。</li>
+              <li><strong>HTML / XML 定位</strong>：<code>selector</code> / <code>selectors</code>、<code>attr</code> / <code>attrs</code>、<code>all: true</code>、<code>preserve_paragraphs</code>、<code>next_sibling</code>、<code>after_heading</code>、<code>json_path</code>（提取 <code>ld+json</code> 脚本内部字段）。</li>
+              <li><strong>组合与条件</strong>：<code>cookie</code>、<code>first_of</code>（顺序回退数组）、<code>when_present</code> + <code>const_value</code>、<code>template</code>。</li>
+              <li><strong>后处理顺序</strong>：<code>strip_prefix/suffix</code> → <code>regex/regex_group</code> → <code>replace_pattern/with</code> → <code>prefix</code> → <code>transform (lower/upper/trim)</code> → <code>resolve_url</code>。</li>
+              <li><strong>正则避坑</strong>：Dart <code>RegExp</code> <strong>不支持 PCRE 内联标志（如 <code>(?i)</code>）</strong>；<code>errors.rules</code> 已默认大小写不敏感，切勿手写 <code>(?i)</code>。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="dev-ref-bar">
+          <span>需要查阅筛选映射、分页模式、多跳下载或完整字段签名？</span>
+          <span>
+            <a href="https://github.com/imlinhanchao/echo-app/blob/standalone/docs/book-source-guide.md" target="_blank" rel="noopener noreferrer">完整 Schema 指南 (book-source-guide.md)</a>
+            ·
+            <a href="https://github.com/imlinhanchao/echo-app/blob/standalone/.agents/skills/echo-book-source-author/references/schema-v1.md" target="_blank" rel="noopener noreferrer">字段字典 (schema-v1.md) →</a>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section id="validator" class="section section-tinted">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Step 4 · 浏览器本地自检</span>
+          <h2 class="section-title"><code>book-sources.v1</code> 规则与脱敏校验器</h2>
+          <p class="section-desc">
+            校验规则与仓库 <code>validate_source.dart</code> 对齐：在浏览器纯本地验证 JSON 语法、必填结构、Dart <code>RegExp</code> 兼容性（捕获非法 <code>(?i)</code>）、模板变量依赖以及 Cookie / Authorization 硬编码风险。
+          </p>
+        </div>
+
+        <div class="validator-grid">
+          <div class="validator-editor">
+            <div class="validator-toolbar">
+              <span class="validator-toolbar-label">载入模板：</span>
+              <button type="button" class="validator-chip-btn" data-load-sample="opds">OPDS 模板</button>
+              <button type="button" class="validator-chip-btn" data-load-sample="html">HTML 两步</button>
+              <button type="button" class="validator-chip-btn" data-load-sample="json">JSON API + 轮询</button>
+              <button type="button" id="validator-format-btn" class="validator-chip-btn">格式化 JSON</button>
+              <button type="button" id="validator-clear-btn" class="validator-chip-btn">清空</button>
+            </div>
+
+            <label class="skip-link" for="validator-input">粘贴或编辑 book-sources.v1 JSON 配置</label>
+            <textarea
+              id="validator-input"
+              class="validator-textarea"
+              spellcheck="false"
+              placeholder="在此粘贴单个 BookSourceDefinition JSON 或含 sources[] 的 Bundle JSON..."
+            ></textarea>
+
+            <div class="validator-actions">
+              <button type="button" id="validator-run-btn" class="btn-primary">立即校验配置</button>
+              <span class="validator-privacy-note">纯浏览器本地计算，绝不向任何服务器上传数据</span>
+            </div>
+          </div>
+
+          <div id="validator-report" class="validator-report" aria-live="polite">
+            <div class="validator-status is-idle">正在初始化校验器…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="import" class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Step 5 · 导入 Echo 与安全隔离</span>
+          <h2 class="section-title">导入客户端，放心更新、分享不泄密</h2>
+          <p class="section-desc">
+            Echo 客户端物理隔离了规则定义、用户网络覆盖与账号凭据，并在「书源管理」页面提供四种开箱即用的添加途径。
+          </p>
+        </div>
+
+        <div class="layer-grid">
+          <article class="feature-card">
+            <h3>1. 规则注册表层</h3>
+            <p>
+              位于 <code>registry.json</code>。存放内置公版源、远程订阅拉取的 Bundle 与本地导入定义；订阅按 <code>config_ttl_hours</code> 自动刷新时仅更新此层。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <h3>2. 用户配置覆盖层</h3>
+            <p>
+              位于 <code>overlays.json</code>。独立存储开关状态、优选镜像、自定义域名、反代前缀与当前搜索书源，<strong>订阅更新绝不覆盖个人配置</strong>。
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <h3>3. 凭据保险箱层</h3>
+            <p>
+              使用系统 <code>FlutterSecureStorage</code> 加密保管账号 Cookie / Token 与额度摘要；单源导出分享时走白名单序列化，从结构上物理隔绝私密凭据。
+            </p>
+          </article>
+        </div>
+
+        <div class="steps-grid" style="margin-bottom: 24px;">
+          <article class="step-card">
+            <span class="step-num">方式 1</span>
+            <h3>URL 订阅</h3>
+            <p>
+              打开「我的 → <code>书源管理</code> → <code>+</code> → URL 订阅」，输入托管 Bundle JSON 的 <code>https://</code> 地址，支持定时增量刷新。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">方式 2</span>
+            <h3>导入 JSON</h3>
+            <p>
+              切换至「导入 JSON」标签，可从设备选择 <code>.json</code> 文件或直接粘贴通过校验器验证的文本立即生效。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">方式 3</span>
+            <h3>OPDS 书库</h3>
+            <p>
+              切换至「OPDS 书库」表单，填入 Calibre / Komga 等目录地址与可选用户名密码，免写 JSON 一键接入。
+            </p>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num">方式 4</span>
+            <h3>ebook-api</h3>
+            <p>
+              切换至「ebook-api」标签填写自建服务地址与 <code>API Key</code>，测试连通后纳入同一书源切换体系。
+            </p>
+          </article>
+        </div>
+
+        <div class="faq-stack" aria-label="书源制作常见避坑指南">
+          <details class="release-notes">
+            <summary>
+              <span>1. 正则表达式在浏览器好使，导入 App 却报错 <code>FormatException</code>？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li>Dart 的 <code>RegExp</code> 不支持 PCRE 内联标志（例如 <code>(?i)</code>、<code>(?s)</code>）。请移除此类内联标志；<code>errors.rules</code> 匹配错误消息时已自动启用大小写不敏感。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="release-notes">
+            <summary>
+              <span>2. JSON 对象的键名自带 <code>/</code> 或 <code>.</code>（如 <code>application/epub+zip</code>）取不到值？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li><code>path</code> 按 <code>.</code> 切分路径，遇到键名本身包含小数点（如 <code>text/plain; charset=utf-8</code> 或版本号）时会出错。请改用精确键名数组 <code>"path_segments": ["formats", "application/epub+zip"]</code>。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="release-notes">
+            <summary>
+              <span>3. 搜书结果封面裂图或返回 403？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li>部分站点图片 CDN 会校验防盗链 <code>Referer</code> 或浏览器 <code>User-Agent</code>。请在顶层配置 <code>image_headers</code>（App 内所有封面渲染组件均已透传该请求头），并确保规则开启 <code>"resolve_url": true</code>。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="release-notes">
+            <summary>
+              <span>4. 下载跳到第三方对象存储/CDN，或匿名调用状态接口也返回 200？</span>
+            </summary>
+            <div class="release-notes-body">
+              <ul>
+                <li>如果最终下载链接在第三方 CDN 域名，务必设置 <code>"same_origin_credentials": false</code>（或在需同源鉴权时保持 <code>true</code>，客户端跨域重定向时会自动剥离 Cookie 与敏感头）。</li>
+                <li>如果站方 <code>/auth/status</code> 匿名也返回 <code>200</code>，请在 <code>auth.verify.steps</code> 中把会返回 <code>401</code> 的受保护接口（例如配额查询）放在第一位，防止过期会话误判。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="logo.svg" alt="" width="24" height="24" aria-hidden="true" />
+        <span>Echo · 回声 · MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Echo 官网首页</a>
+        <a href="ebook-api.html">自建 Ebook API</a>
+        <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">Echo App 源码</a>
+        <a href="https://github.com/imlinhanchao/echo-app/tree/standalone/.agents/skills/echo-book-source-author" target="_blank" rel="noopener noreferrer">书源 Skill 源码</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="book-sources.js"></script>
+</body>
+</html>
