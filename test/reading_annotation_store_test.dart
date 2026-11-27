@@ -18,6 +18,11 @@ void main() {
         note: '人物出场环境描写',
         color: ReadingHighlightColor.amber,
         chapterTitle: '第二章',
+        target: ReadingAnnotationTarget.translation,
+        transStartInFirst: 3,
+        transEndInLast: 11,
+        alignedOrigStart: 12,
+        alignedOrigEnd: 21,
         createdAt: now,
         updatedAt: now,
       );
@@ -33,10 +38,39 @@ void main() {
       expect(decoded.hasNote, isTrue);
       expect(decoded.color, ReadingHighlightColor.amber);
       expect(decoded.chapterTitle, '第二章');
+      expect(decoded.target, ReadingAnnotationTarget.translation);
+      expect(decoded.transStartInFirst, 3);
+      expect(decoded.transEndInLast, 11);
+      expect(decoded.hasAlignedOrigRange, isTrue);
+      expect(decoded.alignedOrigStart, 12);
+      expect(decoded.alignedOrigEnd, 21);
+
+      // 旧版本序列化数据不含 target / trans_* / aligned_orig_* 字段时兼容回退为 auto + null
+      final legacyJson = Map<String, dynamic>.from(ann.toJson())
+        ..remove('target')
+        ..remove('trans_start_in_first')
+        ..remove('trans_end_in_last')
+        ..remove('aligned_orig_start')
+        ..remove('aligned_orig_end');
+      final legacyDecoded = ReadingAnnotation.fromJson(legacyJson);
+      expect(legacyDecoded.target, ReadingAnnotationTarget.auto);
+      expect(legacyDecoded.transStartInFirst, isNull);
+      expect(legacyDecoded.transEndInLast, isNull);
+      expect(legacyDecoded.hasAlignedOrigRange, isFalse);
+      expect(legacyDecoded.alignedOrigStart, isNull);
+      expect(legacyDecoded.alignedOrigEnd, isNull);
 
       expect(ReadingHighlightColor.fromKey('unknown'), ReadingHighlightColor.gold);
       expect(ReadingHighlightColor.fromKey(null), ReadingHighlightColor.gold);
       expect(ReadingHighlightColor.fromKey('rose'), ReadingHighlightColor.rose);
+      expect(
+        ReadingAnnotationTarget.fromKey('original'),
+        ReadingAnnotationTarget.original,
+      );
+      expect(
+        ReadingAnnotationTarget.fromKey('invalid'),
+        ReadingAnnotationTarget.auto,
+      );
     });
 
     test('PersistentReadingAnnotationStore persists CRUD across instances', () async {
@@ -132,6 +166,57 @@ void main() {
       await ctrl.remove(upgraded.id);
       expect(ctrl.state.length, 1);
       expect(ctrl.state.first.chapterIndex, 2);
+    });
+
+    test('BookAnnotationsController.setAlignedOriginalRange persists range without mutating updatedAt or deleted notes', () async {
+      final store = MemoryReadingAnnotationStore();
+      final ctrl = BookAnnotationsController(store, 101);
+      addTearDown(ctrl.dispose);
+
+      final created = await ctrl.add(
+        chapterIndex: 0,
+        startOffset: 0,
+        endOffset: 80,
+        quote: '在农场里',
+        note: '重要细节',
+        color: ReadingHighlightColor.sage,
+        target: ReadingAnnotationTarget.translation,
+        transStartInFirst: 20,
+        transEndInLast: 24,
+      );
+      final originalUpdatedAt = created.updatedAt;
+
+      // 非法区间（end <= start）直接忽略
+      await ctrl.setAlignedOriginalRange(
+        annotationId: created.id,
+        alignedOrigStart: 40,
+        alignedOrigEnd: 40,
+      );
+      expect(ctrl.state.single.hasAlignedOrigRange, isFalse);
+
+      await ctrl.setAlignedOriginalRange(
+        annotationId: created.id,
+        alignedOrigStart: 45,
+        alignedOrigEnd: 56,
+      );
+      final updated = ctrl.state.single;
+      expect(updated.hasAlignedOrigRange, isTrue);
+      expect(updated.alignedOrigStart, 45);
+      expect(updated.alignedOrigEnd, 56);
+      expect(updated.note, '重要细节');
+      expect(updated.color, ReadingHighlightColor.sage);
+      expect(updated.updatedAt, originalUpdatedAt);
+
+      // 若批注已被删除，后到的对齐结果不可复活该批注
+      await ctrl.remove(created.id);
+      expect(ctrl.state, isEmpty);
+      await ctrl.setAlignedOriginalRange(
+        annotationId: created.id,
+        alignedOrigStart: 10,
+        alignedOrigEnd: 20,
+      );
+      expect(ctrl.state, isEmpty);
+      expect(await store.listForBook(101), isEmpty);
     });
 
     test('buildStyledPageSegments handles clamping, overlaps, notes priority, and active cue', () {

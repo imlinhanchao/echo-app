@@ -16,8 +16,15 @@ import '../../core/reader/screen_keep_alive.dart';
 import '../../core/settings/standalone_config_store.dart';
 import '../../core/stats/stats_store.dart';
 import '../../core/sync/progress_sync_service.dart';
+import '../../core/translation/bilingual_phrase_aligner.dart';
+import '../../core/translation/language_detector.dart';
+import '../../core/translation/translation_cache_store.dart';
+import '../../core/translation/translation_model_manager.dart';
+import '../../core/translation/translation_models.dart';
+import '../../core/translation/translation_scheduler.dart';
 import '../../core/tts/sentence_splitter.dart';
 import '../../core/tts/tts_model_manager.dart';
+import '../../design/echo_buttons.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
@@ -25,6 +32,7 @@ import '../auth/auth_controller.dart';
 import '../library/library_controller.dart';
 import '../player/playback_speed_sheet.dart';
 import '../player/player_sheet.dart' show openPlayer;
+import '../settings/translation_model_page.dart';
 import '../tts/tts_model_manager_page.dart';
 import 'reader_annotation_sheets.dart';
 
@@ -118,6 +126,11 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   bool _pendingJumpToLastPage = false;
   bool _switchingChapter = false;
   double _overscrollDelta = 0.0;
+  bool _isUserDragging = false;
+  bool _scrollStartedAtStart = false;
+  bool _scrollStartedAtEnd = false;
+  bool _deferredRepaginateAfterDrag = false;
+  bool _deferredRepaginateImmediate = false;
   bool _hasTextSelection = false;
   ReadingHighlightColor _lastHighlightColor = ReadingHighlightColor.gold;
 
@@ -127,6 +140,19 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   int _lastSyncedLiveSentence = -1;
 
   late final ScreenKeepAliveService _screenKeepAlive;
+
+  BilingualDisplayMode _displayMode = BilingualDisplayMode.original;
+  bool _showForeignBanner = false;
+  bool _dismissedForeignPrompt = false;
+  Timer? _bilingualRepaginateDebounce;
+  Timer? _nextChapterPrewarmTimer;
+  int _prewarmGen = 0;
+  final Map<int, List<ParagraphSegment>> _chapterParagraphsCache =
+      <int, List<ParagraphSegment>>{};
+  Map<String, String> _lastObservedChapterTranslations =
+      const <String, String>{};
+  final Set<String> _alignmentInFlightIds = <String>{};
+  final Set<String> _alignmentSessionDoneIds = <String>{};
 
   @override
   void initState() {
@@ -155,6 +181,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       _loading = false;
       _lastSyncedLiveChapter = liveState.chapterIndex;
       _lastSyncedLiveSentence = liveState.sentenceIndex;
+      unawaited(_initBookTranslationPrefs());
     } else {
       if (widget.initialChapterIndex != null) {
         _chapterIndex = widget.initialChapterIndex!;
@@ -167,9 +194,64 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   @override
   void dispose() {
     _paginationGen++;
+    _prewarmGen++;
+    _bilingualRepaginateDebounce?.cancel();
+    _nextChapterPrewarmTimer?.cancel();
     unawaited(_screenKeepAlive.setEnabled(false));
     _pageController.dispose();
     super.dispose();
+  }
+
+  List<ParagraphSegment> _paragraphsForChapter(ChapterPreview chapter) {
+    return _chapterParagraphsCache.putIfAbsent(
+      chapter.index,
+      () => splitChapterSentences(chapter.text),
+    );
+  }
+
+  Future<void> _initBookTranslationPrefs() async {
+    if (!mounted || _chapters.isEmpty) return;
+    final cacheStore = ref.read(translationCacheStoreProvider);
+    final prefs = await cacheStore.readBookPrefs(widget.book.id);
+    if (!mounted) return;
+
+    final targetLang = TranslationTargetLanguage.fromCode(
+      ref.read(standaloneConfigProvider).translationTargetLang,
+    );
+    final samples = _chapters
+        .take(2)
+        .map((c) => c.text)
+        .where((t) => t.trim().isNotEmpty)
+        .toList(growable: false);
+    final isForeign = isForeignBookForTarget(samples, targetLang);
+
+    final effectiveMode = prefs.displayMode;
+    final shouldShowBanner =
+        isForeign &&
+        !prefs.dismissedForeignPrompt &&
+        effectiveMode == BilingualDisplayMode.original;
+
+    final modeChanged = effectiveMode != _displayMode;
+    setState(() {
+      _displayMode = effectiveMode;
+      _dismissedForeignPrompt = prefs.dismissedForeignPrompt;
+      _showForeignBanner = shouldShowBanner;
+      if (modeChanged) {
+        _layoutSize = null;
+      }
+    });
+
+    if (effectiveMode != BilingualDisplayMode.original) {
+      final arrayIdx = _currentChapterArrayIdx();
+      final ch = _chapters[arrayIdx];
+      await ref
+          .read(translationSchedulerProvider.notifier)
+          .ensureChapterLoaded(bookId: widget.book.id, chapterIndex: ch.index);
+      if (mounted && _layoutSize != null) {
+        final tokens = Theme.of(context).extension<EchoTokens>()!;
+        unawaited(_paginateCurrentChapter(_layoutSize!, tokens));
+      }
+    }
   }
 
   static int _findChapterArrayIdx(List<ChapterPreview> chapters, int target) {
@@ -243,6 +325,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         _loading = false;
         _layoutSize = null;
       });
+      unawaited(_initBookTranslationPrefs());
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -252,82 +335,508 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
   }
 
-  /// 按当前章 + 当前版心尺寸懒分页（先查 LRU 缓存，未命中则分时让帧排版当前单章）。
+  Future<void> _onLayoutSizeChanged(Size size, EchoTokens tokens) async {
+    if (!mounted) return;
+    if (_layoutSize != null &&
+        (_layoutSize!.width - size.width).abs() <= 0.5 &&
+        (_layoutSize!.height - size.height).abs() <= 0.5) {
+      return;
+    }
+    await _paginateCurrentChapter(size, tokens);
+  }
+
+  /// 按当前章 + 当前版心尺寸懒分页（原文/双语均走 LRU 缓存；双语/仅译文按段落对照排版并锚定原文偏移防跳页）。
   Future<void> _paginateCurrentChapter(
     Size size,
     EchoTokens tokens, {
     bool jumpToLastPage = false,
+    bool triggerEnqueue = true,
+    bool keepPageAnchor = false,
   }) async {
     if (_chapters.isEmpty) return;
     final useLastPage = jumpToLastPage || _pendingJumpToLastPage;
-    _pendingJumpToLastPage = false;
     _layoutSize = size;
     final gen = ++_paginationGen;
-    final style = DefaultTextStyle.of(context).style.merge(_textStyle(tokens));
-    final textScaler = MediaQuery.textScalerOf(context);
-    final locale = Localizations.maybeLocaleOf(context);
-    final textScaleFactor = textScaler.scale(10.0) / 10.0;
+    try {
+      final style = DefaultTextStyle.of(context).style.merge(_textStyle(tokens));
+      final textScaler = MediaQuery.textScalerOf(context);
+      final locale = Localizations.maybeLocaleOf(context);
+      final textScaleFactor = textScaler.scale(10.0) / 10.0;
 
-    final arrayIdx = _currentChapterArrayIdx();
-    final targetChapter = _chapters[arrayIdx];
+      final arrayIdx = _currentChapterArrayIdx();
+      final targetChapter = _chapters[arrayIdx];
+      final chapterTitle = targetChapter.title.isNotEmpty
+          ? targetChapter.title
+          : '第 ${arrayIdx + 1} 章';
+
+      final currentVisibleStart =
+          (_currentPage >= 0 && _currentPage < _pages.length)
+              ? _pages[_currentPage].startChar
+              : _charOffset;
+      final shouldKeepAnchor = keepPageAnchor &&
+          !useLastPage &&
+          !_switchingChapter &&
+          _pages.isNotEmpty &&
+          _pages.first.chapterIndex == targetChapter.index;
+      final int? anchorCharOffset =
+          (shouldKeepAnchor && currentVisibleStart > 0)
+              ? currentVisibleStart
+              : null;
+
+      List<ReaderPage>? pages;
+      List<ParagraphSegment>? chapterSegs;
+      var activeHashes = const <String>{};
+
+      if (_displayMode == BilingualDisplayMode.original) {
+        final cacheKey = ChapterPaginationKey(
+          bookId: widget.book.id,
+          chapterIndex: targetChapter.index,
+          maxWidth: size.width,
+          maxHeight: size.height,
+          fontSize: _fontSize,
+          lineHeight: _lineHeight,
+          textScaleFactor: textScaleFactor,
+        );
+
+        pages = ChapterPaginationCache.instance.get(cacheKey);
+        if (pages == null) {
+          pages = await paginateChapterBySizeAsync(
+            chapterIndex: targetChapter.index,
+            chapterTitle: chapterTitle,
+            text: targetChapter.text,
+            style: style,
+            textScaler: textScaler,
+            maxWidth: size.width,
+            maxHeight: size.height,
+            locale: locale,
+            textHeightBehavior: _kReaderTextHeightBehavior,
+            isCancelled: () => !mounted || gen != _paginationGen,
+          );
+          if (!mounted || gen != _paginationGen) return;
+          if (pages.isNotEmpty) {
+            ChapterPaginationCache.instance.put(cacheKey, pages);
+          }
+        }
+      } else {
+        chapterSegs = _paragraphsForChapter(targetChapter);
+        final scheduler = ref.read(translationSchedulerProvider.notifier);
+        final cfg = ref.read(standaloneConfigProvider);
+        final translationsMap = await scheduler.ensureChapterLoaded(
+          bookId: widget.book.id,
+          chapterIndex: targetChapter.index,
+          targetLangCode: cfg.translationTargetLang,
+          modelId: cfg.activeTranslationModelId,
+        );
+        if (!mounted || gen != _paginationGen) return;
+        _lastObservedChapterTranslations = translationsMap;
+
+        final schedState = ref.read(translationSchedulerProvider);
+        final chapterKeyPrefix =
+            '${widget.book.id}::${targetChapter.index}::${cfg.translationTargetLang}::'
+            '${cfg.activeTranslationModelId.isEmpty ? "default" : cfg.activeTranslationModelId}::';
+        activeHashes = <String>{
+          for (final k in schedState.activeParagraphKeys)
+            if (k.startsWith(chapterKeyPrefix))
+              k.substring(chapterKeyPrefix.length),
+        };
+
+        final sig = computeBilingualPaginationSignature(
+          segments: chapterSegs,
+          translationsByHash: translationsMap,
+        );
+        final biCacheKey = BilingualChapterPaginationKey(
+          bookId: widget.book.id,
+          chapterIndex: targetChapter.index,
+          mode: _displayMode,
+          maxWidth: size.width,
+          maxHeight: size.height,
+          fontSize: _fontSize,
+          lineHeight: _lineHeight,
+          textScaleFactor: textScaleFactor,
+          sigA: sig.sigA,
+          sigB: sig.sigB,
+          translatedCount: sig.translatedCount,
+          anchorCharOffset: anchorCharOffset ?? -1,
+        );
+
+        pages = BilingualChapterPaginationCache.instance.get(biCacheKey);
+        if (pages == null) {
+          pages = await paginateBilingualChapterBySizeAsync(
+            chapterIndex: targetChapter.index,
+            chapterTitle: chapterTitle,
+            segments: chapterSegs,
+            translationsByHash: translationsMap,
+            activeTranslatingHashes: const <String>{},
+            mode: _displayMode,
+            style: style,
+            secondaryColor: _themeColors(tokens).secondary,
+            textScaler: textScaler,
+            maxWidth: size.width,
+            maxHeight: size.height,
+            locale: locale,
+            textHeightBehavior: _kReaderTextHeightBehavior,
+            isCancelled: () => !mounted || gen != _paginationGen,
+            anchorCharOffset: anchorCharOffset,
+          );
+          if (!mounted || gen != _paginationGen) return;
+          if (pages.isNotEmpty) {
+            BilingualChapterPaginationCache.instance.put(biCacheKey, pages);
+          }
+        }
+      }
+
+      if (!mounted || gen != _paginationGen || pages.isEmpty) return;
+
+      final lookupOffset = shouldKeepAnchor ? currentVisibleStart : _charOffset;
+      final targetPage = useLastPage
+          ? pages.length - 1
+          : pageIndexForOffset(pages, targetChapter.index, lookupOffset);
+
+      final reuseController =
+          _pageController.hasClients &&
+          targetPage == _currentPage &&
+          !_switchingChapter;
+
+      if (reuseController) {
+        setState(() {
+          _pages = pages!;
+          _currentPage = targetPage;
+          _chapterIndex = targetChapter.index;
+          if (useLastPage) {
+            _charOffset = pages[targetPage].startChar;
+          }
+          _pendingJumpToLastPage = false;
+          _switchingChapter = false;
+        });
+      } else {
+        final oldController = _pageController;
+        final nextController = PageController(initialPage: targetPage);
+
+        setState(() {
+          _pageController = nextController;
+          _pageViewEpoch++;
+          _pages = pages!;
+          _currentPage = targetPage;
+          _chapterIndex = targetChapter.index;
+          if (useLastPage) {
+            _charOffset = pages[targetPage].startChar;
+          }
+          _pendingJumpToLastPage = false;
+          _switchingChapter = false;
+        });
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          oldController.dispose();
+        });
+      }
+
+      if (_displayMode != BilingualDisplayMode.original && chapterSegs != null) {
+        final schedState = ref.read(translationSchedulerProvider);
+        final targetBlocks =
+            pages[targetPage].blocks ?? const <BilingualPageBlock>[];
+        final shouldEnqueue = triggerEnqueue ||
+            (schedState.lastError == null &&
+                targetBlocks.any(
+                  (b) =>
+                      !b.hasTranslation &&
+                      !activeHashes.contains(b.paragraphHash),
+                ));
+        if (shouldEnqueue) {
+          unawaited(
+            _enqueueTranslationForPage(
+              targetPage,
+              pages,
+              chapterSegs,
+              targetChapter.index,
+            ),
+          );
+        }
+        if (targetPage >= pages.length - 2) {
+          _scheduleNextChapterPrewarm();
+        }
+      }
+      if (_displayMode == BilingualDisplayMode.bilingual && mounted) {
+        _schedulePhraseAlignmentForCurrentPage(
+          ref.read(bookAnnotationsProvider(widget.book.id)),
+        );
+      }
+    } finally {
+      if (mounted && gen == _paginationGen && _switchingChapter) {
+        setState(() => _switchingChapter = false);
+      }
+    }
+  }
+
+  /// 在接近本章末尾时于后台提前预载并预排版下一章的双语分页缓存，确保尾页向下翻章瞬间切换不卡顿。
+  void _scheduleNextChapterPrewarm() {
+    if (!mounted ||
+        _displayMode == BilingualDisplayMode.original ||
+        _switchingChapter ||
+        _layoutSize == null) {
+      return;
+    }
+    final nextArrayIdx = _currentChapterArrayIdx() + 1;
+    if (nextArrayIdx >= _chapters.length) return;
+    final size = _layoutSize!;
+    final targetMode = _displayMode;
+    final targetChapter = _chapters[nextArrayIdx];
     final chapterTitle = targetChapter.title.isNotEmpty
         ? targetChapter.title
-        : '第 ${arrayIdx + 1} 章';
+        : '第 ${nextArrayIdx + 1} 章';
 
-    final cacheKey = ChapterPaginationKey(
-      bookId: widget.book.id,
-      chapterIndex: targetChapter.index,
-      maxWidth: size.width,
-      maxHeight: size.height,
-      fontSize: _fontSize,
-      lineHeight: _lineHeight,
-      textScaleFactor: textScaleFactor,
-    );
+    _nextChapterPrewarmTimer?.cancel();
+    final prewarmGen = ++_prewarmGen;
+    _nextChapterPrewarmTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(() async {
+        if (!mounted ||
+            prewarmGen != _prewarmGen ||
+            _switchingChapter ||
+            _displayMode != targetMode ||
+            _displayMode == BilingualDisplayMode.original) {
+          return;
+        }
+        final tokens = Theme.of(context).extension<EchoTokens>();
+        if (tokens == null) return;
+        final style = DefaultTextStyle.of(context).style.merge(_textStyle(tokens));
+        final textScaler = MediaQuery.textScalerOf(context);
+        final locale = Localizations.maybeLocaleOf(context);
+        final textScaleFactor = textScaler.scale(10.0) / 10.0;
+        final secondaryColor = _themeColors(tokens).secondary;
+        final cfg = ref.read(standaloneConfigProvider);
+        final scheduler = ref.read(translationSchedulerProvider.notifier);
 
-    var pages = ChapterPaginationCache.instance.get(cacheKey);
-    if (pages == null) {
-      pages = await paginateChapterBySizeAsync(
-        chapterIndex: targetChapter.index,
-        chapterTitle: chapterTitle,
-        text: targetChapter.text,
-        style: style,
-        textScaler: textScaler,
-        maxWidth: size.width,
-        maxHeight: size.height,
-        locale: locale,
-        textHeightBehavior: _kReaderTextHeightBehavior,
-        isCancelled: () => !mounted || gen != _paginationGen,
+        final segs = _paragraphsForChapter(targetChapter);
+        final translationsMap = await scheduler.ensureChapterLoaded(
+          bookId: widget.book.id,
+          chapterIndex: targetChapter.index,
+          targetLangCode: cfg.translationTargetLang,
+          modelId: cfg.activeTranslationModelId,
+        );
+        if (!mounted ||
+            prewarmGen != _prewarmGen ||
+            _switchingChapter ||
+            _displayMode != targetMode) {
+          return;
+        }
+
+        final sig = computeBilingualPaginationSignature(
+          segments: segs,
+          translationsByHash: translationsMap,
+        );
+        final nextKey = BilingualChapterPaginationKey(
+          bookId: widget.book.id,
+          chapterIndex: targetChapter.index,
+          mode: targetMode,
+          maxWidth: size.width,
+          maxHeight: size.height,
+          fontSize: _fontSize,
+          lineHeight: _lineHeight,
+          textScaleFactor: textScaleFactor,
+          sigA: sig.sigA,
+          sigB: sig.sigB,
+          translatedCount: sig.translatedCount,
+        );
+        if (BilingualChapterPaginationCache.instance.get(nextKey) != null) {
+          return;
+        }
+
+        final pages = await paginateBilingualChapterBySizeAsync(
+          chapterIndex: targetChapter.index,
+          chapterTitle: chapterTitle,
+          segments: segs,
+          translationsByHash: translationsMap,
+          activeTranslatingHashes: const <String>{},
+          mode: targetMode,
+          style: style,
+          secondaryColor: secondaryColor,
+          textScaler: textScaler,
+          maxWidth: size.width,
+          maxHeight: size.height,
+          locale: locale,
+          textHeightBehavior: _kReaderTextHeightBehavior,
+          isCancelled: () =>
+              !mounted ||
+              prewarmGen != _prewarmGen ||
+              _switchingChapter ||
+              _displayMode != targetMode,
+        );
+        if (!mounted ||
+            prewarmGen != _prewarmGen ||
+            _switchingChapter ||
+            _displayMode != targetMode ||
+            pages.isEmpty) {
+          return;
+        }
+        BilingualChapterPaginationCache.instance.put(nextKey, pages);
+      }());
+    });
+  }
+
+  Future<void> _enqueueTranslationForPage(
+    int pageIndex,
+    List<ReaderPage> pages,
+    List<ParagraphSegment> chapterSegs,
+    int chapterIndex,
+  ) async {
+    if (!mounted || pageIndex < 0 || pageIndex >= pages.length) return;
+    final page = pages[pageIndex];
+    final blocks = page.blocks;
+    if (blocks == null || blocks.isEmpty) return;
+    final seen = <int>{};
+    final visibleSegs = <ParagraphSegment>[];
+    for (final b in blocks) {
+      if (b.paragraphIndex >= 0 &&
+          b.paragraphIndex < chapterSegs.length &&
+          seen.add(b.paragraphIndex)) {
+        visibleSegs.add(chapterSegs[b.paragraphIndex]);
+      }
+    }
+    await ref
+        .read(translationSchedulerProvider.notifier)
+        .enqueuePageAndPrefetch(
+          bookId: widget.book.id,
+          chapterIndex: chapterIndex,
+          visibleSegments: visibleSegs,
+          chapterSegments: chapterSegs,
+        );
+  }
+
+  void _scheduleBilingualRepaginate({
+    required bool immediate,
+    Duration debounce = const Duration(milliseconds: 350),
+    bool triggerEnqueue = true,
+  }) {
+    if (_isUserDragging) {
+      _deferredRepaginateAfterDrag = true;
+      _deferredRepaginateImmediate = _deferredRepaginateImmediate || immediate;
+      return;
+    }
+    _bilingualRepaginateDebounce?.cancel();
+    if (!mounted ||
+        _layoutSize == null ||
+        _displayMode == BilingualDisplayMode.original) {
+      return;
+    }
+    void run() {
+      if (!mounted ||
+          _layoutSize == null ||
+          _displayMode == BilingualDisplayMode.original) {
+        return;
+      }
+      final tokens = Theme.of(context).extension<EchoTokens>();
+      if (tokens == null) return;
+      unawaited(
+        _paginateCurrentChapter(
+          _layoutSize!,
+          tokens,
+          triggerEnqueue: triggerEnqueue,
+          keepPageAnchor: true,
+        ),
       );
-      if (!mounted || gen != _paginationGen) return;
-      if (pages.isNotEmpty) {
-        ChapterPaginationCache.instance.put(cacheKey, pages);
+    }
+
+    _bilingualRepaginateDebounce = Timer(
+      immediate ? Duration.zero : debounce,
+      run,
+    );
+  }
+
+  Future<void> _switchDisplayMode(BilingualDisplayMode nextMode) async {
+    if (nextMode != BilingualDisplayMode.original) {
+      final modelPath = await ref
+          .read(translationModelManagerProvider.notifier)
+          .ensureInitializedAndGetActiveModelPath();
+      if (!mounted) return;
+      if (modelPath == null || modelPath.isEmpty) {
+        final goDownload = await showDialog<bool>(
+          context: context,
+          builder: (dCtx) => AlertDialog(
+            title: const Text('需先下载离线翻译模型'),
+            content: const Text(
+              '双语翻译完全在手机本地离线运行。推荐下载腾讯 HY-MT1.5-1.8B 1.25-bit 模型（约 440MB），是否立即前往下载或导入？',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dCtx).pop(false),
+                child: const Text('稍后再说'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dCtx).pop(true),
+                child: const Text('去模型管理'),
+              ),
+            ],
+          ),
+        );
+        if (goDownload == true && mounted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const TranslationModelPage(),
+            ),
+          );
+          if (!mounted) return;
+          final readyAfter = await ref
+              .read(translationModelManagerProvider.notifier)
+              .ensureInitializedAndGetActiveModelPath();
+          if (!mounted) return;
+          if (readyAfter == null || readyAfter.isEmpty) return;
+        } else {
+          return;
+        }
       }
     }
 
-    if (!mounted || gen != _paginationGen || pages.isEmpty) return;
+    final cacheStore = ref.read(translationCacheStoreProvider);
+    await cacheStore.writeBookPrefs(
+      widget.book.id,
+      BookTranslationPrefs(
+        displayMode: nextMode,
+        dismissedForeignPrompt: _dismissedForeignPrompt,
+      ),
+    );
+    if (!mounted) return;
 
-    final targetPage = useLastPage
-        ? pages.length - 1
-        : pageIndexForOffset(pages, targetChapter.index, _charOffset);
-
-    final oldController = _pageController;
-    final nextController = PageController(initialPage: targetPage);
+    _bilingualRepaginateDebounce?.cancel();
+    _nextChapterPrewarmTimer?.cancel();
+    _prewarmGen++;
+    if (nextMode == BilingualDisplayMode.original) {
+      ref.read(translationSchedulerProvider.notifier).pauseLiveQueue();
+    }
 
     setState(() {
-      _pageController = nextController;
-      _pageViewEpoch++;
-      _pages = pages!;
-      _currentPage = targetPage;
-      _chapterIndex = targetChapter.index;
-      if (useLastPage) {
-        _charOffset = pages[targetPage].startChar;
+      _isUserDragging = false;
+      _scrollStartedAtStart = false;
+      _scrollStartedAtEnd = false;
+      _deferredRepaginateAfterDrag = false;
+      _deferredRepaginateImmediate = false;
+      _displayMode = nextMode;
+      if (nextMode != BilingualDisplayMode.original) {
+        _showForeignBanner = false;
       }
-      _switchingChapter = false;
+      _layoutSize = null;
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      oldController.dispose();
+    final liveState = ref.read(liveTtsPlayerProvider);
+    if (liveState.hasBook && liveState.book?.id == widget.book.id) {
+      unawaited(
+        ref
+            .read(liveTtsPlayerProvider.notifier)
+            .setSpeakTranslated(nextMode != BilingualDisplayMode.original),
+      );
+    }
+  }
+
+  Future<void> _dismissForeignBanner() async {
+    setState(() {
+      _showForeignBanner = false;
+      _dismissedForeignPrompt = true;
     });
+    await ref.read(translationCacheStoreProvider).writeBookPrefs(
+      widget.book.id,
+      BookTranslationPrefs(
+        displayMode: _displayMode,
+        dismissedForeignPrompt: true,
+      ),
+    );
   }
 
   void _jumpToChapterArrayIndex(
@@ -337,6 +846,16 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   }) {
     if (arrayIdx < 0 || arrayIdx >= _chapters.length) return;
     final chapter = _chapters[arrayIdx];
+    _bilingualRepaginateDebounce?.cancel();
+    _nextChapterPrewarmTimer?.cancel();
+    _prewarmGen++;
+    _isUserDragging = false;
+    _scrollStartedAtStart = false;
+    _scrollStartedAtEnd = false;
+    _deferredRepaginateAfterDrag = false;
+    _deferredRepaginateImmediate = false;
+    _lastObservedChapterTranslations = const <String, String>{};
+
     setState(() {
       _switchingChapter = true;
       _overscrollDelta = 0.0;
@@ -344,6 +863,11 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       _charOffset = charOffset;
       _pendingJumpToLastPage = jumpToLastPage;
     });
+
+    // 切章时立刻释放旧章占用的本地翻译算力，避免后台推理与新章分页抢占 CPU
+    if (_displayMode != BilingualDisplayMode.original) {
+      ref.read(translationSchedulerProvider.notifier).pauseLiveQueue();
+    }
     unawaited(_persistPosition(chapter.index, charOffset));
 
     final size = _layoutSize;
@@ -460,25 +984,103 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     });
     StatsStore.instance.addPageRead();
     await _persistPosition(page.chapterIndex, page.startChar);
+
+    if (_displayMode != BilingualDisplayMode.original && _chapters.isNotEmpty) {
+      final ch = _chapters[_findChapterArrayIdx(_chapters, page.chapterIndex)];
+      unawaited(
+        _enqueueTranslationForPage(
+          index,
+          _pages,
+          _paragraphsForChapter(ch),
+          ch.index,
+        ),
+      );
+      if (index >= _pages.length - 2) {
+        _scheduleNextChapterPrewarm();
+      }
+      if (_displayMode == BilingualDisplayMode.bilingual && mounted) {
+        _schedulePhraseAlignmentForCurrentPage(
+          ref.read(bookAnnotationsProvider(widget.book.id)),
+        );
+      }
+    }
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.horizontal || _chapters.length <= 1) {
+    if (notification.metrics.axis != Axis.horizontal) {
       return false;
     }
-    if (notification is ScrollStartNotification ||
-        notification is ScrollEndNotification) {
+    if (notification is ScrollStartNotification) {
+      _isUserDragging = notification.dragDetails != null;
       _overscrollDelta = 0.0;
+      final metrics = notification.metrics;
+      _scrollStartedAtStart = metrics.pixels <= metrics.minScrollExtent + 1.0;
+      _scrollStartedAtEnd = metrics.pixels >= metrics.maxScrollExtent - 1.0;
+      return false;
+    }
+    if (!_isUserDragging &&
+        ((notification is ScrollUpdateNotification &&
+                notification.dragDetails != null) ||
+            (notification is OverscrollNotification &&
+                notification.dragDetails != null))) {
+      _isUserDragging = true;
+      final metrics = notification.metrics;
+      _scrollStartedAtStart = metrics.pixels <= metrics.minScrollExtent + 1.0;
+      _scrollStartedAtEnd = metrics.pixels >= metrics.maxScrollExtent - 1.0;
+    }
+    if (notification is ScrollEndNotification) {
+      final wasDragging = _isUserDragging;
+      final startedAtStart = _scrollStartedAtStart;
+      final startedAtEnd = _scrollStartedAtEnd;
+      final overscroll = _overscrollDelta;
+      final primaryVelocity = notification.dragDetails?.primaryVelocity ?? 0.0;
+      _isUserDragging = false;
+      _overscrollDelta = 0.0;
+      _scrollStartedAtStart = false;
+      _scrollStartedAtEnd = false;
+
+      if (wasDragging && !_switchingChapter && _chapters.length > 1) {
+        final arrayIdx = _currentChapterArrayIdx();
+        // 尾页向左快划或拖过阈值跳下一章；首页向右快划或拖过阈值跳上一章末页
+        final forwardFlick = startedAtEnd &&
+            ((overscroll >= 6.0 && primaryVelocity <= -240.0) ||
+                (overscroll >= 0.0 && primaryVelocity <= -450.0));
+        final backwardFlick = startedAtStart &&
+            ((overscroll <= -6.0 && primaryVelocity >= 240.0) ||
+                (overscroll <= 0.0 && primaryVelocity >= 450.0));
+        if (forwardFlick && arrayIdx + 1 < _chapters.length) {
+          _jumpToChapterArrayIndex(arrayIdx + 1);
+          return false;
+        }
+        if (backwardFlick && arrayIdx > 0) {
+          _jumpToChapterArrayIndex(arrayIdx - 1, jumpToLastPage: true);
+          return false;
+        }
+      }
+
+      if (_deferredRepaginateAfterDrag && !_switchingChapter) {
+        final immediate = _deferredRepaginateImmediate;
+        _deferredRepaginateAfterDrag = false;
+        _deferredRepaginateImmediate = false;
+        _scheduleBilingualRepaginate(
+          immediate: immediate,
+          triggerEnqueue: false,
+        );
+      }
       return false;
     }
     if (notification is OverscrollNotification &&
         notification.dragDetails != null &&
-        !_switchingChapter) {
+        !_switchingChapter &&
+        _chapters.length > 1) {
       _overscrollDelta += notification.overscroll;
       final arrayIdx = _currentChapterArrayIdx();
-      if (_overscrollDelta >= 48.0 && arrayIdx + 1 < _chapters.length) {
+      final forwardThreshold = _scrollStartedAtEnd ? 32.0 : 64.0;
+      final backwardThreshold = _scrollStartedAtStart ? 32.0 : 64.0;
+      if (_overscrollDelta >= forwardThreshold &&
+          arrayIdx + 1 < _chapters.length) {
         _jumpToChapterArrayIndex(arrayIdx + 1);
-      } else if (_overscrollDelta <= -48.0 && arrayIdx > 0) {
+      } else if (_overscrollDelta <= -backwardThreshold && arrayIdx > 0) {
         _jumpToChapterArrayIndex(arrayIdx - 1, jumpToLastPage: true);
       }
     }
@@ -664,6 +1266,532 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     );
   }
 
+  /// 翻译与双语对照控制面板（三态切换 / 目标语种 / 预翻译 / 模型管理）。
+  void _showTranslationSheet() {
+    final tokens = Theme.of(context).extension<EchoTokens>()!;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => Consumer(
+        builder: (sheetCtx, sheetRef, _) {
+          final textTheme = Theme.of(sheetCtx).textTheme;
+          final cfg = sheetRef.watch(standaloneConfigProvider);
+          final mtState = sheetRef.watch(translationModelManagerProvider);
+          final schedState = sheetRef.watch(translationSchedulerProvider);
+          final targetLang =
+              TranslationTargetLanguage.fromCode(cfg.translationTargetLang);
+          final activeEntry = mtState.activeEntry;
+          final modelReady =
+              mtState.activeModelPath != null &&
+              mtState.activeModelPath!.isNotEmpty;
+
+          return SafeArea(
+            child: SingleChildScrollView(
+              child: Padding(
+                key: const Key('reader_translation_sheet'),
+                padding: const EdgeInsets.fromLTRB(
+                  EchoMetrics.pagePadding,
+                  4,
+                  EchoMetrics.pagePadding,
+                  EchoMetrics.space3,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const EchoSheetDragHandle(),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.translate_rounded,
+                          color: tokens.primary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '离线双语阅读（HY-MT1.5）',
+                            style: textTheme.titleMedium?.copyWith(
+                              color: tokens.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: EchoMetrics.space2),
+                    Text(
+                      '显示模式',
+                      style: textTheme.labelMedium?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          key: const Key('reader_mode_original'),
+                          label: const Text('原文'),
+                          selected:
+                              _displayMode == BilingualDisplayMode.original,
+                          onSelected: (_) {
+                            Navigator.of(sheetCtx).pop();
+                            unawaited(
+                              _switchDisplayMode(BilingualDisplayMode.original),
+                            );
+                          },
+                        ),
+                        ChoiceChip(
+                          key: const Key('reader_mode_bilingual'),
+                          label: const Text('双语对照'),
+                          selected:
+                              _displayMode == BilingualDisplayMode.bilingual,
+                          onSelected: (_) {
+                            Navigator.of(sheetCtx).pop();
+                            unawaited(
+                              _switchDisplayMode(
+                                BilingualDisplayMode.bilingual,
+                              ),
+                            );
+                          },
+                        ),
+                        ChoiceChip(
+                          key: const Key('reader_mode_translatedOnly'),
+                          label: const Text('仅译文'),
+                          selected:
+                              _displayMode ==
+                              BilingualDisplayMode.translatedOnly,
+                          onSelected: (_) {
+                            Navigator.of(sheetCtx).pop();
+                            unawaited(
+                              _switchDisplayMode(
+                                BilingualDisplayMode.translatedOnly,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: EchoMetrics.space2),
+                    Text(
+                      '翻译目标语言',
+                      style: textTheme.labelMedium?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        for (final lang in TranslationTargetLanguage.values)
+                          ChoiceChip(
+                            key: Key('reader_target_lang_${lang.code}'),
+                            label: Text(lang.label),
+                            selected: targetLang == lang,
+                            onSelected: (_) async {
+                              if (lang == targetLang) return;
+                              await ref
+                                  .read(standaloneConfigProvider.notifier)
+                                  .setTranslationTargetLang(lang.code);
+                              if (mounted &&
+                                  _displayMode !=
+                                      BilingualDisplayMode.original) {
+                                _scheduleBilingualRepaginate(immediate: true);
+                              }
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: EchoMetrics.space2),
+                    if (schedState.pretranslateRunning) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: tokens.surfaceSubtle,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  schedState.pretranslateTitle,
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: tokens.textPrimary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  '${schedState.pretranslateCompleted}/${schedState.pretranslateTotal}',
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: tokens.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            LinearProgressIndicator(
+                              value: schedState.pretranslateTotal > 0
+                                  ? schedState.pretranslateCompleted /
+                                        schedState.pretranslateTotal
+                                  : null,
+                              color: tokens.primary,
+                              backgroundColor: tokens.surfaceBase,
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                key: const Key(
+                                  'reader_cancel_pretranslate_button',
+                                ),
+                                onPressed: () => unawaited(
+                                  ref
+                                      .read(
+                                        translationSchedulerProvider.notifier,
+                                      )
+                                      .cancelPretranslate(),
+                                ),
+                                child: Text(
+                                  '取消预翻译',
+                                  style: TextStyle(color: tokens.error),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: EchoSecondaryButton(
+                              key: const Key(
+                                'reader_pretranslate_chapter_button',
+                              ),
+                              label: '预翻译本章',
+                              icon: Icons.article_outlined,
+                              onPressed: _chapters.isEmpty
+                                  ? null
+                                  : () async {
+                                      if (!modelReady) {
+                                        Navigator.of(sheetCtx).pop();
+                                        unawaited(
+                                          _switchDisplayMode(
+                                            BilingualDisplayMode.bilingual,
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      final cur =
+                                          _chapters[_currentChapterArrayIdx()];
+                                      Navigator.of(sheetCtx).pop();
+                                      await ref
+                                          .read(
+                                            translationSchedulerProvider
+                                                .notifier,
+                                          )
+                                          .startPretranslate(
+                                            bookId: widget.book.id,
+                                            bookTitle: widget.book.title,
+                                            chapterIndices: <int>[cur.index],
+                                            loadChapterContent: (idx) async {
+                                              final arr = _findChapterArrayIdx(
+                                                _chapters,
+                                                idx,
+                                              );
+                                              return _chapters[arr].text;
+                                            },
+                                          );
+                                    },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: EchoSecondaryButton(
+                              key: const Key('reader_pretranslate_book_button'),
+                              label: '预翻译整书',
+                              icon: Icons.auto_stories_outlined,
+                              onPressed: _chapters.isEmpty
+                                  ? null
+                                  : () async {
+                                      if (!modelReady) {
+                                        Navigator.of(sheetCtx).pop();
+                                        unawaited(
+                                          _switchDisplayMode(
+                                            BilingualDisplayMode.bilingual,
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      final startArr = _currentChapterArrayIdx();
+                                      final indices = <int>[
+                                        for (
+                                          var i = startArr;
+                                          i < _chapters.length;
+                                          i++
+                                        )
+                                          _chapters[i].index,
+                                        for (var i = 0; i < startArr; i++)
+                                          _chapters[i].index,
+                                      ];
+                                      Navigator.of(sheetCtx).pop();
+                                      await ref
+                                          .read(
+                                            translationSchedulerProvider
+                                                .notifier,
+                                          )
+                                          .startPretranslate(
+                                            bookId: widget.book.id,
+                                            bookTitle: widget.book.title,
+                                            chapterIndices: indices,
+                                            loadChapterContent: (idx) async {
+                                              final arr = _findChapterArrayIdx(
+                                                _chapters,
+                                                idx,
+                                              );
+                                              return _chapters[arr].text;
+                                            },
+                                          );
+                                    },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    if (schedState.lastError != null &&
+                        schedState.lastError!.isNotEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          color: tokens.error.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: tokens.error.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          schedState.lastError!,
+                          style: textTheme.bodySmall?.copyWith(
+                            color: tokens.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                    ListTile(
+                      key: const Key('reader_translation_model_entry'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        modelReady
+                            ? Icons.check_circle_outline_rounded
+                            : Icons.download_for_offline_outlined,
+                        color: modelReady ? tokens.success : tokens.primary,
+                      ),
+                      title: Text(
+                        modelReady && activeEntry != null
+                            ? activeEntry.spec.name
+                            : '管理离线翻译模型（HY-MT1.5）',
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: tokens.textPrimary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        modelReady ? '端侧模型已就绪 · 点击切换或清理缓存' : '尚未下载模型（推荐 440MB 1.25-bit）',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: tokens.textSecondary,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: tokens.textDisabled,
+                      ),
+                      onTap: () {
+                        Navigator.of(sheetCtx).pop();
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const TranslationModelPage(),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  List<SentenceAlignmentPair> _sentenceAlignmentPairsForRange(
+    int chapterIndex,
+    int startOffset,
+    int endOffset,
+  ) {
+    if (_chapters.isEmpty) return const <SentenceAlignmentPair>[];
+    final arrayIdx = _findChapterArrayIdx(_chapters, chapterIndex);
+    if (arrayIdx < 0 || arrayIdx >= _chapters.length) {
+      return const <SentenceAlignmentPair>[];
+    }
+    final ch = _chapters[arrayIdx];
+    if (ch.index != chapterIndex) {
+      return const <SentenceAlignmentPair>[];
+    }
+    final segs = _paragraphsForChapter(ch);
+    final cfg = ref.read(standaloneConfigProvider);
+    final transMap = ref
+        .read(translationSchedulerProvider)
+        .chapterMapFor(
+          bookId: widget.book.id,
+          chapterIndex: chapterIndex,
+          targetLangCode: cfg.translationTargetLang,
+          modelId: cfg.activeTranslationModelId,
+        );
+    final pairs = <SentenceAlignmentPair>[];
+    for (final s in segs) {
+      if (endOffset <= s.startChar || startOffset >= s.endChar) continue;
+      final tr = transMap[s.hash]?.trim() ?? '';
+      if (tr.isEmpty) {
+        return const <SentenceAlignmentPair>[];
+      }
+      pairs.add(
+        SentenceAlignmentPair(
+          origStartChar: s.startChar,
+          origEndChar: s.endChar,
+          origText: s.text,
+          transText: tr,
+        ),
+      );
+    }
+    return pairs;
+  }
+
+  ({int? start, int? end}) _tryInstantAlignmentForSelection({
+    required ReaderPage page,
+    required ({
+      int startOffset,
+      int endOffset,
+      String quote,
+      bool isTranslation,
+      int? transStartInFirst,
+      int? transEndInLast,
+    })
+    mapped,
+  }) {
+    if (!page.isBilingual || !mapped.isTranslation) {
+      return (start: null, end: null);
+    }
+    final pairs = _sentenceAlignmentPairsForRange(
+      page.chapterIndex,
+      mapped.startOffset,
+      mapped.endOffset,
+    );
+    if (pairs.isEmpty) return (start: null, end: null);
+    final now = DateTime.now().toUtc();
+    final probe = ReadingAnnotation(
+      id: '_probe',
+      bookId: widget.book.id,
+      chapterIndex: page.chapterIndex,
+      startOffset: mapped.startOffset,
+      endOffset: mapped.endOffset,
+      quote: mapped.quote,
+      target: ReadingAnnotationTarget.translation,
+      transStartInFirst: mapped.transStartInFirst,
+      transEndInLast: mapped.transEndInLast,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final instant = tryInstantPhraseAlign(annotation: probe, sentences: pairs);
+    if (instant == null) return (start: null, end: null);
+    return (start: instant.alignedOrigStart, end: instant.alignedOrigEnd);
+  }
+
+  Future<void> _alignAnnotationInBackground(ReadingAnnotation ann) async {
+    if (!mounted ||
+        _displayMode != BilingualDisplayMode.bilingual ||
+        ann.hasAlignedOrigRange ||
+        ann.target == ReadingAnnotationTarget.original ||
+        _alignmentInFlightIds.contains(ann.id) ||
+        _alignmentSessionDoneIds.contains(ann.id)) {
+      return;
+    }
+    final pairs = _sentenceAlignmentPairsForRange(
+      ann.chapterIndex,
+      ann.startOffset,
+      ann.endOffset,
+    );
+    if (pairs.isEmpty) return;
+
+    _alignmentInFlightIds.add(ann.id);
+    try {
+      final scheduler = ref.read(translationSchedulerProvider.notifier);
+      final result = await alignChineseAnnotationToOriginal(
+        annotation: ann,
+        sentences: pairs,
+        backTranslatePhrase: (phrase, targetLang) =>
+            scheduler.translatePhraseForAlignment(
+              phrase: phrase,
+              targetLang: targetLang,
+            ),
+      );
+      if (!mounted) return;
+      if (result == null) {
+        final modelPath = ref
+            .read(translationModelManagerProvider)
+            .activeModelPath;
+        if (modelPath == null || modelPath.isEmpty) {
+          _alignmentSessionDoneIds.add(ann.id);
+        }
+        return;
+      }
+      await ref
+          .read(bookAnnotationsProvider(widget.book.id).notifier)
+          .setAlignedOriginalRange(
+            annotationId: ann.id,
+            alignedOrigStart: result.alignedOrigStart,
+            alignedOrigEnd: result.alignedOrigEnd,
+          );
+      _alignmentSessionDoneIds.add(ann.id);
+    } finally {
+      _alignmentInFlightIds.remove(ann.id);
+    }
+  }
+
+  void _schedulePhraseAlignmentForCurrentPage(
+    List<ReadingAnnotation> annotations,
+  ) {
+    if (!mounted ||
+        _displayMode != BilingualDisplayMode.bilingual ||
+        _pages.isEmpty ||
+        _currentPage < 0 ||
+        _currentPage >= _pages.length) {
+      return;
+    }
+    final curPage = _pages[_currentPage];
+    for (final ann in annotations) {
+      if (ann.chapterIndex != curPage.chapterIndex ||
+          ann.hasAlignedOrigRange ||
+          ann.target == ReadingAnnotationTarget.original ||
+          _alignmentInFlightIds.contains(ann.id) ||
+          _alignmentSessionDoneIds.contains(ann.id)) {
+        continue;
+      }
+      if (ann.endOffset <= curPage.startChar ||
+          ann.startOffset >= curPage.endChar) {
+        continue;
+      }
+      unawaited(_alignAnnotationInBackground(ann));
+    }
+  }
+
   /// 边听边看：从当前可见页首句起播/续播，若正在朗读本页则切换暂停/播放。
   Future<void> _createHighlight({
     required ReaderPage page,
@@ -671,23 +1799,38 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     required int localEnd,
     required ReadingHighlightColor color,
   }) async {
-    final safeStart = localStart.clamp(0, page.text.length);
-    final safeEnd = localEnd.clamp(0, page.text.length);
-    if (safeStart >= safeEnd) return;
-    final quote = page.text.substring(safeStart, safeEnd).trim();
-    if (quote.isEmpty) return;
+    final mapped = resolveOriginalSelectionForPage(page, localStart, localEnd);
+    if (mapped.quote.isEmpty || mapped.startOffset >= mapped.endOffset) return;
 
+    final instantAlign = _tryInstantAlignmentForSelection(
+      page: page,
+      mapped: mapped,
+    );
     setState(() => _lastHighlightColor = color);
     final created = await ref
         .read(bookAnnotationsProvider(widget.book.id).notifier)
         .add(
           chapterIndex: page.chapterIndex,
-          startOffset: page.startChar + safeStart,
-          endOffset: page.startChar + safeEnd,
-          quote: quote,
+          startOffset: mapped.startOffset,
+          endOffset: mapped.endOffset,
+          quote: mapped.quote,
           color: color,
           chapterTitle: page.chapterTitle,
+          target: page.isBilingual
+              ? (mapped.isTranslation
+                    ? ReadingAnnotationTarget.translation
+                    : ReadingAnnotationTarget.original)
+              : ReadingAnnotationTarget.original,
+          transStartInFirst: mapped.transStartInFirst,
+          transEndInLast: mapped.transEndInLast,
+          alignedOrigStart: instantAlign.start,
+          alignedOrigEnd: instantAlign.end,
         );
+    if (page.isBilingual &&
+        mapped.isTranslation &&
+        !created.hasAlignedOrigRange) {
+      unawaited(_alignAnnotationInBackground(created));
+    }
     if (!mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger?.hideCurrentSnackBar();
@@ -719,11 +1862,9 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       chapterTitle = existing.chapterTitle;
     } else {
       if (page == null || localStart == null || localEnd == null) return;
-      final s = localStart.clamp(0, page.text.length);
-      final e = localEnd.clamp(0, page.text.length);
-      if (s >= e) return;
-      quote = page.text.substring(s, e).trim();
-      if (quote.isEmpty) return;
+      final mapped = resolveOriginalSelectionForPage(page, localStart, localEnd);
+      if (mapped.quote.isEmpty || mapped.startOffset >= mapped.endOffset) return;
+      quote = mapped.quote;
       chapterTitle = page.chapterTitle;
     }
 
@@ -741,15 +1882,38 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         if (existing != null) {
           await notifier.update(existing.copyWith(color: color, note: note));
         } else if (page != null && localStart != null && localEnd != null) {
-          await notifier.add(
+          final mapped = resolveOriginalSelectionForPage(
+            page,
+            localStart,
+            localEnd,
+          );
+          final instantAlign = _tryInstantAlignmentForSelection(
+            page: page,
+            mapped: mapped,
+          );
+          final created = await notifier.add(
             chapterIndex: page.chapterIndex,
-            startOffset: page.startChar + localStart,
-            endOffset: page.startChar + localEnd,
+            startOffset: mapped.startOffset,
+            endOffset: mapped.endOffset,
             quote: quote,
             note: note,
             color: color,
             chapterTitle: chapterTitle,
+            target: page.isBilingual
+                ? (mapped.isTranslation
+                      ? ReadingAnnotationTarget.translation
+                      : ReadingAnnotationTarget.original)
+                : ReadingAnnotationTarget.original,
+            transStartInFirst: mapped.transStartInFirst,
+            transEndInLast: mapped.transEndInLast,
+            alignedOrigStart: instantAlign.start,
+            alignedOrigEnd: instantAlign.end,
           );
+          if (page.isBilingual &&
+              mapped.isTranslation &&
+              !created.hasAlignedOrigRange) {
+            unawaited(_alignAnnotationInBackground(created));
+          }
         }
       },
       onDelete: existing == null ? null : () => notifier.remove(existing.id),
@@ -829,6 +1993,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         widget.book,
         chapterIndex: arrayIdx,
         startCharOffset: overrideCharOffset,
+        speakTranslated: _displayMode != BilingualDisplayMode.original,
       );
       final err = ref.read(liveTtsPlayerProvider).error;
       if (err != null && mounted) {
@@ -867,6 +2032,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
           widget.book,
           chapterIndex: arrayIdx,
           startCharOffset: page.startChar,
+          speakTranslated: _displayMode != BilingualDisplayMode.original,
         );
       } else {
         await liveCtrl.togglePlayPause();
@@ -901,6 +2067,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
         widget.book,
         chapterIndex: arrayIdx,
         startCharOffset: startOffset,
+        speakTranslated: _displayMode != BilingualDisplayMode.original,
       );
       final err = ref.read(liveTtsPlayerProvider).error;
       if (err != null && mounted) {
@@ -1092,6 +2259,38 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       key: const Key('reader_live_control_bar'),
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (_displayMode != BilingualDisplayMode.original) ...[
+          InkWell(
+            key: const Key('reader_live_lang_toggle'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => unawaited(
+              liveCtrl.setSpeakTranslated(!liveState.speakTranslated),
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: liveState.speakTranslated
+                    ? tokens.primary.withValues(alpha: 0.16)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: liveState.speakTranslated
+                      ? tokens.primary
+                      : palette.secondary.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Text(
+                liveState.speakTranslated ? '译' : '原',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: liveState.speakTranslated ? tokens.primary : palette.fg,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
         buildCompactSpeedPill(
           key: const Key('reader_live_speed_button'),
           speed: liveState.speed,
@@ -1324,6 +2523,84 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
       }
     });
 
+    ref.listen<TranslationSchedulerState>(translationSchedulerProvider, (
+      prev,
+      next,
+    ) {
+      if (!mounted ||
+          _switchingChapter ||
+          _displayMode == BilingualDisplayMode.original ||
+          _chapters.isEmpty) {
+        return;
+      }
+      final cfg = ref.read(standaloneConfigProvider);
+      final curCh = _chapters[_currentChapterArrayIdx()].index;
+      final nextMap = next.chapterMapFor(
+        bookId: widget.book.id,
+        chapterIndex: curCh,
+        targetLangCode: cfg.translationTargetLang,
+        modelId: cfg.activeTranslationModelId,
+      );
+      final curPage = (_currentPage >= 0 && _currentPage < _pages.length)
+          ? _pages[_currentPage]
+          : null;
+      final nextPage =
+          (_currentPage + 1 >= 0 && _currentPage + 1 < _pages.length)
+              ? _pages[_currentPage + 1]
+              : null;
+
+      final translationsChanged =
+          nextMap.length != _lastObservedChapterTranslations.length ||
+          !nextMap.keys.every(
+            (k) => _lastObservedChapterTranslations[k] == nextMap[k],
+          );
+      if (translationsChanged) {
+        final addedHashes = nextMap.keys
+            .where((k) => _lastObservedChapterTranslations[k] != nextMap[k])
+            .toSet();
+        _lastObservedChapterTranslations = nextMap;
+        if (addedHashes.isNotEmpty) {
+          final hitsVisiblePage =
+              curPage?.blocks?.any(
+                (b) => addedHashes.contains(b.paragraphHash),
+              ) ??
+              false;
+          final hitsNextPage =
+              nextPage?.blocks?.any(
+                (b) => addedHashes.contains(b.paragraphHash),
+              ) ??
+              false;
+          _scheduleBilingualRepaginate(
+            immediate: hitsVisiblePage,
+            debounce: hitsNextPage
+                ? const Duration(milliseconds: 450)
+                : const Duration(milliseconds: 1400),
+            triggerEnqueue: false,
+          );
+        }
+      }
+    });
+
+    ref.listen<List<ReadingAnnotation>>(bookAnnotationsProvider(widget.book.id), (
+      prev,
+      next,
+    ) {
+      if (!mounted ||
+          _displayMode != BilingualDisplayMode.bilingual ||
+          _pages.isEmpty) {
+        return;
+      }
+      Future<void>.microtask(() {
+        if (mounted) {
+          _schedulePhraseAlignmentForCurrentPage(next);
+        }
+      });
+    });
+
+    final translationError = _displayMode != BilingualDisplayMode.original
+        ? ref.watch(translationSchedulerProvider.select((s) => s.lastError))
+        : null;
+
     final hasAudio =
         ref
             .watch(libraryControllerProvider)
@@ -1336,6 +2613,45 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     final currentArrayIdx = _currentChapterArrayIdx();
     final curChapterObj =
         _chapters.isNotEmpty ? _chapters[currentArrayIdx] : null;
+    final activeCountForCurChapter =
+        _displayMode != BilingualDisplayMode.original && curChapterObj != null
+            ? ref.watch(
+                translationSchedulerProvider.select((s) {
+                  final cfg = ref.read(standaloneConfigProvider);
+                  final prefix =
+                      '${widget.book.id}::${curChapterObj.index}::${cfg.translationTargetLang}::'
+                      '${cfg.activeTranslationModelId.isEmpty ? "default" : cfg.activeTranslationModelId}::';
+                  return s.activeParagraphKeys
+                      .where((k) => k.startsWith(prefix))
+                      .length;
+                }),
+              )
+            : 0;
+    final activeTranslatingHashForCurChapter =
+        _displayMode != BilingualDisplayMode.original && curChapterObj != null
+            ? ref.watch(
+                translationSchedulerProvider.select((s) {
+                  final key = s.currentTranslatingKey;
+                  if (key == null) return null;
+                  final cfg = ref.read(standaloneConfigProvider);
+                  final prefix =
+                      '${widget.book.id}::${curChapterObj.index}::${cfg.translationTargetLang}::'
+                      '${cfg.activeTranslationModelId.isEmpty ? "default" : cfg.activeTranslationModelId}::';
+                  return key.startsWith(prefix)
+                      ? key.substring(prefix.length)
+                      : null;
+                }),
+              )
+            : null;
+    final pageBlocks = page?.blocks ?? const <BilingualPageBlock>[];
+    final totalOnPage = pageBlocks.length;
+    final doneOnPage = pageBlocks.where((b) => b.hasTranslation).length;
+    final showProgressStrip =
+        _displayMode != BilingualDisplayMode.original &&
+        (translationError == null || translationError.isEmpty) &&
+        totalOnPage > 0 &&
+        doneOnPage < totalOnPage &&
+        activeCountForCurChapter > 0;
     final headerChapterTitle =
         page?.chapterTitle ??
         (curChapterObj == null
@@ -1404,6 +2720,20 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
             ),
           ),
           IconButton(
+            key: const Key('reader_translate_button'),
+            tooltip: '双语翻译',
+            visualDensity: VisualDensity.compact,
+            onPressed: _loading || _chapters.isEmpty
+                ? null
+                : _showTranslationSheet,
+            icon: Icon(
+              Icons.translate_rounded,
+              color: _displayMode != BilingualDisplayMode.original
+                  ? tokens.primary
+                  : palette.fg,
+            ),
+          ),
+          IconButton(
             key: const Key('reader_font_button'),
             tooltip: '排版设置',
             visualDensity: VisualDensity.compact,
@@ -1464,64 +2794,118 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                 ),
               ),
             )
-          : _ReaderBody(
-              pages: _pages,
-              pageViewEpoch: _pageViewEpoch,
-              pageController: _pageController,
-              textStyle: DefaultTextStyle.of(
-                context,
-              ).style.merge(_textStyle(tokens)),
-              highlightColor: tokens.readingHighlight,
-              activeSentence: activeSentence,
-              activeCueText: activeCueText,
-              annotations: annotations,
-              lastHighlightColor: _lastHighlightColor,
-              hasTextSelection: _hasTextSelection,
-              layoutSize: _layoutSize,
-              onNeedPagination: _paginateCurrentChapter,
-              onPageChanged: _onPageChanged,
-              onScrollNotification: _onScrollNotification,
-              onSelectionActiveChanged: (active) {
-                if (mounted && _hasTextSelection != active) {
-                  setState(() => _hasTextSelection = active);
-                }
-              },
-              onQuickHighlight: (page, localStart, localEnd, color) {
-                unawaited(
-                  _createHighlight(
-                    page: page,
-                    localStart: localStart,
-                    localEnd: localEnd,
-                    color: color,
+          : Column(
+              children: [
+                if (_showForeignBanner &&
+                    _displayMode == BilingualDisplayMode.original)
+                  _buildForeignPromptBanner(
+                    tokens: tokens,
+                    textTheme: textTheme,
+                    palette: palette,
                   ),
-                );
-              },
-              onOpenNoteEditor: (page, localStart, localEnd) {
-                unawaited(
-                  _openAnnotationEditor(
-                    page: page,
-                    localStart: localStart,
-                    localEnd: localEnd,
+                if (translationError != null && translationError.isNotEmpty)
+                  _buildTranslationErrorBanner(
+                    errorText: translationError,
+                    tokens: tokens,
+                    textTheme: textTheme,
+                    palette: palette,
                   ),
-                );
-              },
-              onTapAnnotation: (ann) {
-                unawaited(_openAnnotationEditor(existing: ann));
-              },
-              onListenFromSelection: hasAudio
-                  ? (page, localStart) {
-                      final idx = _findChapterArrayIdx(
-                        _chapters,
-                        page.chapterIndex,
-                      );
+                if (_displayMode != BilingualDisplayMode.original)
+                  SizedBox(
+                    height: 26,
+                    child: showProgressStrip && !_switchingChapter
+                        ? _buildBilingualProgressStrip(
+                            doneOnPage: doneOnPage,
+                            totalOnPage: totalOnPage,
+                            tokens: tokens,
+                            textTheme: textTheme,
+                            palette: palette,
+                          )
+                        : (_switchingChapter
+                              ? Align(
+                                  alignment: Alignment.topCenter,
+                                  child: SizedBox(
+                                    height: 2,
+                                    child: LinearProgressIndicator(
+                                      color: tokens.primary,
+                                      backgroundColor: palette.secondary
+                                          .withValues(alpha: 0.14),
+                                    ),
+                                  ),
+                                )
+                              : null),
+                  ),
+                Expanded(
+                  child: _ReaderBody(
+                    pages: _pages,
+                    pageViewEpoch: _pageViewEpoch,
+                    pageController: _pageController,
+                    textStyle: DefaultTextStyle.of(
+                      context,
+                    ).style.merge(_textStyle(tokens)),
+                    secondaryColor: palette.secondary,
+                    highlightColor: tokens.readingHighlight,
+                    activeSentence: activeSentence,
+                    activeCueText: activeCueText,
+                    speakTranslated:
+                        isLiveThisBook && liveState.speakTranslated,
+                    annotations: annotations,
+                    activeTranslatingHash: activeTranslatingHashForCurChapter,
+                    lastHighlightColor: _lastHighlightColor,
+                    hasTextSelection: _hasTextSelection,
+                    layoutSize: _layoutSize,
+                    onNeedPagination: _onLayoutSizeChanged,
+                    onPageChanged: _onPageChanged,
+                    onScrollNotification: _onScrollNotification,
+                    onSelectionActiveChanged: (active) {
+                      if (mounted && _hasTextSelection != active) {
+                        setState(() => _hasTextSelection = active);
+                      }
+                    },
+                    onQuickHighlight: (page, localStart, localEnd, color) {
                       unawaited(
-                        _listenFromHere(
-                          overrideChapterArrayIdx: idx,
-                          overrideCharOffset: page.startChar + localStart,
+                        _createHighlight(
+                          page: page,
+                          localStart: localStart,
+                          localEnd: localEnd,
+                          color: color,
                         ),
                       );
-                    }
-                  : null,
+                    },
+                    onOpenNoteEditor: (page, localStart, localEnd) {
+                      unawaited(
+                        _openAnnotationEditor(
+                          page: page,
+                          localStart: localStart,
+                          localEnd: localEnd,
+                        ),
+                      );
+                    },
+                    onTapAnnotation: (ann) {
+                      unawaited(_openAnnotationEditor(existing: ann));
+                    },
+                    onListenFromSelection: hasAudio
+                        ? (page, localStart) {
+                            final idx = _findChapterArrayIdx(
+                              _chapters,
+                              page.chapterIndex,
+                            );
+                            final mapped = resolveOriginalSelectionForPage(
+                              page,
+                              localStart,
+                              math.min(page.text.length, localStart + 1),
+                            );
+                            unawaited(
+                              _listenFromHere(
+                                overrideChapterArrayIdx: idx,
+                                overrideCharOffset: mapped.startOffset,
+                              ),
+                            );
+                          }
+                        : null,
+                  ),
+                ),
+              ],
             ),
       bottomNavigationBar: _loading || _pages.isEmpty
           ? null
@@ -1541,6 +2925,225 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
             ),
     );
   }
+
+  Widget _buildForeignPromptBanner({
+    required EchoTokens tokens,
+    required TextTheme textTheme,
+    required ({Color bg, Color fg, Color secondary}) palette,
+  }) {
+    return Container(
+      key: const Key('reader_foreign_prompt_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: tokens.primary.withValues(alpha: 0.12),
+        border: Border(
+          bottom: BorderSide(color: palette.secondary.withValues(alpha: 0.18)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.translate_rounded, size: 16, color: tokens.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '检测到外文书籍，可开启离线双语阅读',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.bodySmall?.copyWith(
+                color: palette.fg,
+                fontSize: 12.5,
+              ),
+            ),
+          ),
+          TextButton(
+            key: const Key('reader_foreign_dismiss_button'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: _dismissForeignBanner,
+            child: Text(
+              '不再提示',
+              style: TextStyle(color: palette.secondary, fontSize: 12),
+            ),
+          ),
+          const SizedBox(width: 4),
+          FilledButton(
+            key: const Key('reader_foreign_enable_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: tokens.primary,
+              foregroundColor: tokens.textOnPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () =>
+                unawaited(_switchDisplayMode(BilingualDisplayMode.bilingual)),
+            child: const Text('开启双语', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTranslationErrorBanner({
+    required String errorText,
+    required EchoTokens tokens,
+    required TextTheme textTheme,
+    required ({Color bg, Color fg, Color secondary}) palette,
+  }) {
+    return Container(
+      key: const Key('reader_translation_error_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: tokens.error.withValues(alpha: 0.12),
+        border: Border(
+          bottom: BorderSide(color: palette.secondary.withValues(alpha: 0.18)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline_rounded, size: 16, color: tokens.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              errorText,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.bodySmall?.copyWith(
+                color: palette.fg,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          TextButton(
+            key: const Key('reader_translation_retry_button'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              ref.read(translationSchedulerProvider.notifier).clearError();
+              if (_chapters.isNotEmpty &&
+                  _pages.isNotEmpty &&
+                  _currentPage >= 0 &&
+                  _currentPage < _pages.length) {
+                final ch = _chapters[_currentChapterArrayIdx()];
+                unawaited(
+                  _enqueueTranslationForPage(
+                    _currentPage,
+                    _pages,
+                    _paragraphsForChapter(ch),
+                    ch.index,
+                  ),
+                );
+              } else if (_layoutSize != null) {
+                unawaited(_paginateCurrentChapter(_layoutSize!, tokens));
+              }
+            },
+            child: Text(
+              '重试',
+              style: TextStyle(color: tokens.primary, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            key: const Key('reader_translation_error_model_button'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const TranslationModelPage(),
+                ),
+              );
+              if (!mounted) return;
+              ref.read(translationSchedulerProvider.notifier).clearError();
+              if (_layoutSize != null &&
+                  _displayMode != BilingualDisplayMode.original) {
+                unawaited(_paginateCurrentChapter(_layoutSize!, tokens));
+              }
+            },
+            child: Text(
+              '模型管理',
+              style: TextStyle(color: palette.secondary, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBilingualProgressStrip({
+    required int doneOnPage,
+    required int totalOnPage,
+    required EchoTokens tokens,
+    required TextTheme textTheme,
+    required ({Color bg, Color fg, Color secondary}) palette,
+  }) {
+    final progress = totalOnPage > 0 ? doneOnPage / totalOnPage : null;
+    return Container(
+      key: const Key('reader_bilingual_progress_strip'),
+      width: double.infinity,
+      height: 26,
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          tokens.primary.withValues(alpha: 0.06),
+          palette.bg,
+        ),
+        border: Border(
+          bottom: BorderSide(color: palette.secondary.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.translate_rounded,
+                    size: 13,
+                    color: tokens.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '逐句翻译中 · $doneOnPage/$totalOnPage 句',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textScaler: TextScaler.noScaling,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: palette.secondary,
+                        fontSize: 11.5,
+                        height: 1.15,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 2,
+            child: LinearProgressIndicator(
+              value: progress,
+              color: tokens.primary,
+              backgroundColor: palette.secondary.withValues(alpha: 0.14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// 版心：用 LayoutBuilder 拿到可用宽高，宽屏约束最大宽度 680dp（45–75ch），按章精确分页。
@@ -1550,10 +3153,13 @@ class _ReaderBody extends StatelessWidget {
     required this.pageViewEpoch,
     required this.pageController,
     required this.textStyle,
+    required this.secondaryColor,
     required this.highlightColor,
     required this.activeSentence,
     required this.activeCueText,
+    required this.speakTranslated,
     required this.annotations,
+    this.activeTranslatingHash,
     required this.lastHighlightColor,
     required this.hasTextSelection,
     required this.layoutSize,
@@ -1571,10 +3177,13 @@ class _ReaderBody extends StatelessWidget {
   final int pageViewEpoch;
   final PageController pageController;
   final TextStyle textStyle;
+  final Color secondaryColor;
   final Color highlightColor;
   final TextSentence? activeSentence;
   final String? activeCueText;
+  final bool speakTranslated;
   final List<ReadingAnnotation> annotations;
+  final String? activeTranslatingHash;
   final ReadingHighlightColor lastHighlightColor;
   final bool hasTextSelection;
   final Size? layoutSize;
@@ -1603,26 +3212,224 @@ class _ReaderBody extends StatelessWidget {
     EchoMetrics.space2,
   );
 
-  ({int start, int end})? _resolveHighlightSpan(ReaderPage page) {
-    final sentence = activeSentence;
-    if (sentence != null) {
-      final overlapStart = math.max(sentence.startOffset, page.startChar);
-      final overlapEnd = math.min(sentence.endOffset, page.endChar);
-      if (overlapStart < overlapEnd) {
-        final localStart =
-            (overlapStart - page.startChar).clamp(0, page.text.length);
-        final localEnd =
-            (overlapEnd - page.startChar).clamp(0, page.text.length);
-        if (localStart < localEnd) {
-          return (start: localStart, end: localEnd);
+  List<({int start, int end})> _findCueInConcatRuns(
+    String pageText,
+    List<BilingualDisplayRun> targetRuns,
+    String cue,
+  ) {
+    if (targetRuns.isEmpty || cue.isEmpty) {
+      return const <({int start, int end})>[];
+    }
+    final concatBuf = StringBuffer();
+    final segs = <({BilingualDisplayRun run, int concatStart, int concatEnd})>[];
+    for (final r in targetRuns) {
+      final cs = concatBuf.length;
+      concatBuf.write(pageText.substring(r.displayStart, r.displayEnd));
+      segs.add((run: r, concatStart: cs, concatEnd: concatBuf.length));
+    }
+    final hit = findCueSpanInPage(concatBuf.toString(), cue);
+    if (hit == null) return const <({int start, int end})>[];
+
+    final spans = <({int start, int end})>[];
+    for (final seg in segs) {
+      final ovS = math.max(hit.start, seg.concatStart);
+      final ovE = math.min(hit.end, seg.concatEnd);
+      if (ovS < ovE) {
+        final ds = seg.run.displayStart + (ovS - seg.concatStart);
+        final de = seg.run.displayStart + (ovE - seg.concatStart);
+        if (ds < de) {
+          spans.add((start: ds, end: de));
         }
       }
     }
-    final cue = activeCueText;
-    if (cue != null && cue.isNotEmpty) {
-      return findCueSpanInPage(page.text, cue);
+    return spans;
+  }
+
+  List<({int start, int end})> _resolveHighlightSpans(ReaderPage page) {
+    final blocks = page.blocks;
+    if (blocks == null) {
+      final sentence = activeSentence;
+      if (sentence != null) {
+        final overlapStart = math.max(sentence.startOffset, page.startChar);
+        final overlapEnd = math.min(sentence.endOffset, page.endChar);
+        if (overlapStart < overlapEnd) {
+          final localStart = (overlapStart - page.startChar).clamp(
+            0,
+            page.text.length,
+          );
+          final localEnd = (overlapEnd - page.startChar).clamp(
+            0,
+            page.text.length,
+          );
+          if (localStart < localEnd) {
+            return <({int start, int end})>[(start: localStart, end: localEnd)];
+          }
+        }
+      }
+      final cue = activeCueText;
+      if (cue != null && cue.isNotEmpty) {
+        final hit = findCueSpanInPage(page.text, cue);
+        if (hit != null) return <({int start, int end})>[hit];
+      }
+      return const <({int start, int end})>[];
     }
-    return null;
+
+    // 双语 / 仅译文行间模式下按当前朗读语种联动投影高亮至对应视觉片段
+    final sentence = activeSentence;
+    final cue = activeCueText?.trim() ?? '';
+    final runs = page.displayRuns;
+    if (runs != null && runs.isNotEmpty) {
+      if (speakTranslated) {
+        final matchingTrans = <BilingualDisplayRun>[
+          for (final r in runs)
+            if (r.kind == BilingualRunKind.transPrimary &&
+                r.origStartChar >= 0 &&
+                (sentence == null ||
+                    (r.origStartChar < sentence.endOffset &&
+                        r.origEndChar > sentence.startOffset)))
+              r,
+        ];
+        if (matchingTrans.isNotEmpty) {
+          if (cue.isNotEmpty) {
+            final subSpans = _findCueInConcatRuns(
+              page.text,
+              matchingTrans,
+              cue,
+            );
+            if (subSpans.isNotEmpty) return subSpans;
+          }
+          if (sentence != null) {
+            return <({int start, int end})>[
+              for (final r in matchingTrans)
+                (start: r.displayStart, end: r.displayEnd),
+            ];
+          }
+        }
+      } else {
+        if (sentence != null) {
+          final origSpans = <({int start, int end})>[];
+          for (final r in runs) {
+            if ((r.kind != BilingualRunKind.origSubtitle &&
+                    r.kind != BilingualRunKind.untranslatedOrig) ||
+                r.origStartChar < 0 ||
+                r.origEndChar <= sentence.startOffset ||
+                r.origStartChar >= sentence.endOffset) {
+              continue;
+            }
+            if (r.exactOrigMapping) {
+              final ovS = math.max(sentence.startOffset, r.origStartChar);
+              final ovE = math.min(sentence.endOffset, r.origEndChar);
+              if (ovS < ovE) {
+                final ds = (r.displayStart + (ovS - r.origStartChar)).clamp(
+                  r.displayStart,
+                  r.displayEnd,
+                );
+                final de = (r.displayStart + (ovE - r.origStartChar)).clamp(
+                  ds,
+                  r.displayEnd,
+                );
+                if (ds < de) {
+                  origSpans.add((start: ds, end: de));
+                }
+              }
+            } else {
+              origSpans.add((start: r.displayStart, end: r.displayEnd));
+            }
+          }
+          if (origSpans.isNotEmpty) return origSpans;
+        }
+      }
+
+      // 回退 1：未译句在译文朗读模式下降级读原文时高亮对应待译原文片段
+      if (sentence != null) {
+        final fallbackSpans = <({int start, int end})>[];
+        for (final r in runs) {
+          if (r.kind != BilingualRunKind.untranslatedOrig ||
+              r.origStartChar < 0 ||
+              r.origEndChar <= sentence.startOffset ||
+              r.origStartChar >= sentence.endOffset) {
+            continue;
+          }
+          final ovS = math.max(sentence.startOffset, r.origStartChar);
+          final ovE = math.min(sentence.endOffset, r.origEndChar);
+          if (ovS < ovE) {
+            final ds = (r.displayStart + (ovS - r.origStartChar)).clamp(
+              r.displayStart,
+              r.displayEnd,
+            );
+            final de = (r.displayStart + (ovE - r.origStartChar)).clamp(
+              ds,
+              r.displayEnd,
+            );
+            if (ds < de) {
+              fallbackSpans.add((start: ds, end: de));
+            }
+          }
+        }
+        if (fallbackSpans.isNotEmpty) return fallbackSpans;
+      }
+
+      // 回退 2：离线音频字幕仅提供 cue 文本时匹配原文片段
+      if (cue.isNotEmpty) {
+        final origRuns = <BilingualDisplayRun>[
+          for (final r in runs)
+            if (r.kind == BilingualRunKind.origSubtitle ||
+                r.kind == BilingualRunKind.untranslatedOrig)
+              r,
+        ];
+        final hitSpans = _findCueInConcatRuns(page.text, origRuns, cue);
+        if (hitSpans.isNotEmpty) return hitSpans;
+      }
+    }
+
+    if (speakTranslated && cue.isNotEmpty) {
+      for (final b in blocks) {
+        if (b.transDisplayEnd <= b.transDisplayStart) continue;
+        if (sentence != null &&
+            (sentence.endOffset <= b.origStartChar ||
+                sentence.startOffset >= b.origEndChar)) {
+          continue;
+        }
+        final transSlice = page.text.substring(
+          b.transDisplayStart,
+          b.transDisplayEnd,
+        );
+        final hit = findCueSpanInPage(transSlice, cue);
+        if (hit != null) {
+          return <({int start, int end})>[
+            (
+              start: b.transDisplayStart + hit.start,
+              end: b.transDisplayStart + hit.end,
+            ),
+          ];
+        }
+      }
+    }
+
+    if (sentence != null) {
+      for (final b in blocks) {
+        if (b.origDisplayEnd <= b.origDisplayStart) continue;
+        final ovS = math.max(sentence.startOffset, b.origStartChar);
+        final ovE = math.min(sentence.endOffset, b.origEndChar);
+        if (ovS < ovE) {
+          final s = b.origDisplayStart + (ovS - b.origStartChar);
+          final e = b.origDisplayStart + (ovE - b.origStartChar);
+          if (s < e) {
+            return <({int start, int end})>[
+              (
+                start: s.clamp(0, page.text.length),
+                end: e.clamp(0, page.text.length),
+              ),
+            ];
+          }
+        }
+      }
+    }
+    if (cue.isNotEmpty) {
+      final hit = findCueSpanInPage(page.text, cue);
+      if (hit != null) return <({int start, int end})>[hit];
+    }
+    return const <({int start, int end})>[];
   }
 
   @override
@@ -1658,7 +3465,9 @@ class _ReaderBody extends StatelessWidget {
               key: const Key('reader_pageview'),
               physics: hasTextSelection
                   ? const NeverScrollableScrollPhysics()
-                  : const ClampingScrollPhysics(),
+                  : const AlwaysScrollableScrollPhysics(
+                      parent: ClampingScrollPhysics(),
+                    ),
               controller: pageController,
               onPageChanged: onPageChanged,
               itemCount: pages.length,
@@ -1679,9 +3488,11 @@ class _ReaderBody extends StatelessWidget {
                           index: index,
                           page: page,
                           textStyle: textStyle,
+                          secondaryColor: secondaryColor,
                           highlightColor: highlightColor,
-                          activeCueSpan: _resolveHighlightSpan(page),
+                          activeCueSpans: _resolveHighlightSpans(page),
                           annotations: annotations,
+                          activeTranslatingHash: activeTranslatingHash,
                           lastHighlightColor: lastHighlightColor,
                           onSelectionActiveChanged: onSelectionActiveChanged,
                           onQuickHighlight: onQuickHighlight,
@@ -1707,9 +3518,11 @@ class _SelectableReaderPage extends StatefulWidget {
     required this.index,
     required this.page,
     required this.textStyle,
+    required this.secondaryColor,
     required this.highlightColor,
-    required this.activeCueSpan,
+    required this.activeCueSpans,
     required this.annotations,
+    this.activeTranslatingHash,
     required this.lastHighlightColor,
     required this.onSelectionActiveChanged,
     required this.onQuickHighlight,
@@ -1721,9 +3534,11 @@ class _SelectableReaderPage extends StatefulWidget {
   final int index;
   final ReaderPage page;
   final TextStyle textStyle;
+  final Color secondaryColor;
   final Color highlightColor;
-  final ({int start, int end})? activeCueSpan;
+  final List<({int start, int end})> activeCueSpans;
   final List<ReadingAnnotation> annotations;
+  final String? activeTranslatingHash;
   final ReadingHighlightColor lastHighlightColor;
   final ValueChanged<bool> onSelectionActiveChanged;
   final void Function(
@@ -1834,6 +3649,25 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
         !paragraph.attached ||
         !paragraph.hasSize) {
       return const <TextBox>[];
+    }
+    if (widget.page.isBilingual &&
+        (widget.page.displayRuns?.isNotEmpty ?? false)) {
+      final resolved = resolveBilingualSelectionHits(
+        widget.page,
+        _selStart!,
+        _selEnd!,
+      );
+      if (resolved.hits.isNotEmpty) {
+        final boxes = <TextBox>[];
+        for (final hit in resolved.hits) {
+          boxes.addAll(
+            paragraph.getBoxesForSelection(
+              TextSelection(baseOffset: hit.start, extentOffset: hit.end),
+            ),
+          );
+        }
+        if (boxes.isNotEmpty) return boxes;
+      }
     }
     return paragraph.getBoxesForSelection(
       TextSelection(baseOffset: _selStart!, extentOffset: _selEnd!),
@@ -1998,7 +3832,17 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
         widget.onOpenNoteEditor(widget.page, s, e);
       },
       onCopy: () {
-        final text = widget.page.text.substring(s, e);
+        final rawText = widget.page.text.substring(s, e);
+        final text = widget.page.isBilingual
+            ? () {
+                final mapped = resolveOriginalSelectionForPage(
+                  widget.page,
+                  s,
+                  e,
+                );
+                return mapped.quote.isNotEmpty ? mapped.quote : rawText;
+              }()
+            : rawText;
         _clearSelection();
         unawaited(Clipboard.setData(ClipboardData(text: text)));
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -2027,10 +3871,16 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
   }
 
   Widget _buildPageText(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (widget.page.isBilingual) {
+      return _buildBilingualPageText(context, isDark);
+    }
+
     final segments = buildStyledPageSegments(
       page: widget.page,
       annotations: widget.annotations,
-      activeCueSpan: widget.activeCueSpan,
+      activeCueSpan:
+          widget.activeCueSpans.isNotEmpty ? widget.activeCueSpans.first : null,
     );
 
     final activeIds = <String>{
@@ -2054,7 +3904,6 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
       );
     }
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Text.rich(
       key: Key('reader_page_text_${widget.index}'),
       style: widget.textStyle,
@@ -2069,19 +3918,7 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
               TapGestureRecognizer? recognizer;
               if (ann != null) {
                 recognizer = _recognizerFor(ann);
-                spanStyle = spanStyle.copyWith(
-                  decoration: TextDecoration.underline,
-                  decorationColor: ann.color.color,
-                  decorationThickness: ann.hasNote ? 2.2 : 1.8,
-                  decorationStyle: ann.hasNote
-                      ? TextDecorationStyle.double
-                      : TextDecorationStyle.solid,
-                  backgroundColor: ann.color.color.withValues(
-                    alpha: ann.hasNote
-                        ? (isDark ? 0.22 : 0.24)
-                        : (isDark ? 0.12 : 0.14),
-                  ),
-                );
+                spanStyle = _applyAnnotationStyle(spanStyle, ann, isDark);
               }
               if (seg.isActiveCue) {
                 spanStyle = spanStyle.copyWith(
@@ -2099,6 +3936,295 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
     );
   }
 
+  TextStyle _applyAnnotationStyle(
+    TextStyle base,
+    ReadingAnnotation ann,
+    bool isDark,
+  ) {
+    return base.copyWith(
+      decoration: TextDecoration.underline,
+      decorationColor: ann.color.color,
+      decorationThickness: ann.hasNote ? 2.2 : 1.8,
+      decorationStyle:
+          ann.hasNote ? TextDecorationStyle.double : TextDecorationStyle.solid,
+      backgroundColor: ann.color.color.withValues(
+        alpha: ann.hasNote ? (isDark ? 0.22 : 0.24) : (isDark ? 0.12 : 0.14),
+      ),
+    );
+  }
+
+  /// 双语伴随高亮：中文已划线对应的英文副标采用同色系淡底色与提亮字色（不加下划线，保持主次层次）。
+  TextStyle _applyCompanionHighlightStyle(
+    TextStyle base,
+    ReadingAnnotation ann,
+    bool isDark,
+  ) {
+    final accent = ann.color.color;
+    final primaryInk =
+        widget.textStyle.color ?? (isDark ? Colors.white : Colors.black);
+    final liftedColor = Color.lerp(primaryInk, accent, isDark ? 0.45 : 0.28)!;
+    return base.copyWith(
+      color: liftedColor,
+      backgroundColor: accent.withValues(
+        alpha: ann.hasNote ? (isDark ? 0.22 : 0.26) : (isDark ? 0.18 : 0.22),
+      ),
+    );
+  }
+
+  Widget _buildBilingualPageText(BuildContext context, bool isDark) {
+    final blocks = widget.page.blocks ?? const <BilingualPageBlock>[];
+    final runs = widget.page.displayRuns;
+    final pageText = widget.page.text;
+    final styles = bilingualTypographyStyles(
+      origStyle: widget.textStyle,
+      secondaryColor: widget.secondaryColor,
+    );
+    final tokens = Theme.of(context).extension<EchoTokens>();
+    final activeTintColor = (tokens?.primary ?? widget.secondaryColor)
+        .withValues(alpha: isDark ? 0.14 : 0.11);
+    final activeTranslatingParagraphIndices = <int>{
+      if (widget.activeTranslatingHash != null)
+        for (final b in blocks)
+          if (!b.hasTranslation &&
+              b.paragraphHash == widget.activeTranslatingHash)
+            b.paragraphIndex,
+    };
+
+    // 投影批注到展示坐标：严格按划线语种与句内精确偏移回显，并附带对应英文伴随高亮
+    final projectedAnns = projectBilingualAnnotationsForPage(
+      page: widget.page,
+      annotations: widget.annotations,
+    );
+    final activeIds = <String>{
+      for (final p in projectedAnns) p.annotation.id,
+    };
+
+    _annotationRecognizers.removeWhere((id, recognizer) {
+      if (activeIds.contains(id)) return false;
+      recognizer.dispose();
+      return true;
+    });
+
+    final cueSpans = widget.activeCueSpans;
+    final children = <InlineSpan>[];
+
+    void emitRange(int start, int end, TextStyle baseStyle) {
+      if (start >= end || end > pageText.length) return;
+      final points = <int>{start, end};
+      for (final p in projectedAnns) {
+        final s = p.start.clamp(start, end);
+        final e = p.end.clamp(start, end);
+        if (s < e) {
+          points.add(s);
+          points.add(e);
+        }
+      }
+      for (final cue in cueSpans) {
+        final cs = cue.start.clamp(start, end);
+        final ce = cue.end.clamp(start, end);
+        if (cs < ce) {
+          points.add(cs);
+          points.add(ce);
+        }
+      }
+      final sorted = points.toList()..sort();
+      ReadingAnnotation pickHigherAnnotation(
+        ReadingAnnotation? current,
+        ReadingAnnotation candidate,
+      ) {
+        if (current == null) return candidate;
+        final curRank = current.hasNote ? 1 : 0;
+        final nextRank = candidate.hasNote ? 1 : 0;
+        if (nextRank > curRank ||
+            (nextRank == curRank &&
+                candidate.updatedAt.isAfter(current.updatedAt))) {
+          return candidate;
+        }
+        return current;
+      }
+
+      for (var i = 0; i + 1 < sorted.length; i++) {
+        final s = sorted[i];
+        final e = sorted[i + 1];
+        if (s >= e) continue;
+        ReadingAnnotation? bestPrimaryAnn;
+        ReadingAnnotation? bestCompanionAnn;
+        for (final p in projectedAnns) {
+          if (p.start <= s && p.end >= e) {
+            if (!p.isCompanion) {
+              bestPrimaryAnn = pickHigherAnnotation(
+                bestPrimaryAnn,
+                p.annotation,
+              );
+            } else {
+              bestCompanionAnn = pickHigherAnnotation(
+                bestCompanionAnn,
+                p.annotation,
+              );
+            }
+          }
+        }
+        final isCue = cueSpans.any((c) => c.start <= s && c.end >= e);
+        var spanStyle = baseStyle;
+        TapGestureRecognizer? recognizer;
+        if (bestPrimaryAnn != null) {
+          recognizer = _recognizerFor(bestPrimaryAnn);
+          spanStyle = _applyAnnotationStyle(spanStyle, bestPrimaryAnn, isDark);
+        } else if (bestCompanionAnn != null) {
+          recognizer = _recognizerFor(bestCompanionAnn);
+          spanStyle = _applyCompanionHighlightStyle(
+            spanStyle,
+            bestCompanionAnn,
+            isDark,
+          );
+        }
+        if (isCue) {
+          spanStyle = spanStyle.copyWith(backgroundColor: widget.highlightColor);
+        }
+        children.add(
+          TextSpan(
+            text: pageText.substring(s, e),
+            style: spanStyle,
+            recognizer: recognizer,
+          ),
+        );
+      }
+    }
+
+    if (runs != null && runs.isNotEmpty) {
+      for (final r in runs) {
+        final ds = r.displayStart.clamp(0, pageText.length);
+        final de = r.displayEnd.clamp(ds, pageText.length);
+        if (ds >= de) continue;
+        switch (r.kind) {
+          case BilingualRunKind.innerBreak:
+            children.add(
+              TextSpan(
+                text: pageText.substring(ds, de),
+                style: styles.innerBreakStyle,
+              ),
+            );
+          case BilingualRunKind.pairGapBreak:
+            children.add(
+              TextSpan(
+                text: pageText.substring(ds, de),
+                style: styles.pairGapBreakStyle,
+              ),
+            );
+          case BilingualRunKind.sentenceBreak:
+            children.add(
+              TextSpan(
+                text: pageText.substring(ds, de),
+                style: styles.sentenceBreakStyle,
+              ),
+            );
+          case BilingualRunKind.paragraphBreak:
+            children.add(
+              TextSpan(
+                text: pageText.substring(ds, de),
+                style: styles.paragraphBreakStyle,
+              ),
+            );
+          case BilingualRunKind.transPrimary:
+            emitRange(ds, de, styles.transPrimaryStyle);
+          case BilingualRunKind.origSubtitle:
+            emitRange(ds, de, styles.origSubtitleStyle);
+          case BilingualRunKind.untranslatedOrig:
+            final isActiveTranslating = r.isTranslating ||
+                activeTranslatingParagraphIndices.contains(r.paragraphIndex);
+            final untransStyle = isActiveTranslating
+                ? styles.untranslatedOrigStyle.copyWith(
+                    color: widget.textStyle.color,
+                    backgroundColor: activeTintColor,
+                  )
+                : styles.untranslatedOrigStyle;
+            emitRange(ds, de, untransStyle);
+        }
+      }
+    } else {
+      var cursor = 0;
+      for (var i = 0; i < blocks.length; i++) {
+        final b = blocks[i];
+        if (i > 0) {
+          final gapEnd = math.min(pageText.length, cursor + 2);
+          if (cursor < gapEnd) {
+            children.add(
+              TextSpan(
+                text: pageText.substring(cursor, gapEnd),
+                style: blocks[i - 1].isParagraphEnd
+                    ? styles.paragraphBreakStyle
+                    : styles.sentenceBreakStyle,
+              ),
+            );
+            cursor = gapEnd;
+          }
+        }
+        final isBlockActive = b.isTranslating ||
+            (!b.hasTranslation &&
+                widget.activeTranslatingHash != null &&
+                b.paragraphHash == widget.activeTranslatingHash);
+        if (b.mode == BilingualDisplayMode.translatedOnly) {
+          if (b.hasTranslation) {
+            emitRange(
+              b.transDisplayStart,
+              b.transDisplayEnd,
+              styles.transPrimaryStyle,
+            );
+            cursor = b.transDisplayEnd;
+          } else {
+            final untransStyle = isBlockActive
+                ? styles.untranslatedOrigStyle.copyWith(
+                    color: widget.textStyle.color,
+                    backgroundColor: activeTintColor,
+                  )
+                : styles.untranslatedOrigStyle;
+            emitRange(b.origDisplayStart, b.origDisplayEnd, untransStyle);
+            cursor = b.origDisplayEnd;
+          }
+        } else {
+          if (b.hasTranslation) {
+            emitRange(
+              b.transDisplayStart,
+              b.transDisplayEnd,
+              styles.transPrimaryStyle,
+            );
+            final innerEnd = b.origDisplayStart;
+            if (b.transDisplayEnd < innerEnd) {
+              children.add(
+                TextSpan(
+                  text: pageText.substring(b.transDisplayEnd, innerEnd),
+                  style: styles.innerBreakStyle,
+                ),
+              );
+            }
+            emitRange(
+              b.origDisplayStart,
+              b.origDisplayEnd,
+              styles.origSubtitleStyle,
+            );
+            cursor = b.origDisplayEnd;
+          } else {
+            final untransStyle = isBlockActive
+                ? styles.untranslatedOrigStyle.copyWith(
+                    color: widget.textStyle.color,
+                    backgroundColor: activeTintColor,
+                  )
+                : styles.untranslatedOrigStyle;
+            emitRange(b.origDisplayStart, b.origDisplayEnd, untransStyle);
+            cursor = b.origDisplayEnd;
+          }
+        }
+      }
+    }
+
+    return Text.rich(
+      key: Key('reader_page_text_${widget.index}'),
+      style: widget.textStyle,
+      textHeightBehavior: _kReaderTextHeightBehavior,
+      TextSpan(style: widget.textStyle, children: children),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
@@ -2106,6 +4232,56 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
     final boxes = _computeSelectionBoxes(_findRenderParagraph());
     final firstBox = boxes.isNotEmpty ? boxes.first : null;
     final lastBox = boxes.isNotEmpty ? boxes.last : null;
+
+    final pageContent = Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: [
+        if (boxes.isNotEmpty)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _SelectionHighlightPainter(
+                  boxes: boxes,
+                  color: tokens.primary.withValues(
+                    alpha: isDark ? 0.28 : 0.24,
+                  ),
+                  edgeColor: tokens.primary,
+                ),
+              ),
+            ),
+          ),
+        KeyedSubtree(key: _textKey, child: _buildPageText(context)),
+        if (firstBox != null)
+          Positioned(
+            left: firstBox.left - 18,
+            top: firstBox.bottom - 4,
+            child: _SelectionHandle(
+              handleKey: const Key('reader_selection_handle_start'),
+              color: tokens.primary,
+              isStart: true,
+              onDragUpdate: (d) => _updateHandle(
+                isStart: true,
+                globalPosition: d.globalPosition,
+              ),
+            ),
+          ),
+        if (lastBox != null)
+          Positioned(
+            left: lastBox.right - 18,
+            top: lastBox.bottom - 4,
+            child: _SelectionHandle(
+              handleKey: const Key('reader_selection_handle_end'),
+              color: tokens.primary,
+              isStart: false,
+              onDragUpdate: (d) => _updateHandle(
+                isStart: false,
+                globalPosition: d.globalPosition,
+              ),
+            ),
+          ),
+      ],
+    );
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -2115,55 +4291,14 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
       onLongPressEnd: (_) {
         if (_hasSelection) _showOrUpdateToolbar();
       },
-      child: Stack(
-        fit: StackFit.passthrough,
-        clipBehavior: Clip.none,
-        children: [
-          if (boxes.isNotEmpty)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _SelectionHighlightPainter(
-                    boxes: boxes,
-                    color: tokens.primary.withValues(
-                      alpha: isDark ? 0.28 : 0.24,
-                    ),
-                    edgeColor: tokens.primary,
-                  ),
-                ),
-              ),
-            ),
-          KeyedSubtree(key: _textKey, child: _buildPageText(context)),
-          if (firstBox != null)
-            Positioned(
-              left: firstBox.left - 18,
-              top: firstBox.bottom - 4,
-              child: _SelectionHandle(
-                handleKey: const Key('reader_selection_handle_start'),
-                color: tokens.primary,
-                isStart: true,
-                onDragUpdate: (d) => _updateHandle(
-                  isStart: true,
-                  globalPosition: d.globalPosition,
-                ),
-              ),
-            ),
-          if (lastBox != null)
-            Positioned(
-              left: lastBox.right - 18,
-              top: lastBox.bottom - 4,
-              child: _SelectionHandle(
-                handleKey: const Key('reader_selection_handle_end'),
-                color: tokens.primary,
-                isStart: false,
-                onDragUpdate: (d) => _updateHandle(
-                  isStart: false,
-                  globalPosition: d.globalPosition,
-                ),
-              ),
-            ),
-        ],
-      ),
+      child: widget.page.isBilingual
+          ? SingleChildScrollView(
+              physics: _hasSelection
+                  ? const NeverScrollableScrollPhysics()
+                  : const ClampingScrollPhysics(),
+              child: pageContent,
+            )
+          : pageContent,
     );
   }
 }

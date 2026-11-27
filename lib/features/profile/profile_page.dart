@@ -8,6 +8,8 @@ import '../../core/offline/offline_store.dart';
 import '../../core/settings/standalone_config_store.dart';
 import '../../core/settings/theme_mode_controller.dart';
 import '../../core/stats/stats_store.dart';
+import '../../core/translation/translation_model_manager.dart';
+import '../../core/translation/translation_models.dart';
 import '../../core/tts/tts_model_catalog.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_ambient.dart';
@@ -18,6 +20,7 @@ import '../discover/discover_controller.dart';
 import '../providers/provider_account_page.dart';
 import '../settings/discover_settings_page.dart';
 import '../settings/ebook_api_settings_page.dart';
+import '../settings/translation_model_page.dart';
 import '../settings/update_settings_page.dart';
 import '../tts/tts_model_manager_page.dart';
 import 'offline_manager_page.dart';
@@ -138,6 +141,41 @@ class ProfilePage extends ConsumerWidget {
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => const TtsModelManagerPage(),
+                    ),
+                  ),
+                );
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final cfg = ref.watch(standaloneConfigProvider);
+                final mtState = ref.watch(translationModelManagerProvider);
+                final activeEntry = mtState.activeEntry;
+                final targetLang = TranslationTargetLanguage.fromCode(
+                  cfg.translationTargetLang,
+                );
+                final subtitle = activeEntry != null && activeEntry.isInstalled
+                    ? '当前：${activeEntry.spec.name} · 目标${targetLang.label}'
+                    : '下载 HY-MT1.5 1.25-bit 模型开启离线双语';
+                return ListTile(
+                  key: const Key('profile_translation_models'),
+                  leading: Icon(
+                    Icons.translate_rounded,
+                    size: 20,
+                    color: tokens.textPrimary,
+                  ),
+                  title: const Text('离线翻译模型（HY-MT1.5）'),
+                  subtitle: Text(
+                    subtitle,
+                    style: textTheme.bodySmall?.copyWith(fontSize: 12.5),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    color: tokens.textDisabled,
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const TranslationModelPage(),
                     ),
                   ),
                 );

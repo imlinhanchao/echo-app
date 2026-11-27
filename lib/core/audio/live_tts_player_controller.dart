@@ -11,6 +11,8 @@ import '../books/local_library_store.dart';
 import '../reader/reading_store.dart';
 import '../settings/standalone_config_store.dart';
 import '../stats/stats_store.dart';
+import '../translation/language_detector.dart';
+import '../translation/translation_scheduler.dart';
 import '../tts/sentence_splitter.dart';
 import '../tts/sherpa_tts_engine.dart';
 import '../tts/tts_model_manager.dart';
@@ -32,6 +34,7 @@ class LiveTtsState {
     this.speakerId = 0,
     this.modelId = '',
     this.modelVariantTag = '',
+    this.speakTranslated = false,
     this.error,
   });
 
@@ -46,6 +49,7 @@ class LiveTtsState {
   final int speakerId;
   final String modelId;
   final String modelVariantTag;
+  final bool speakTranslated;
   final String? error;
 
   bool get hasBook => book != null;
@@ -82,6 +86,7 @@ class LiveTtsState {
     int? speakerId,
     String? modelId,
     String? modelVariantTag,
+    bool? speakTranslated,
     String? error,
     bool clearError = false,
   }) {
@@ -97,6 +102,7 @@ class LiveTtsState {
       speakerId: speakerId ?? this.speakerId,
       modelId: modelId ?? this.modelId,
       modelVariantTag: modelVariantTag ?? this.modelVariantTag,
+      speakTranslated: speakTranslated ?? this.speakTranslated,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -118,6 +124,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     required StandaloneConfig Function() readConfig,
     ReadingStore? readingStore,
     Future<void> Function(double speed)? onSpeedChanged,
+    Future<Map<String, String>> Function(int bookId, int chapterIndex)?
+    loadChapterTranslations,
     Directory? cacheDirOverride,
     int maxCacheBytes = 100 * 1024 * 1024,
     SentenceSplitter? splitter,
@@ -128,6 +136,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
        _readConfig = readConfig,
        _readingStore = readingStore,
        _onSpeedChanged = onSpeedChanged,
+       _loadChapterTranslations = loadChapterTranslations,
        _cacheDirOverride = cacheDirOverride,
        _maxCacheBytes = maxCacheBytes,
        _splitter = splitter ?? const SentenceSplitter(),
@@ -171,6 +180,8 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
   final StandaloneConfig Function() _readConfig;
   final ReadingStore? _readingStore;
   final Future<void> Function(double speed)? _onSpeedChanged;
+  final Future<Map<String, String>> Function(int bookId, int chapterIndex)?
+  _loadChapterTranslations;
   final Directory? _cacheDirOverride;
   final int _maxCacheBytes;
   final SentenceSplitter _splitter;
@@ -233,11 +244,74 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     return total;
   }
 
-  /// 开始实时朗读指定书籍的指定章节（可按字符偏移精确定位到对应句子）。
+  /// 按译文缓存逐段拆句，未命中译文的段落回退朗读原文，并统一锚定原文偏移区间。
+  List<TextSentence> _buildTranslatedSentences(
+    String chapterText,
+    Map<String, String> translations,
+  ) {
+    final segments = splitChapterSentences(chapterText);
+    if (segments.isEmpty) return _splitter.split(chapterText);
+    final result = <TextSentence>[];
+    var seq = 0;
+    for (final seg in segments) {
+      final trans = translations[seg.hash]?.trim();
+      if (trans != null && trans.isNotEmpty) {
+        final subSentences = _splitter.split(trans);
+        if (subSentences.isEmpty) {
+          result.add(
+            TextSentence(
+              index: seq++,
+              text: trans,
+              startOffset: seg.startChar,
+              endOffset: seg.endChar,
+            ),
+          );
+        } else {
+          for (final sub in subSentences) {
+            result.add(
+              TextSentence(
+                index: seq++,
+                text: sub.text,
+                startOffset: seg.startChar,
+                endOffset: seg.endChar,
+              ),
+            );
+          }
+        }
+      } else {
+        final origSub = _splitter.split(seg.text);
+        if (origSub.isEmpty) {
+          result.add(
+            TextSentence(
+              index: seq++,
+              text: seg.text,
+              startOffset: seg.startChar,
+              endOffset: seg.endChar,
+            ),
+          );
+        } else {
+          for (final sub in origSub) {
+            result.add(
+              TextSentence(
+                index: seq++,
+                text: sub.text,
+                startOffset: seg.startChar + sub.startOffset,
+                endOffset: seg.startChar + sub.endOffset,
+              ),
+            );
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  /// 开始实时朗读指定书籍的指定章节（可按字符偏移精确定位到对应句子，并可选朗读译文）。
   Future<void> playBookChapter(
     LibraryBook book, {
     int chapterIndex = 0,
     int startCharOffset = 0,
+    bool? speakTranslated,
   }) async {
     final resolvedModel = _resolveActiveModel();
     if (resolvedModel == null) {
@@ -257,7 +331,20 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
 
     final safeChapterIdx = chapterIndex.clamp(0, chapters.length - 1);
     final chapter = chapters[safeChapterIdx];
-    final sentences = _splitter.split(chapter.text);
+    final effectiveSpeakTranslated =
+        speakTranslated ??
+        (state.hasBook && state.book?.id == book.id && state.speakTranslated);
+
+    List<TextSentence> sentences;
+    if (effectiveSpeakTranslated && _loadChapterTranslations != null) {
+      final translations = await _loadChapterTranslations(
+        book.id,
+        chapter.index,
+      );
+      sentences = _buildTranslatedSentences(chapter.text, translations);
+    } else {
+      sentences = _splitter.split(chapter.text);
+    }
     if (sentences.isEmpty) {
       state = state.copyWith(error: '当前章节没有可朗读文本');
       return;
@@ -314,6 +401,7 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
       speakerId: speakerId,
       modelId: resolvedModel.spec.id,
       modelVariantTag: _fnv1aHex(resolvedModel.cacheKey),
+      speakTranslated: effectiveSpeakTranslated,
     );
 
     try {
@@ -608,6 +696,23 @@ class LiveTtsPlayerController extends StateNotifier<LiveTtsState> {
     }
   }
 
+  /// 在「听译文」与「听原文」间实时切换（保持当前章节与大致位置）。
+  Future<void> setSpeakTranslated(bool enabled) async {
+    if (enabled == state.speakTranslated) return;
+    final book = state.book;
+    final currentOffset = state.currentSentence?.startOffset ?? 0;
+    final chIdx = state.chapterIndex;
+    state = state.copyWith(speakTranslated: enabled);
+    if (state.hasBook && book != null) {
+      await playBookChapter(
+        book,
+        chapterIndex: chIdx,
+        startCharOffset: currentOffset,
+        speakTranslated: enabled,
+      );
+    }
+  }
+
   Future<void> stop() async {
     _generation++;
     _transitioningSentence = false;
@@ -653,6 +758,9 @@ liveTtsPlayerProvider =
         onSpeedChanged: (speed) => ref
             .read(standaloneConfigProvider.notifier)
             .setDefaultTtsSpeed(speed),
+        loadChapterTranslations: (bookId, chapterIndex) => ref
+            .read(translationSchedulerProvider.notifier)
+            .ensureChapterLoaded(bookId: bookId, chapterIndex: chapterIndex),
         resolveActiveModel: () =>
             ref.read(ttsModelManagerProvider.notifier).activeModelPaths,
         readConfig: () => ref.read(standaloneConfigProvider),

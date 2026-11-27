@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../discover/discover_config.dart';
+import '../translation/translation_models.dart';
 
 /// 单机版全局配置（无内置写死服务地址，由首次启动引导或设置页配置）。
 @immutable
@@ -27,6 +28,11 @@ class StandaloneConfig {
     this.discoverSourceId = '',
     this.updateMirrorMode = 'auto',
     this.customUpdateMirrorPrefix = '',
+    this.activeTranslationModelId = TranslationModelCatalog.defaultModelId,
+    this.translationTargetLang = 'zh-Hans',
+    this.translationDownloadMirror = TranslationModelCatalog.mirrorHfMirror,
+    this.customTranslationMirrorPrefix = '',
+    this.importedTranslationModelPath = '',
   });
 
   factory StandaloneConfig.fromJson(Map<String, dynamic> json) {
@@ -70,6 +76,22 @@ class StandaloneConfig {
       updateMirrorMode: (json['update_mirror_mode'] as String? ?? 'auto').trim(),
       customUpdateMirrorPrefix:
           (json['custom_update_mirror_prefix'] as String? ?? '').trim(),
+      activeTranslationModelId:
+          (json['active_translation_model_id'] as String? ?? '').trim().isNotEmpty
+          ? (json['active_translation_model_id'] as String).trim()
+          : TranslationModelCatalog.defaultModelId,
+      translationTargetLang:
+          (json['translation_target_lang'] as String? ?? '').trim().isNotEmpty
+          ? (json['translation_target_lang'] as String).trim()
+          : 'zh-Hans',
+      translationDownloadMirror:
+          (json['translation_download_mirror'] as String? ?? '').trim().isNotEmpty
+          ? (json['translation_download_mirror'] as String).trim()
+          : TranslationModelCatalog.mirrorHfMirror,
+      customTranslationMirrorPrefix:
+          (json['custom_translation_mirror_prefix'] as String? ?? '').trim(),
+      importedTranslationModelPath:
+          (json['imported_translation_model_path'] as String? ?? '').trim(),
     );
   }
 
@@ -90,6 +112,11 @@ class StandaloneConfig {
   final String discoverSourceId;
   final String updateMirrorMode;
   final String customUpdateMirrorPrefix;
+  final String activeTranslationModelId;
+  final String translationTargetLang;
+  final String translationDownloadMirror;
+  final String customTranslationMirrorPrefix;
+  final String importedTranslationModelPath;
 
   bool get preferCnMirror => ttsDownloadMirror != 'github';
 
@@ -114,6 +141,11 @@ class StandaloneConfig {
     'discover_source_id': discoverSourceId,
     'update_mirror_mode': updateMirrorMode,
     'custom_update_mirror_prefix': customUpdateMirrorPrefix,
+    'active_translation_model_id': activeTranslationModelId,
+    'translation_target_lang': translationTargetLang,
+    'translation_download_mirror': translationDownloadMirror,
+    'custom_translation_mirror_prefix': customTranslationMirrorPrefix,
+    'imported_translation_model_path': importedTranslationModelPath,
   };
 
   StandaloneConfig copyWith({
@@ -134,6 +166,11 @@ class StandaloneConfig {
     String? discoverSourceId,
     String? updateMirrorMode,
     String? customUpdateMirrorPrefix,
+    String? activeTranslationModelId,
+    String? translationTargetLang,
+    String? translationDownloadMirror,
+    String? customTranslationMirrorPrefix,
+    String? importedTranslationModelPath,
   }) {
     return StandaloneConfig(
       ebookApiBaseUrl: ebookApiBaseUrl ?? this.ebookApiBaseUrl,
@@ -156,6 +193,16 @@ class StandaloneConfig {
       updateMirrorMode: updateMirrorMode ?? this.updateMirrorMode,
       customUpdateMirrorPrefix:
           customUpdateMirrorPrefix ?? this.customUpdateMirrorPrefix,
+      activeTranslationModelId:
+          activeTranslationModelId ?? this.activeTranslationModelId,
+      translationTargetLang:
+          translationTargetLang ?? this.translationTargetLang,
+      translationDownloadMirror:
+          translationDownloadMirror ?? this.translationDownloadMirror,
+      customTranslationMirrorPrefix:
+          customTranslationMirrorPrefix ?? this.customTranslationMirrorPrefix,
+      importedTranslationModelPath:
+          importedTranslationModelPath ?? this.importedTranslationModelPath,
     );
   }
 }
@@ -348,6 +395,21 @@ class StandaloneConfigController extends StateNotifier<StandaloneConfig> {
 
   Future<void> setCustomUpdateMirrorPrefix(String prefix) =>
       _commit(state.copyWith(customUpdateMirrorPrefix: prefix.trim()));
+
+  Future<void> setActiveTranslationModel(String modelId) =>
+      _commit(state.copyWith(activeTranslationModelId: modelId.trim()));
+
+  Future<void> setTranslationTargetLang(String langCode) =>
+      _commit(state.copyWith(translationTargetLang: langCode.trim()));
+
+  Future<void> setTranslationDownloadMirror(String mirrorId) =>
+      _commit(state.copyWith(translationDownloadMirror: mirrorId.trim()));
+
+  Future<void> setCustomTranslationMirrorPrefix(String prefix) =>
+      _commit(state.copyWith(customTranslationMirrorPrefix: prefix.trim()));
+
+  Future<void> setImportedTranslationModelPath(String path) =>
+      _commit(state.copyWith(importedTranslationModelPath: path.trim()));
 }
 
 final Provider<StandaloneConfigStorage> standaloneConfigStorageProvider =
