@@ -1,0 +1,732 @@
+{
+  "schema_version": 1,
+  "config_version": "2026.11.27.1",
+  "config_ttl_hours": 24,
+  "name": "Echo 内置公版书源",
+  "sources": [
+    {
+      "schema_version": 1,
+      "id": "gutendex",
+      "name": "古登堡公版书库",
+      "description": "Project Gutenberg 开源书库（7 万+多语种公版名著，免登录直连下载）",
+      "driver": "rule",
+      "enabled": true,
+      "domains": [
+        "https://gutendex.com"
+      ],
+      "headers": {
+        "Accept": "application/json"
+      },
+      "supported_formats": [
+        "epub",
+        "txt"
+      ],
+      "probe": {
+        "path": "/books?page=1",
+        "timeout_ms": 10000
+      },
+      "auth": {
+        "required": false
+      },
+      "search": {
+        "request": {
+          "method": "GET",
+          "path": "/books",
+          "query": {
+            "search": "{{query.q}}",
+            "page": "{{query.page}}"
+          },
+          "page_size": 32
+        },
+        "filters": {
+          "extensions": {
+            "param": "mime_type",
+            "map": {
+              "EPUB": "application/epub",
+              "TXT": "text/plain"
+            }
+          },
+          "languages": {
+            "param": "languages",
+            "mode": "join",
+            "join_with": ",",
+            "map": {
+              "chinese": "zh",
+              "english": "en",
+              "japanese": "ja",
+              "german": "de",
+              "french": "fr",
+              "spanish": "es",
+              "russian": "ru"
+            }
+          },
+          "order": {
+            "param": "sort",
+            "options": [
+              {
+                "value": "",
+                "label": "最热"
+              },
+              {
+                "value": "ascending",
+                "label": "编号升序"
+              },
+              {
+                "value": "descending",
+                "label": "编号降序"
+              }
+            ]
+          }
+        },
+        "response": {
+          "mode": "json",
+          "items_path": "results",
+          "pagination": {
+            "total_count_path": "count",
+            "page_size": 32,
+            "next_page_path": "next"
+          },
+          "vars": {
+            "download_url": {
+              "first_of": [
+                {
+                  "path_segments": [
+                    "formats",
+                    "application/epub+zip"
+                  ],
+                  "resolve_url": true
+                },
+                {
+                  "path_segments": [
+                    "formats",
+                    "text/plain; charset=utf-8"
+                  ],
+                  "resolve_url": true
+                },
+                {
+                  "path_segments": [
+                    "formats",
+                    "text/plain; charset=us-ascii"
+                  ],
+                  "resolve_url": true
+                },
+                {
+                  "path_segments": [
+                    "formats",
+                    "text/plain"
+                  ],
+                  "resolve_url": true
+                }
+              ]
+            }
+          },
+          "fields": {
+            "ref": {
+              "path": "id"
+            },
+            "title": {
+              "path": "title"
+            },
+            "authors": {
+              "path": "authors",
+              "all": true
+            },
+            "language": {
+              "path": "languages",
+              "join_with": ", "
+            },
+            "format": {
+              "first_of": [
+                {
+                  "when_present": {
+                    "path_segments": [
+                      "formats",
+                      "application/epub+zip"
+                    ]
+                  },
+                  "const_value": "epub"
+                },
+                {
+                  "when_present": {
+                    "path_segments": [
+                      "formats",
+                      "text/plain; charset=utf-8"
+                    ]
+                  },
+                  "const_value": "txt"
+                },
+                {
+                  "when_present": {
+                    "path_segments": [
+                      "formats",
+                      "text/plain; charset=us-ascii"
+                    ]
+                  },
+                  "const_value": "txt"
+                },
+                {
+                  "when_present": {
+                    "path_segments": [
+                      "formats",
+                      "text/plain"
+                    ]
+                  },
+                  "const_value": "txt"
+                }
+              ]
+            },
+            "cover_url": {
+              "path_segments": [
+                "formats",
+                "image/jpeg"
+              ],
+              "resolve_url": true
+            },
+            "description": {
+              "path": "subjects",
+              "join_with": " · "
+            },
+            "source_url": {
+              "template": "https://www.gutenberg.org/ebooks/{{fields.ref}}"
+            }
+          }
+        }
+      },
+      "detail": {
+        "method": "GET",
+        "path": "/books/{{book.ref}}",
+        "response_mode": "json",
+        "vars": {
+          "download_url": {
+            "first_of": [
+              {
+                "path_segments": [
+                  "formats",
+                  "application/epub+zip"
+                ],
+                "resolve_url": true
+              },
+              {
+                "path_segments": [
+                  "formats",
+                  "text/plain; charset=utf-8"
+                ],
+                "resolve_url": true
+              },
+              {
+                "path_segments": [
+                  "formats",
+                  "text/plain; charset=us-ascii"
+                ],
+                "resolve_url": true
+              },
+              {
+                "path_segments": [
+                  "formats",
+                  "text/plain"
+                ],
+                "resolve_url": true
+              }
+            ]
+          }
+        },
+        "fields": {
+          "description": {
+            "path": "subjects",
+            "join_with": " · "
+          },
+          "cover_url": {
+            "path_segments": [
+              "formats",
+              "image/jpeg"
+            ],
+            "resolve_url": true
+          }
+        }
+      },
+      "download": {
+        "file_request": {
+          "url": "{{book.var.download_url}}",
+          "same_origin_credentials": false,
+          "retries": 3,
+          "stall_timeout_seconds": 120
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "id": "standard_ebooks",
+      "name": "Standard Ebooks",
+      "description": "精排英文公版名著（全人工校对排版、现代封面、免登录直下 EPUB）",
+      "driver": "rule",
+      "enabled": true,
+      "domains": [
+        "https://standardebooks.org"
+      ],
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+      },
+      "image_headers": {
+        "Referer": "https://standardebooks.org/"
+      },
+      "min_request_interval_ms": 800,
+      "supported_formats": [
+        "epub"
+      ],
+      "probe": {
+        "path": "/ebooks",
+        "timeout_ms": 8000
+      },
+      "auth": {
+        "required": false
+      },
+      "search": {
+        "request": {
+          "method": "GET",
+          "path": "/ebooks",
+          "query": {
+            "query": "{{query.q}}",
+            "page": "{{query.page}}"
+          },
+          "page_size": 12
+        },
+        "filters": {
+          "order": {
+            "param": "sort",
+            "options": [
+              {
+                "value": "",
+                "label": "默认"
+              },
+              {
+                "value": "newest",
+                "label": "最新"
+              },
+              {
+                "value": "author-alpha",
+                "label": "作者"
+              },
+              {
+                "value": "reading-ease",
+                "label": "易读度"
+              }
+            ]
+          }
+        },
+        "response": {
+          "mode": "html",
+          "items_selector": "ol.ebooks-list > li[typeof='schema:Book']",
+          "pagination": {
+            "next_page_selector": "nav a[rel='next']"
+          },
+          "fields": {
+            "ref": {
+              "attr": "about"
+            },
+            "title": {
+              "selector": "p a[property='schema:url'] span[property='schema:name']"
+            },
+            "authors": {
+              "selector": "p.author span[property='schema:name']",
+              "all": true
+            },
+            "language": {
+              "const_value": "English"
+            },
+            "format": {
+              "const_value": "epub"
+            },
+            "cover_url": {
+              "selector": "picture img",
+              "attr": "src",
+              "resolve_url": true
+            },
+            "source_url": {
+              "attr": "about",
+              "resolve_url": true
+            }
+          }
+        }
+      },
+      "detail": {
+        "method": "GET",
+        "path": "{{book.ref}}",
+        "response_mode": "html",
+        "fields": {
+          "description": {
+            "selector": "div[property='schema:description']",
+            "preserve_paragraphs": true
+          },
+          "cover_url": {
+            "selector": "picture img",
+            "attr": "src",
+            "resolve_url": true
+          }
+        }
+      },
+      "download": {
+        "steps": [
+          {
+            "id": "detail_page",
+            "method": "GET",
+            "path": "{{book.ref}}",
+            "response_mode": "html",
+            "extract": {
+              "url": {
+                "selectors": [
+                  "a.epub[href$='.epub']",
+                  "a[property='schema:contentUrl'][href$='.epub']"
+                ],
+                "attr": "href",
+                "resolve_url": true
+              }
+            }
+          }
+        ],
+        "file_request": {
+          "url": "{{step.detail_page.url}}?source=download",
+          "same_origin_credentials": false,
+          "headers": {
+            "Referer": "{{origin}}{{book.ref}}",
+            "Accept": "*/*"
+          },
+          "retries": 3,
+          "stall_timeout_seconds": 120
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "id": "wenshuoge",
+      "name": "文硕阁",
+      "description": "中文公版典籍数字书阁（1.34 万+经史子集与近现代经典；搜书免登，下载 EPUB 需免费账号）",
+      "driver": "rule",
+      "enabled": true,
+      "domains": [
+        "https://www.wenshuoge.com"
+      ],
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json",
+        "Origin": "https://www.wenshuoge.com",
+        "Referer": "https://www.wenshuoge.com/"
+      },
+      "image_headers": {
+        "Referer": "https://www.wenshuoge.com/"
+      },
+      "min_request_interval_ms": 500,
+      "supported_formats": [
+        "epub"
+      ],
+      "probe": {
+        "path": "/api/v2/health",
+        "timeout_ms": 8000
+      },
+      "auth": {
+        "required": false,
+        "required_for": [
+          "download"
+        ],
+        "inject": {
+          "cookies": {
+            "wenshuoge_session": "{{cred.wenshuoge_session}}"
+          }
+        },
+        "modes": [
+          {
+            "id": "password",
+            "label": "邮箱密码",
+            "fields": [
+              {
+                "key": "email",
+                "label": "邮箱",
+                "type": "email"
+              },
+              {
+                "key": "password",
+                "label": "密码",
+                "type": "password"
+              }
+            ],
+            "login": {
+              "pre_steps": [
+                {
+                  "id": "csrf",
+                  "method": "GET",
+                  "path": "/api/v2/auth/csrf",
+                  "extract": {
+                    "token": {
+                      "path": "data.token"
+                    }
+                  },
+                  "extract_cookies": {
+                    "csrf_cookie": "wenshuoge_csrf"
+                  }
+                }
+              ],
+              "method": "POST",
+              "path": "/api/v2/auth/password/login",
+              "content_type": "json",
+              "headers": {
+                "X-CSRF-Token": "{{step.csrf.token}}"
+              },
+              "cookies": {
+                "wenshuoge_csrf": "{{step.csrf.csrf_cookie}}"
+              },
+              "body": {
+                "email": "{{input.email}}",
+                "password": "{{input.password}}"
+              },
+              "save_credentials": {
+                "email": {
+                  "path": "data.user.email"
+                }
+              },
+              "save_cookie_credentials": {
+                "wenshuoge_session": "wenshuoge_session"
+              }
+            }
+          },
+          {
+            "id": "cookies",
+            "label": "Cookie 导入",
+            "fields": [
+              {
+                "key": "wenshuoge_session",
+                "label": "wenshuoge_session",
+                "type": "password",
+                "hint": "浏览器登录后从 Cookie 复制 wenshuoge_session 值"
+              }
+            ]
+          }
+        ],
+        "verify": {
+          "steps": [
+            {
+              "id": "quota",
+              "method": "GET",
+              "path": "/api/v2/downloads/quota",
+              "extract": {
+                "daily_used": {
+                  "path": "data.used"
+                },
+                "daily_limit": {
+                  "path": "data.limit"
+                },
+                "daily_remaining": {
+                  "path": "data.remaining"
+                }
+              }
+            },
+            {
+              "id": "profile",
+              "method": "GET",
+              "path": "/api/v2/auth/status",
+              "extract": {
+                "email": {
+                  "path": "data.user.email"
+                }
+              }
+            }
+          ],
+          "fields": {
+            "email": {
+              "template": "{{step.profile.email}}"
+            },
+            "daily_used": {
+              "template": "{{step.quota.daily_used}}"
+            },
+            "daily_limit": {
+              "template": "{{step.quota.daily_limit}}"
+            },
+            "daily_remaining": {
+              "template": "{{step.quota.daily_remaining}}"
+            }
+          }
+        }
+      },
+      "errors": {
+        "bot_protection": {
+          "statuses": [
+            403,
+            503
+          ],
+          "html_body": true
+        },
+        "envelope": {
+          "error_path": "error.message",
+          "error_code_path": "error.code"
+        },
+        "rules": [
+          {
+            "code": "QUOTA_EXCEEDED",
+            "statuses": [
+              429
+            ],
+            "error_code_regex": "download_daily_limit|quota"
+          },
+          {
+            "code": "SESSION_EXPIRED",
+            "statuses": [
+              401
+            ],
+            "error_code_regex": "login_required|unauthorized|session"
+          },
+          {
+            "code": "NOT_FOUND",
+            "statuses": [
+              404
+            ]
+          }
+        ]
+      },
+      "search": {
+        "request": {
+          "method": "GET",
+          "path": "/api/v2/catalog",
+          "query": {
+            "q": "{{query.q}}",
+            "limit": "{{query.limit}}"
+          },
+          "page_size": 20
+        },
+        "response": {
+          "mode": "json",
+          "items_path": "data.books",
+          "pagination": {
+            "total_count_path": "meta.total",
+            "page_size": 20,
+            "cursor_param": "cursor",
+            "next_cursor_path": "meta.nextCursor"
+          },
+          "fields": {
+            "ref": {
+              "path": "id"
+            },
+            "title": {
+              "path": "title"
+            },
+            "authors": {
+              "path": "author",
+              "split_regex": "\\s*[,、，;]\\s*"
+            },
+            "year": {
+              "path": "era"
+            },
+            "publisher": {
+              "path": "category"
+            },
+            "language": {
+              "path": "variantLabel"
+            },
+            "format": {
+              "const_value": "epub"
+            },
+            "description": {
+              "path": "tags",
+              "join_with": " · "
+            },
+            "source_url": {
+              "template": "https://www.wenshuoge.com/book/{{fields.ref}}"
+            }
+          }
+        }
+      },
+      "detail": {
+        "method": "GET",
+        "path": "/book/{{book.ref}}",
+        "headers": {
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+        "response_mode": "html",
+        "fields": {
+          "description": {
+            "selector": "script[type='application/ld+json']",
+            "json_path": "description"
+          },
+          "cover_url": {
+            "selector": "script[type='application/ld+json']",
+            "json_path": "image",
+            "resolve_url": true
+          }
+        }
+      },
+      "download": {
+        "steps": [
+          {
+            "id": "csrf",
+            "method": "GET",
+            "path": "/api/v2/auth/csrf",
+            "extract": {
+              "token": {
+                "path": "data.token"
+              }
+            },
+            "extract_cookies": {
+              "csrf_cookie": "wenshuoge_csrf"
+            }
+          },
+          {
+            "id": "authorize",
+            "method": "POST",
+            "path": "/api/v2/downloads/epub/authorize",
+            "content_type": "json",
+            "headers": {
+              "X-CSRF-Token": "{{step.csrf.token}}"
+            },
+            "cookies": {
+              "wenshuoge_csrf": "{{step.csrf.csrf_cookie}}"
+            },
+            "body": {
+              "editionId": "{{book.ref}}",
+              "visitorId": "{{rand.id_24}}",
+              "requestId": "{{rand.uuid}}"
+            },
+            "extract": {
+              "state": {
+                "path": "data.state"
+              },
+              "intent": {
+                "path": "data.intent"
+              },
+              "url": {
+                "path": "data.url",
+                "resolve_url": true
+              }
+            },
+            "poll": {
+              "method": "GET",
+              "path": "/api/v2/downloads/epub/status?intent={{step.authorize.intent}}",
+              "interval_ms": 3000,
+              "max_attempts": 40,
+              "until_path": "data.state",
+              "until_value": "ready",
+              "fail_path": "data.state",
+              "fail_value": "failed",
+              "fail_message_path": "data.message",
+              "extract": {
+                "url": {
+                  "path": "data.url",
+                  "resolve_url": true
+                }
+              }
+            }
+          }
+        ],
+        "file_request": {
+          "url": "{{step.authorize.url}}",
+          "same_origin_credentials": true,
+          "headers": {
+            "Referer": "{{origin}}/book/{{book.ref}}",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity"
+          },
+          "retries": 3,
+          "stall_timeout_seconds": 120
+        }
+      }
+    }
+  ]
+}

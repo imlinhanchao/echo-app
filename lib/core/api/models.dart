@@ -441,6 +441,8 @@ class SearchBook {
     this.coverUrl = '',
     this.description = '',
     this.sourceUrl = '',
+    this.imageHeaders = const <String, String>{},
+    this.sourceVars = const <String, String>{},
   });
 
   factory SearchBook.fromJson(Map<String, dynamic> json) => SearchBook(
@@ -459,7 +461,22 @@ class SearchBook {
     coverUrl: json['cover_url'] as String? ?? '',
     description: json['description'] as String? ?? '',
     sourceUrl: json['source_url'] as String? ?? '',
+    imageHeaders: _stringMapFromJson(json['image_headers']),
+    sourceVars: _stringMapFromJson(json['source_vars']),
   );
+
+  static Map<String, String> _stringMapFromJson(Object? raw) {
+    if (raw is! Map) return const <String, String>{};
+    final out = <String, String>{};
+    for (final entry in raw.entries) {
+      final k = entry.key.toString().trim();
+      final v = entry.value?.toString() ?? '';
+      if (k.isNotEmpty && v.isNotEmpty) {
+        out[k] = v;
+      }
+    }
+    return Map<String, String>.unmodifiable(out);
+  }
 
   final String provider;
 
@@ -476,6 +493,8 @@ class SearchBook {
   final String coverUrl;
   final String description;
   final String sourceUrl;
+  final Map<String, String> imageHeaders;
+  final Map<String, String> sourceVars;
 }
 
 @immutable

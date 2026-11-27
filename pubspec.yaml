@@ -41,6 +41,7 @@ flutter:
   assets:
     - assets/design-tokens.json
     - assets/discover-rules.json
+    - assets/bundled-book-sources.json
 
 flutter_launcher_icons:
   android: true
