@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "id": "example_html_two_step",
+  "name": "示例 HTML 两步提取书源",
+  "description": "演示 HTML 搜索列表抓取、详情页提取与两步 EPUB 下载链（使用 example.org 占位）",
+  "driver": "rule",
+  "enabled": true,
+  "domains": [
+    "https://ebooks.example.org"
+  ],
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+  },
+  "image_headers": {
+    "Referer": "https://ebooks.example.org/"
+  },
+  "min_request_interval_ms": 800,
+  "supported_formats": [
+    "epub"
+  ],
+  "probe": {
+    "path": "/ebooks",
+    "timeout_ms": 8000
+  },
+  "auth": {
+    "required": false
+  },
+  "search": {
+    "request": {
+      "method": "GET",
+      "path": "/ebooks",
+      "query": {
+        "query": "{{query.q}}",
+        "page": "{{query.page}}"
+      },
+      "page_size": 12
+    },
+    "filters": {
+      "order": {
+        "param": "sort",
+        "options": [
+          { "value": "", "label": "默认" },
+          { "value": "newest", "label": "最新" },
+          { "value": "author", "label": "作者" }
+        ]
+      }
+    },
+    "response": {
+      "mode": "html",
+      "items_selector": "ol.book-list > li.book-item",
+      "pagination": {
+        "next_page_selector": "nav a[rel='next']"
+      },
+      "fields": {
+        "ref": { "attr": "data-book-path" },
+        "title": { "selector": "h3.book-title a" },
+        "authors": { "selector": "p.book-author span.author", "all": true },
+        "language": { "const_value": "English" },
+        "format": { "const_value": "epub" },
+        "cover_url": { "selector": "img.cover", "attr": "src", "resolve_url": true },
+        "source_url": { "attr": "data-book-path", "resolve_url": true }
+      }
+    }
+  },
+  "detail": {
+    "method": "GET",
+    "path": "{{book.ref}}",
+    "response_mode": "html",
+    "fields": {
+      "description": {
+        "selector": "div.book-summary",
+        "preserve_paragraphs": true
+      },
+      "cover_url": {
+        "selector": "img.hero-cover",
+        "attr": "src",
+        "resolve_url": true
+      }
+    }
+  },
+  "download": {
+    "steps": [
+      {
+        "id": "detail_page",
+        "method": "GET",
+        "path": "{{book.ref}}",
+        "response_mode": "html",
+        "extract": {
+          "url": {
+            "selectors": [
+              "a.download-epub[href$='.epub']",
+              "a[download][href$='.epub']"
+            ],
+            "attr": "href",
+            "resolve_url": true
+          }
+        }
+      }
+    ],
+    "file_request": {
+      "url": "{{step.detail_page.url}}",
+      "same_origin_credentials": false,
+      "headers": {
+        "Referer": "{{origin}}{{book.ref}}"
+      }
+    }
+  }
+}

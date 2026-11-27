@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "id": "example_json_api_auth",
+  "name": "示例 JSON API（含 CSRF 登录与异步轮询）",
+  "description": "演示 cursor 游标分页、pre_steps CSRF 登录、配额校验与 async poll 下载（使用 example.org 占位）",
+  "driver": "rule",
+  "enabled": true,
+  "domains": [
+    "https://api.example.org"
+  ],
+  "headers": {
+    "Accept": "application/json",
+    "Origin": "https://api.example.org",
+    "Referer": "https://api.example.org/"
+  },
+  "min_request_interval_ms": 500,
+  "supported_formats": [
+    "epub"
+  ],
+  "probe": {
+    "path": "/api/v1/health",
+    "timeout_ms": 8000
+  },
+  "auth": {
+    "required": false,
+    "required_for": [
+      "download"
+    ],
+    "inject": {
+      "cookies": {
+        "session_id": "{{cred.session_id}}"
+      }
+    },
+    "modes": [
+      {
+        "id": "password",
+        "label": "邮箱密码",
+        "fields": [
+          { "key": "email", "label": "邮箱", "type": "email" },
+          { "key": "password", "label": "密码", "type": "password" }
+        ],
+        "login": {
+          "pre_steps": [
+            {
+              "id": "csrf",
+              "method": "GET",
+              "path": "/api/v1/auth/csrf",
+              "extract": {
+                "token": { "path": "data.token" }
+              },
+              "extract_cookies": {
+                "csrf_cookie": "csrf_token"
+              }
+            }
+          ],
+          "method": "POST",
+          "path": "/api/v1/auth/login",
+          "content_type": "json",
+          "headers": {
+            "X-CSRF-Token": "{{step.csrf.token}}"
+          },
+          "cookies": {
+            "csrf_token": "{{step.csrf.csrf_cookie}}"
+          },
+          "body": {
+            "email": "{{input.email}}",
+            "password": "{{input.password}}"
+          },
+          "save_credentials": {
+            "email": { "path": "data.user.email" }
+          },
+          "save_cookie_credentials": {
+            "session_id": "session_id"
+          }
+        }
+      },
+      {
+        "id": "cookies",
+        "label": "Cookie 导入",
+        "fields": [
+          {
+            "key": "session_id",
+            "label": "session_id",
+            "type": "password",
+            "hint": "从浏览器 Cookie 复制 session_id 值"
+          }
+        ]
+      }
+    ],
+    "verify": {
+      "steps": [
+        {
+          "id": "quota",
+          "method": "GET",
+          "path": "/api/v1/downloads/quota",
+          "extract": {
+            "daily_used": { "path": "data.used" },
+            "daily_limit": { "path": "data.limit" },
+            "daily_remaining": { "path": "data.remaining" }
+          }
+        },
+        {
+          "id": "profile",
+          "method": "GET",
+          "path": "/api/v1/auth/status",
+          "extract": {
+            "email": { "path": "data.user.email" }
+          }
+        }
+      ],
+      "fields": {
+        "email": { "template": "{{step.profile.email}}" },
+        "daily_used": { "template": "{{step.quota.daily_used}}" },
+        "daily_limit": { "template": "{{step.quota.daily_limit}}" },
+        "daily_remaining": { "template": "{{step.quota.daily_remaining}}" }
+      }
+    }
+  },
+  "errors": {
+    "bot_protection": {
+      "statuses": [403, 503],
+      "html_body": true
+    },
+    "envelope": {
+      "error_path": "error.message",
+      "error_code_path": "error.code"
+    },
+    "rules": [
+      {
+        "code": "QUOTA_EXCEEDED",
+        "statuses": [429],
+        "error_code_regex": "download_daily_limit|quota"
+      },
+      {
+        "code": "SESSION_EXPIRED",
+        "statuses": [401],
+        "error_code_regex": "login_required|unauthorized"
+      }
+    ]
+  },
+  "search": {
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/catalog",
+      "query": {
+        "q": "{{query.q}}",
+        "limit": "{{query.limit}}"
+      },
+      "page_size": 20
+    },
+    "response": {
+      "mode": "json",
+      "items_path": "data.books",
+      "pagination": {
+        "total_count_path": "meta.total",
+        "page_size": 20,
+        "cursor_param": "cursor",
+        "next_cursor_path": "meta.nextCursor"
+      },
+      "fields": {
+        "ref": { "path": "id" },
+        "title": { "path": "title" },
+        "authors": { "path": "author", "split_regex": "\\s*[,、，;]\\s*" },
+        "format": { "const_value": "epub" },
+        "source_url": { "template": "{{origin}}/book/{{fields.ref}}" }
+      }
+    }
+  },
+  "detail": {
+    "method": "GET",
+    "path": "/book/{{book.ref}}",
+    "headers": {
+      "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+    },
+    "response_mode": "html",
+    "fields": {
+      "description": {
+        "selector": "script[type='application/ld+json']",
+        "json_path": "description"
+      },
+      "cover_url": {
+        "selector": "script[type='application/ld+json']",
+        "json_path": "image",
+        "resolve_url": true
+      }
+    }
+  },
+  "download": {
+    "steps": [
+      {
+        "id": "authorize",
+        "method": "POST",
+        "path": "/api/v1/downloads/authorize",
+        "content_type": "json",
+        "body": {
+          "bookId": "{{book.ref}}",
+          "requestId": "{{rand.uuid}}"
+        },
+        "extract": {
+          "state": { "path": "data.state" },
+          "intent": { "path": "data.intent" },
+          "url": { "path": "data.url", "resolve_url": true }
+        },
+        "poll": {
+          "method": "GET",
+          "path": "/api/v1/downloads/status?intent={{step.authorize.intent}}",
+          "interval_ms": 3000,
+          "max_attempts": 40,
+          "until_path": "data.state",
+          "until_value": "ready",
+          "fail_path": "data.state",
+          "fail_value": "failed",
+          "fail_message_path": "data.message",
+          "extract": {
+            "url": { "path": "data.url", "resolve_url": true }
+          }
+        }
+      }
+    ],
+    "file_request": {
+      "url": "{{step.authorize.url}}",
+      "same_origin_credentials": true,
+      "headers": {
+        "Referer": "{{origin}}/book/{{book.ref}}",
+        "Accept": "*/*"
+      }
+    }
+  }
+}
