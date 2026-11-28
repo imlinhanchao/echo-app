@@ -319,64 +319,88 @@
 
   function initReaderMockup() {
     var mockup = document.getElementById('reader-mockup');
-    var pairs = Array.prototype.slice.call(document.querySelectorAll('.cue-pair'));
-    var cues = pairs.length
-      ? pairs
-      : Array.prototype.slice.call(document.querySelectorAll('.cue-sentence'));
+    var cues = Array.prototype.slice.call(document.querySelectorAll('.cue-group'));
     var playBtn = document.getElementById('mockup-play-btn');
+    var topListenBtn = document.getElementById('mockup-top-listen-btn');
+    var topListenLabel = document.getElementById('mockup-top-listen-label');
+    var prevBtn = document.getElementById('mockup-prev-btn');
+    var nextBtn = document.getElementById('mockup-next-btn');
+    var langBtn = document.getElementById('mockup-lang-btn');
     var bilingualBtn = document.getElementById('mockup-bilingual-btn');
+    var modeLabel = document.getElementById('mockup-mode-label');
+    var notesBtn = document.getElementById('mockup-notes-btn');
+    var paperBtn = document.getElementById('mockup-paper-btn');
     var speedBtn = document.getElementById('mockup-speed-btn');
     var cueLabel = document.getElementById('mockup-cue-label');
     var progressFill = document.getElementById('mockup-progress-fill');
 
-    if (!cues.length || !playBtn || !speedBtn) return;
+    if (!mockup || !cues.length || !playBtn || !speedBtn) return;
 
     var speeds = [1.0, 1.25, 1.5, 1.75];
+    var speedLabels = ['1.0x', '1.25x', '1.5x', '1.75x'];
     var speedIndex = 0;
+    var modes = ['bilingual', 'translatedOnly', 'original'];
+    var modeLabels = {
+      bilingual: '双语中',
+      translatedOnly: '仅译文',
+      original: '双语'
+    };
+    var modeIndex = 0;
+    var speakLang = 'zh';
     var activeCue = 0;
     var reducedMotion =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var isPlaying = !reducedMotion;
-    var isBilingual = false;
     var timer = null;
+    var pulseTimer = null;
 
     function updateMockupView() {
+      var mode = modes[modeIndex];
+      var effectiveSpeakLang = mode === 'original' ? 'en' : (mode === 'translatedOnly' ? 'zh' : speakLang);
+
       for (var i = 0; i < cues.length; i++) {
-        var active = i === activeCue;
-        cues[i].classList.toggle('is-active', active);
-        var sentenceEl = cues[i].classList.contains('cue-sentence')
-          ? cues[i]
-          : cues[i].querySelector('.cue-sentence');
-        if (sentenceEl && sentenceEl !== cues[i]) {
-          sentenceEl.classList.toggle('is-active', active);
-        }
+        cues[i].classList.toggle('is-active', i === activeCue);
       }
-      if (mockup) {
-        mockup.classList.toggle('is-bilingual', isBilingual);
-      }
+
+      mockup.setAttribute('data-display-mode', mode);
+      mockup.setAttribute('data-speak-lang', effectiveSpeakLang);
+      mockup.classList.toggle('is-bilingual', mode === 'bilingual');
+
       if (bilingualBtn) {
-        bilingualBtn.setAttribute('aria-pressed', isBilingual ? 'true' : 'false');
+        var translateActive = mode !== 'original';
+        bilingualBtn.setAttribute('aria-pressed', translateActive ? 'true' : 'false');
+        bilingualBtn.classList.toggle('is-active', translateActive);
       }
+      if (modeLabel) {
+        modeLabel.textContent = modeLabels[mode];
+      }
+
+      if (langBtn) {
+        langBtn.hidden = mode === 'original';
+        var isZhSpeak = speakLang === 'zh';
+        langBtn.textContent = isZhSpeak ? '译' : '原';
+        langBtn.setAttribute('aria-pressed', isZhSpeak ? 'true' : 'false');
+        langBtn.classList.toggle('is-active', isZhSpeak);
+      }
+
       playBtn.setAttribute('aria-pressed', isPlaying ? 'true' : 'false');
+      if (topListenBtn) {
+        topListenBtn.setAttribute('aria-pressed', isPlaying ? 'true' : 'false');
+      }
+      if (topListenLabel) {
+        topListenLabel.textContent = isPlaying ? '朗读中' : '听书';
+      }
+
       if (cueLabel) {
-        if (isPlaying) {
-          cueLabel.textContent =
-            (isBilingual ? '双语对照 · 第 ' : '边听边看 · 第 ') +
-            (activeCue + 1) +
-            ' / ' +
-            cues.length +
-            ' 句高亮';
-        } else {
-          cueLabel.textContent = isBilingual
-            ? '双语预览 · 点击继续朗读'
-            : '已暂停 · 点击继续预览';
-        }
+        cueLabel.textContent = isPlaying
+          ? (activeCue + 1) + ' / ' + cues.length + ' 句'
+          : '已暂停 · ' + (activeCue + 1) + '/' + cues.length;
       }
       if (progressFill) {
         progressFill.style.width = (((activeCue + 1) / cues.length) * 100).toFixed(1) + '%';
       }
-      speedBtn.textContent = speeds[speedIndex] + 'x';
+      speedBtn.textContent = speedLabels[speedIndex];
     }
 
     function scheduleTick() {
@@ -392,16 +416,81 @@
       }, intervalMs);
     }
 
-    playBtn.addEventListener('click', function () {
+    function togglePlay() {
       isPlaying = !isPlaying;
       updateMockupView();
       scheduleTick();
-    });
+    }
+
+    playBtn.addEventListener('click', togglePlay);
+    if (topListenBtn) {
+      topListenBtn.addEventListener('click', togglePlay);
+    }
+
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function () {
+        activeCue = (activeCue - 1 + cues.length) % cues.length;
+        updateMockupView();
+        scheduleTick();
+      });
+    }
+
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        activeCue = (activeCue + 1) % cues.length;
+        updateMockupView();
+        scheduleTick();
+      });
+    }
+
+    if (langBtn) {
+      langBtn.addEventListener('click', function () {
+        speakLang = speakLang === 'zh' ? 'en' : 'zh';
+        if (modes[modeIndex] === 'translatedOnly' && speakLang === 'en') {
+          modeIndex = 0;
+        }
+        updateMockupView();
+      });
+    }
 
     if (bilingualBtn) {
       bilingualBtn.addEventListener('click', function () {
-        isBilingual = !isBilingual;
+        modeIndex = (modeIndex + 1) % modes.length;
         updateMockupView();
+      });
+    }
+
+    if (notesBtn) {
+      notesBtn.addEventListener('click', function () {
+        activeCue = 0;
+        if (modes[modeIndex] === 'translatedOnly') {
+          modeIndex = 0;
+        }
+        updateMockupView();
+        scheduleTick();
+        var targets = mockup.querySelectorAll('.ink-underline, .companion-en');
+        for (var i = 0; i < targets.length; i++) {
+          targets[i].classList.add('is-pulsing');
+        }
+        if (pulseTimer) clearTimeout(pulseTimer);
+        pulseTimer = setTimeout(function () {
+          for (var j = 0; j < targets.length; j++) {
+            targets[j].classList.remove('is-pulsing');
+          }
+        }, 700);
+      });
+    }
+
+    if (paperBtn) {
+      paperBtn.addEventListener('click', function () {
+        var currentPaper = mockup.getAttribute('data-paper');
+        var siteIsLight = document.documentElement.dataset.theme === 'light';
+        var effectiveLight = currentPaper
+          ? currentPaper === 'light-paper'
+          : siteIsLight;
+        var nextPaper = effectiveLight ? 'warm-dark' : 'light-paper';
+        mockup.setAttribute('data-paper', nextPaper);
+        paperBtn.setAttribute('aria-pressed', 'true');
       });
     }
 

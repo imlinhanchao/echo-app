@@ -20,7 +20,7 @@
       } catch (_) {}
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=20261128" />
+  <link rel="stylesheet" href="styles.css?v=20261128b" />
 </head>
 <body>
   <a class="skip-link" href="#main">跳至正文内容</a>
@@ -121,77 +121,184 @@
         </div>
 
         <div class="hero-visual">
-          <div id="reader-mockup" class="reader-mockup" role="region" aria-label="边听边看与双语阅读器交互预览">
+          <div id="reader-mockup" class="reader-mockup is-bilingual" data-display-mode="bilingual" data-speak-lang="zh" role="region" aria-label="边听边看与双语阅读器交互预览">
             <div class="mockup-topbar">
-              <div class="mockup-book-info">
-                <span class="mockup-book-title">呐喊 · 自序</span>
-                <span class="mockup-chapter">第 1 / 15 章 · 3 / 18 页</span>
+              <div class="mockup-top-left">
+                <span class="mockup-back-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </span>
+                <span class="mockup-book-title">Animal Farm</span>
               </div>
-              <div class="mockup-ink-swatches" aria-label="五色划线墨色预览" title="五色墨色划线">
-                <span class="swatch swatch-gold"></span>
-                <span class="swatch swatch-vermilion"></span>
-                <span class="swatch swatch-sage"></span>
-                <span class="swatch swatch-cobalt"></span>
-                <span class="swatch swatch-plum"></span>
-              </div>
+              <button
+                type="button"
+                id="mockup-top-listen-btn"
+                class="mockup-listen-pill"
+                aria-pressed="true"
+                aria-label="切换边听边看状态"
+              >
+                <svg class="icon-pause" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.8" />
+                  <rect x="9.2" y="8" width="2.1" height="8" rx="0.8" />
+                  <rect x="12.7" y="8" width="2.1" height="8" rx="0.8" />
+                </svg>
+                <svg class="icon-headphones" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+                  <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+                </svg>
+                <span id="mockup-top-listen-label">朗读中</span>
+              </button>
+            </div>
+
+            <div class="mockup-reading-meta">
+              <span>Chapter One</span>
+              <span>第 1 / 12 章 · 2 / 19 页</span>
             </div>
 
             <article class="mockup-paper">
-              <p class="mockup-paragraph">
-                <span class="cue-pair is-active" data-cue="0">
-                  <span class="cue-sentence is-active">我在年轻时候也曾经做过许多梦，后来大半忘却了，但自己也并不以为可惜。</span>
-                  <span class="cue-translation">In my youth I too had many dreams; most of them have since been forgotten, yet I feel no regret.</span>
-                </span>
-                <span class="cue-pair" data-cue="1">
-                  <span class="cue-sentence"><u class="ink-underline">所谓回忆者，虽说可以使人欢欣，有时也不免使人寂寞</u>，使精神的丝缕还牵着已逝的寂寞的时光，又有什么意味呢，而我偏苦于不能全忘却。</span>
-                  <span class="cue-translation">Though memories can bring joy, at times they also bring loneliness — yet I cannot wholly forget them.</span>
-                </span>
-                <span class="cue-pair" data-cue="2">
-                  <span class="cue-sentence">这不能全忘的一部分，到现在便成了《呐喊》的来由。</span>
-                  <span class="cue-translation">That part which I could not wholly forget has now become the origin of Call to Arms.</span>
+              <p class="mockup-para">
+                <span class="cue-group is-active" data-cue="0">
+                  <span class="interlinear-row"><span class="line-zh"><span class="line-zh-inner">老少校<u class="ink-underline">在农场里享有极高的声望</u>，以至于大家</span></span><span class="line-en"><span class="line-en-inner">Old Major <mark class="companion-en">was so highly regarded on the farm</mark></span></span></span><span class="interlinear-row"><span class="line-zh"><span class="line-zh-inner">都愿意牺牲一小时睡眠，来听他讲话。</span></span><span class="line-en"><span class="line-en-inner">that everyone was quite ready to lose an hour's sleep.</span></span></span>
                 </span>
               </p>
-              <div class="mockup-note-chip">
-                <span class="note-dot"></span>
-                <span>笔记 · 记忆与书写的起点</span>
-              </div>
+
+              <p class="mockup-para">
+                <span class="cue-group" data-cue="1">
+                  <span class="interlinear-row"><span class="line-zh"><span class="line-zh-inner">在大谷仓的一端，少校已经舒舒服服地</span></span><span class="line-en"><span class="line-en-inner">At one end of the big barn, Major was already</span></span></span><span class="interlinear-row"><span class="line-zh"><span class="line-zh-inner">躺在他铺着稻草的床铺上。</span></span><span class="line-en"><span class="line-en-inner">ensconced on his bed of straw.</span></span></span>
+                </span><span class="cue-group" data-cue="2">
+                  <span class="interlinear-row"><span class="line-zh"><span class="line-zh-inner">头顶横梁悬着一盏提灯，动物们静静围在</span></span><span class="line-en"><span class="line-en-inner">Under a lantern on a beam, the animals drew</span></span></span><span class="interlinear-row"><span class="line-zh"><span class="line-zh-inner">四周聆听。</span></span><span class="line-en"><span class="line-en-inner">quietly around to listen.</span></span></span>
+                </span>
+              </p>
             </article>
 
-            <div class="mockup-footer">
-              <div class="mockup-minibar">
-                <button
-                  type="button"
-                  id="mockup-play-btn"
-                  class="mockup-play-btn"
-                  aria-pressed="true"
-                  aria-label="播放或暂停示例朗读"
-                >
-                  <svg class="icon-pause" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-                    <rect x="6" y="5" width="4" height="14" rx="1.2" />
-                    <rect x="14" y="5" width="4" height="14" rx="1.2" />
-                  </svg>
-                  <svg class="icon-play" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-                    <polygon points="7,5 19,12 7,19" />
-                  </svg>
-                </button>
-                <span id="mockup-cue-label" class="mockup-cue-label">边听边看 · 句级高亮联动</span>
-                <button
-                  type="button"
-                  id="mockup-bilingual-btn"
-                  class="mockup-speed-pill mockup-bilingual-btn"
-                  aria-pressed="false"
-                  aria-label="切换双语对照预览"
-                  title="点击体验 HY-MT1.5 双语对照排版"
-                >双语</button>
-                <button
-                  type="button"
-                  id="mockup-speed-btn"
-                  class="mockup-speed-pill"
-                  aria-label="切换示例朗读倍速"
-                >1.0x</button>
-              </div>
-              <div class="mockup-progress-line" aria-hidden="true">
-                <span id="mockup-progress-fill" class="mockup-progress-fill"></span>
+            <div class="mockup-dock-wrap">
+              <div class="mockup-dock">
+                <div class="mockup-audio-strip">
+                  <div class="mockup-strip-left">
+                    <button
+                      type="button"
+                      id="mockup-lang-btn"
+                      class="mockup-mini-pill is-active"
+                      aria-pressed="true"
+                      aria-label="切换朗读译文或原文"
+                      title="点击切换朗读译文 / 原文"
+                    >译</button>
+                    <button
+                      type="button"
+                      id="mockup-speed-btn"
+                      class="mockup-mini-pill"
+                      aria-label="切换示例朗读倍速"
+                      title="点击切换 1.0x–1.75x 倍速"
+                    >1.0x</button>
+                  </div>
+
+                  <div class="mockup-transport">
+                    <button
+                      type="button"
+                      id="mockup-prev-btn"
+                      class="mockup-transport-btn"
+                      aria-label="上一句"
+                      title="上一句"
+                    >
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                        <rect x="6" y="6" width="2" height="12" rx="0.8" />
+                        <polygon points="18,6 10,12 18,18" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      id="mockup-play-btn"
+                      class="mockup-play-btn"
+                      aria-pressed="true"
+                      aria-label="播放或暂停示例朗读"
+                    >
+                      <svg class="icon-pause" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                        <rect x="6.5" y="5.5" width="3.5" height="13" rx="1" />
+                        <rect x="14" y="5.5" width="3.5" height="13" rx="1" />
+                      </svg>
+                      <svg class="icon-play" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                        <polygon points="7.5,5.5 18.5,12 7.5,18.5" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      id="mockup-next-btn"
+                      class="mockup-transport-btn"
+                      aria-label="下一句"
+                      title="下一句"
+                    >
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                        <polygon points="6,6 14,12 6,18" />
+                        <rect x="16" y="6" width="2" height="12" rx="0.8" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <span id="mockup-cue-label" class="mockup-cue-count">1 / 3 句</span>
+                </div>
+
+                <div class="mockup-dock-divider" aria-hidden="true"></div>
+
+                <div class="mockup-dock-nav">
+                  <button type="button" class="mockup-dock-item" aria-label="章节目录预览">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <line x1="8" y1="6" x2="21" y2="6" />
+                      <line x1="8" y1="12" x2="21" y2="12" />
+                      <line x1="8" y1="18" x2="21" y2="18" />
+                      <circle cx="4" cy="6" r="1" fill="currentColor" stroke="none" />
+                      <circle cx="4" cy="12" r="1" fill="currentColor" stroke="none" />
+                      <circle cx="4" cy="18" r="1" fill="currentColor" stroke="none" />
+                    </svg>
+                    <span>目录</span>
+                  </button>
+
+                  <button type="button" id="mockup-notes-btn" class="mockup-dock-item" aria-label="定位划线笔记示例" title="点击高亮已划线句">
+                    <span class="dock-icon-wrap">
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                      </svg>
+                      <span class="dock-badge-dot" aria-hidden="true"></span>
+                    </span>
+                    <span>笔记</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="mockup-bilingual-btn"
+                    class="mockup-dock-item is-active"
+                    aria-pressed="true"
+                    aria-label="切换双语对照、仅译文或原文"
+                    title="点击切换：双语对照 / 仅译文 / 原文"
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m5 8 6 6" />
+                      <path d="m4 14 6-6 2-3" />
+                      <path d="M2 5h12" />
+                      <path d="M7 2h1" />
+                      <path d="m22 22-5-10-5 10" />
+                      <path d="M14 18h6" />
+                    </svg>
+                    <span id="mockup-mode-label">双语中</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="mockup-paper-btn"
+                    class="mockup-dock-item"
+                    aria-pressed="false"
+                    aria-label="切换阅读纸张配色"
+                    title="点击切换暖墨纸 / 羊皮纸阅读预览"
+                  >
+                    <span class="dock-aa-icon" aria-hidden="true">Aa</span>
+                    <span>排版</span>
+                  </button>
+                </div>
+
+                <div class="mockup-progress-line" aria-hidden="true">
+                  <span id="mockup-progress-fill" class="mockup-progress-fill"></span>
+                </div>
               </div>
             </div>
           </div>
@@ -699,6 +806,6 @@
     </div>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20261128b"></script>
 </body>
 </html>
