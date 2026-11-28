@@ -1729,57 +1729,95 @@ html[data-theme="light"] .icon-moon { display: block; }
   font-size: 0.72rem;
 }
 
-.ecosystem-cta-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-}
-
-.route-banner-card {
+.ecosystem-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 22px;
+  gap: 20px;
+  padding: 20px 24px;
   border-radius: var(--radius-card);
   border: 1px solid var(--hairline);
   background: var(--surface-elevated);
-  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+  transition: border-color 200ms ease;
 }
 
-.route-banner-card:hover {
+.ecosystem-banner:hover {
   border-color: var(--hairline-gold);
-  transform: translateY(-1px);
 }
 
-.route-banner-card.is-primary {
-  border-color: var(--hairline-gold);
-  background: var(--badge-bg);
-}
-
-.route-banner-body {
+.ecosystem-banner-copy {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
-.route-banner-title {
-  font-size: 1rem;
-  font-weight: 650;
+.ecosystem-banner-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ecosystem-banner-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
   color: var(--text-primary);
 }
 
-.route-banner-desc {
-  font-size: 0.86rem;
+.ecosystem-banner-head .model-badge {
+  margin-left: 0;
+}
+
+.ecosystem-banner-copy p {
+  margin: 0;
+  font-size: 0.88rem;
   color: var(--text-secondary);
 }
 
-.route-banner-arrow {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--primary);
+.ecosystem-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   flex-shrink: 0;
+}
+
+.ecosystem-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: var(--radius-control);
+  font-size: 0.86rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.ecosystem-btn-secondary {
+  border: 1px solid var(--hairline);
+  background: var(--surface-base);
+  color: var(--text-primary);
+}
+
+.ecosystem-btn-secondary:hover {
+  border-color: var(--hairline-gold);
+  color: var(--primary);
+}
+
+.ecosystem-btn-primary {
+  border: 1px solid var(--hairline-gold);
+  background: var(--badge-bg);
+  color: var(--primary);
+}
+
+.ecosystem-btn-primary:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  transform: translateY(-1px);
 }
 
 /* Shared Callout Banner */
@@ -2111,8 +2149,14 @@ html[data-theme="light"] .validator-issues li.issue-error {
     display: inline-flex;
   }
 
-  .ecosystem-cta-grid {
-    grid-template-columns: 1fr;
+  .ecosystem-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px 20px;
+  }
+
+  .ecosystem-banner-actions {
+    width: 100%;
   }
 }
 
