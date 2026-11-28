@@ -1055,7 +1055,7 @@ html[data-theme="light"] .icon-moon { display: block; }
   font-weight: 600;
 }
 
-/* Ebook API subpage Hero & Scenario Route Card */
+/* Subpage Hero & Scenario Route Card */
 .subpage-hero {
   padding: 56px 0 64px;
 }
@@ -1493,6 +1493,10 @@ html[data-theme="light"] .icon-moon { display: block; }
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.steps-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .step-card {
   padding: 22px;
   border-radius: var(--radius-card);
@@ -1577,7 +1581,8 @@ html[data-theme="light"] .icon-moon { display: block; }
 
   .env-builder,
   .proxy-grid,
-  .steps-grid-3 {
+  .steps-grid-3,
+  .steps-grid-2 {
     grid-template-columns: 1fr;
   }
 }
@@ -1726,7 +1731,7 @@ html[data-theme="light"] .icon-moon { display: block; }
 
 .ecosystem-cta-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
 }
 

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var VALID_DRIVERS = ['rule', 'opds', 'ebook_api'];
+  var VALID_DRIVERS = ['rule', 'opds'];
   var VALID_MODES = ['json', 'html', 'xml'];
   var VALID_TEMPLATE_ROOTS = [
     'origin',
@@ -846,7 +846,7 @@
             (srcId || 'sources[' + i + ']') +
             ' 的 driver "' +
             rawSrc.driver +
-            '" 不受支持（仅支持 rule / opds / ebook_api）'
+            '" 不受支持（仅支持 rule / opds）'
         );
       }
 

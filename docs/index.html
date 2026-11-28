@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Echo · 回声 — 静默阅读，随时聆听</title>
-  <meta name="description" content="Echo（回声）是一款采用极简书房美学的跨平台听看一体书客户端，内置端侧离线语音与 HY-MT1.5 实时双语翻译引擎、免部署声明式书源（规则 / OPDS / Ebook API）、发现荐书、沉浸分页阅读与划线笔记，支持 Android、Windows、macOS 与 Linux。" />
+  <meta name="description" content="Echo（回声）是一款采用极简书房美学的跨平台听看一体书客户端，内置端侧离线语音与 HY-MT1.5 实时双语翻译引擎、免部署声明式书源（规则 / OPDS）、发现荐书、沉浸分页阅读与划线笔记，支持 Android、Windows、macOS 与 Linux。" />
   <meta name="theme-color" content="#0D0E10" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Echo · 回声 — 静默阅读，随时聆听" />
@@ -41,7 +41,6 @@
         <a href="#book-sources">书源生态</a>
         <a href="#download">全平台下载</a>
         <a href="book-sources.html">书源制作</a>
-        <a href="ebook-api.html">自建 API</a>
       </nav>
 
       <div class="header-actions">
@@ -233,7 +232,7 @@
             </div>
             <h3>免部署书源与发现荐书</h3>
             <p>
-              全新 <code>book-sources.v1</code> 端侧书源引擎支持规则、OPDS 书库与自建 <code>ebook-api</code> 三驱动，开箱内置 3 个公版书库；「发现」页集成托管荐书榜单（<code>discover-rules.json</code>），支持一键联动搜书。参阅 <a class="inline-link" href="book-sources.html">书源制作与 Skill 指南</a>。
+              全新 <code>book-sources.v1</code> 端侧书源引擎支持通用规则与 OPDS 书库双驱动，开箱内置 3 个公版书库；「发现」页集成托管荐书榜单（<code>discover-rules.json</code>），支持一键联动搜书。参阅 <a class="inline-link" href="book-sources.html">书源制作与 Skill 指南</a>。
             </p>
           </article>
 
@@ -517,14 +516,6 @@
             </span>
             <span class="route-banner-arrow" aria-hidden="true">→</span>
           </a>
-
-          <a class="route-banner-card" href="ebook-api.html">
-            <span class="route-banner-body">
-              <span class="route-banner-title">自建 Ebook API 后端（可选扩展）</span>
-              <span class="route-banner-desc">适合重度风控中转、多设备共享加密令牌或配合 CDN 缓存省配额，支持 Docker / NAS 3 分钟部署</span>
-            </span>
-            <span class="route-banner-arrow" aria-hidden="true">→</span>
-          </a>
         </div>
       </div>
     </section>
@@ -696,10 +687,8 @@
       </div>
       <div class="footer-links">
         <a href="book-sources.html">书源制作与 Skill</a>
-        <a href="ebook-api.html">自建 Ebook API</a>
         <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">GitHub 源码</a>
         <a href="https://github.com/imlinhanchao/echo-app/releases" target="_blank" rel="noopener noreferrer">Releases</a>
-        <a href="https://github.com/imlinhanchao/ebook-api" target="_blank" rel="noopener noreferrer">Ebook API 源码</a>
       </div>
     </div>
   </footer>

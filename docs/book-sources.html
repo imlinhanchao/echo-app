@@ -42,7 +42,6 @@
         <a href="#schema">规则与模板</a>
         <a href="#validator">本地校验</a>
         <a href="#import">导入管理</a>
-        <a href="ebook-api.html">自建 API</a>
       </nav>
 
       <div class="header-actions">
@@ -110,7 +109,7 @@
 
           <ul class="hero-specs" aria-label="书源核心特性">
             <li>零服务端部署</li>
-            <li>3 种驱动（rule / opds / ebook_api）</li>
+            <li>2 种驱动（rule / opds）</li>
             <li>3 层隔离不泄密</li>
             <li>纯 Dart CLI + 网页自检</li>
           </ul>
@@ -147,15 +146,6 @@
                 <span class="scenario-body">
                   <span class="scenario-title">已有 JSON，在浏览器本地校验与脱敏审计</span>
                   <span class="scenario-desc">即时检查 Schema、模板变量、Dart 正则兼容性与硬编码凭据</span>
-                </span>
-                <span class="scenario-arrow" aria-hidden="true">→</span>
-              </a>
-
-              <a class="scenario-item" href="ebook-api.html">
-                <span class="scenario-badge">自建后端</span>
-                <span class="scenario-body">
-                  <span class="scenario-title">站点有强人机挑战或需 CDN 缓存省配额</span>
-                  <span class="scenario-desc">改用 Go 单二进制 <code>ebook-api</code> 桥接（三分钟部署）</span>
                 </span>
                 <span class="scenario-arrow" aria-hidden="true">→</span>
               </a>
@@ -337,7 +327,6 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
           <span class="callout-banner-text">
             <strong>架构安全边界：</strong>Echo 的 <code>rule</code> 引擎是纯声明式引擎，<strong>刻意不内置 JS 执行器（QuickJS / V8）与隐藏 WebView</strong>；且书架本地导入当前仅支持 <strong><code>.epub</code></strong> 与 <strong><code>.txt</code></strong> 格式。
           </span>
-          <a class="callout-banner-link" href="ebook-api.html">重度风控转 ebook-api →</a>
         </div>
 
         <div class="table-wrap">
@@ -373,7 +362,7 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
               <tr>
                 <td>存在 Cloudflare Turnstile / hCaptcha / 滑块或每次登录下载强制图形验证码</td>
                 <td><span class="verdict-badge verdict-no">不可直接转</span></td>
-                <td>静态规则无法自动过人机验证，请优先使用官方开放 API 或转用 <code>ebook-api</code></td>
+                <td>静态规则无法自动过人机验证，请优先使用站点官方开放 API 或放弃接入</td>
               </tr>
               <tr>
                 <td>参数或下载链接依赖混淆 JS 签名（动态 AES / WASM Token）或 DRM 加密</td>
@@ -395,13 +384,13 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
       <div class="container">
         <div class="section-head">
           <span class="eyebrow">Step 3 · 规则结构与模板</span>
-          <h2 class="section-title"><code>book-sources.v1</code> 三种驱动与标准范例</h2>
+          <h2 class="section-title"><code>book-sources.v1</code> 驱动类型与标准范例</h2>
           <p class="section-desc">
             支持导入单条书源对象（Single Source）或合集（Bundle，含 <code>config_version</code> 与 <code>config_ttl_hours</code>）。以下全部模板均使用 <code>example.org</code> 占位并可通过严格校验。
           </p>
         </div>
 
-        <div class="steps-grid steps-grid-3" style="margin-bottom: 24px;">
+        <div class="steps-grid steps-grid-2" style="margin-bottom: 24px;">
           <article class="step-card">
             <span class="step-num">driver: rule</span>
             <h3>通用规则引擎</h3>
@@ -415,14 +404,6 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
             <h3>OPDS 原生书库</h3>
             <p>
               原生兼容 OPDS 1.2（Atom XML + OpenSearch）与 OPDS 2.0 JSON，自动发现搜索模板并按 <code>prefer_formats</code> 选择 <code>epub</code> / <code>txt</code>。
-            </p>
-          </article>
-
-          <article class="step-card">
-            <span class="step-num">driver: ebook_api</span>
-            <h3>Ebook API 兼容桥接</h3>
-            <p>
-              与任意自建 <code>ebook-api</code> 后端互通，统一收纳到「书源管理」与单源搜索切换器中（旧版设置首次启动自动迁移）。
             </p>
           </article>
         </div>
@@ -916,7 +897,7 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
           </article>
         </div>
 
-        <div class="steps-grid" style="margin-bottom: 24px;">
+        <div class="steps-grid steps-grid-3" style="margin-bottom: 24px;">
           <article class="step-card">
             <span class="step-num">方式 1</span>
             <h3>URL 订阅</h3>
@@ -938,14 +919,6 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
             <h3>OPDS 书库</h3>
             <p>
               切换至「OPDS 书库」表单，填入 Calibre / Komga 等目录地址与可选用户名密码，免写 JSON 一键接入。
-            </p>
-          </article>
-
-          <article class="step-card">
-            <span class="step-num">方式 4</span>
-            <h3>ebook-api</h3>
-            <p>
-              切换至「ebook-api」标签填写自建服务地址与 <code>API Key</code>，测试连通后纳入同一书源切换体系。
             </p>
           </article>
         </div>
@@ -1008,7 +981,6 @@ cp -r .agents/skills/echo-book-source-author ~/.gemini/antigravity/skills/echo-b
       </div>
       <div class="footer-links">
         <a href="index.html">Echo 官网首页</a>
-        <a href="ebook-api.html">自建 Ebook API</a>
         <a href="https://github.com/imlinhanchao/echo-app" target="_blank" rel="noopener noreferrer">Echo App 源码</a>
         <a href="https://github.com/imlinhanchao/echo-app/tree/standalone/.agents/skills/echo-book-source-author" target="_blank" rel="noopener noreferrer">书源 Skill 源码</a>
       </div>
