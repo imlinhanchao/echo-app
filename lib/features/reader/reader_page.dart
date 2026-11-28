@@ -25,6 +25,7 @@ import '../../core/translation/translation_scheduler.dart';
 import '../../core/tts/sentence_splitter.dart';
 import '../../core/tts/tts_model_manager.dart';
 import '../../design/echo_buttons.dart';
+import '../../design/echo_glass.dart';
 import '../../design/echo_metrics.dart';
 import '../../design/echo_surfaces.dart';
 import '../../design/echo_tokens.dart';
@@ -95,12 +96,36 @@ class ReaderPageView extends ConsumerStatefulWidget {
 
 enum _ReaderTheme { warmDark, pureBlack, lightPaper }
 
+@immutable
+class _ReaderPalette {
+  const _ReaderPalette({
+    required this.bg,
+    required this.fg,
+    required this.secondary,
+    required this.chromeBg,
+    required this.hairline,
+    required this.accent,
+    required this.onAccent,
+    required this.isDarkSurface,
+  });
+
+  final Color bg;
+  final Color fg;
+  final Color secondary;
+  final Color chromeBg;
+  final Color hairline;
+  final Color accent;
+  final Color onAccent;
+  final bool isDarkSurface;
+}
+
 const TextHeightBehavior _kReaderTextHeightBehavior = TextHeightBehavior(
   applyHeightToFirstAscent: true,
   applyHeightToLastDescent: true,
 );
 
-class _ReaderPageState extends ConsumerState<ReaderPageView> {
+class _ReaderPageState extends ConsumerState<ReaderPageView>
+    with SingleTickerProviderStateMixin {
   PageController _pageController = PageController();
   int _pageViewEpoch = 0;
 
@@ -113,6 +138,10 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   bool _loading = true;
   String? _error;
   bool _listening = false;
+
+  /// 阅读沉浸态控制：默认隐藏工具栏，点击正文后显露工具栏并隐藏章节/页码信息。
+  bool _chromeVisible = false;
+  late final AnimationController _chromeController;
 
   /// 上次已知的阅读位置（章号 + 字符偏移），用于重排后复原。
   int _chapterIndex = 0;
@@ -157,6 +186,12 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   @override
   void initState() {
     super.initState();
+    _chromeController = AnimationController(
+      vsync: this,
+      duration: EchoMetrics.motionBase,
+      reverseDuration: EchoMetrics.motionFast,
+      value: 0.0,
+    );
     _screenKeepAlive = ref.read(screenKeepAliveServiceProvider);
     final keepScreenOn =
         ref.read(standaloneConfigProvider).keepScreenOnWhileReading;
@@ -198,8 +233,26 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     _bilingualRepaginateDebounce?.cancel();
     _nextChapterPrewarmTimer?.cancel();
     unawaited(_screenKeepAlive.setEnabled(false));
+    _chromeController.dispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  void _setChromeVisible(bool visible) {
+    if (!mounted || visible == _chromeVisible) return;
+    setState(() => _chromeVisible = visible);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (reduceMotion) {
+      _chromeController.value = visible ? 1.0 : 0.0;
+    } else if (visible) {
+      _chromeController.forward();
+    } else {
+      _chromeController.reverse();
+    }
+  }
+
+  void _toggleChrome() {
+    _setChromeVisible(!_chromeVisible);
   }
 
   List<ParagraphSegment> _paragraphsForChapter(ChapterPreview chapter) {
@@ -265,24 +318,38 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     return _findChapterArrayIdx(_chapters, _chapterIndex);
   }
 
-  ({Color bg, Color fg, Color secondary}) _themeColors(EchoTokens tokens) =>
-      switch (_readerTheme) {
-        _ReaderTheme.warmDark => (
-          bg: tokens.paperWarm,
-          fg: tokens.paperText,
-          secondary: tokens.textSecondary,
-        ),
-        _ReaderTheme.pureBlack => (
-          bg: const Color(0xFF000000),
-          fg: const Color(0xFFE2E8F0),
-          secondary: const Color(0xFF94A3B8),
-        ),
-        _ReaderTheme.lightPaper => (
-          bg: const Color(0xFFF6F1E7),
-          fg: const Color(0xFF1E293B),
-          secondary: const Color(0xFF64748B),
-        ),
-      };
+  _ReaderPalette _themeColors(EchoTokens tokens) => switch (_readerTheme) {
+    _ReaderTheme.warmDark => _ReaderPalette(
+      bg: tokens.paperWarm,
+      fg: tokens.paperText,
+      secondary: tokens.textSecondary,
+      chromeBg: Color.lerp(tokens.surfaceElevated, tokens.paperWarm, 0.15)!,
+      hairline: Colors.white.withValues(alpha: 0.09),
+      accent: const Color(0xFFD4AE74),
+      onAccent: const Color(0xFF14120F),
+      isDarkSurface: true,
+    ),
+    _ReaderTheme.pureBlack => _ReaderPalette(
+      bg: const Color(0xFF000000),
+      fg: const Color(0xFFE6E4DE),
+      secondary: const Color(0xFF9A9791),
+      chromeBg: const Color(0xFF141416),
+      hairline: Colors.white.withValues(alpha: 0.09),
+      accent: const Color(0xFFD4AE74),
+      onAccent: const Color(0xFF14120F),
+      isDarkSurface: true,
+    ),
+    _ReaderTheme.lightPaper => _ReaderPalette(
+      bg: const Color(0xFFF6F1E7),
+      fg: const Color(0xFF1E1B18),
+      secondary: const Color(0xFF6B655D),
+      chromeBg: const Color(0xFFFDFBF7),
+      hairline: const Color(0xFF1E1B18).withValues(alpha: 0.09),
+      accent: const Color(0xFF8F6836),
+      onAccent: const Color(0xFFFDFBF7),
+      isDarkSurface: false,
+    ),
+  };
 
   TextStyle _textStyle(EchoTokens tokens) => TextStyle(
     fontFamily: 'serif',
@@ -948,6 +1015,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                     ),
                     onTap: () {
                       Navigator.of(sheetCtx).pop();
+                      _setChromeVisible(false);
                       _jumpToChapterArrayIndex(i);
                     },
                   );
@@ -1012,6 +1080,9 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     }
     if (notification is ScrollStartNotification) {
       _isUserDragging = notification.dragDetails != null;
+      if (_isUserDragging && _chromeVisible) {
+        _setChromeVisible(false);
+      }
       _overscrollDelta = 0.0;
       final metrics = notification.metrics;
       _scrollStartedAtStart = metrics.pixels <= metrics.minScrollExtent + 1.0;
@@ -1105,6 +1176,18 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     return ((readChars / totalChars) * 100).round().clamp(1, 100);
   }
 
+  Widget _themeSwatchAvatar(Color bg, Color border) {
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: bg,
+        shape: BoxShape.circle,
+        border: Border.all(color: border.withValues(alpha: 0.45), width: 1),
+      ),
+    );
+  }
+
   /// 排版设置面板（字号滑块 / 行距滑块 / 护眼底色 / 阅读防锁屏）。
   void _showTypographySheet() {
     final tokens = Theme.of(context).extension<EchoTokens>()!;
@@ -1196,6 +1279,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                     children: [
                       ChoiceChip(
                         key: const Key('reader_theme_warmDark'),
+                        avatar: _themeSwatchAvatar(tokens.paperWarm, tokens.paperText),
                         label: const Text('暖纸深底'),
                         selected: _readerTheme == _ReaderTheme.warmDark,
                         onSelected: (_) {
@@ -1207,6 +1291,10 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                       ),
                       ChoiceChip(
                         key: const Key('reader_theme_pureBlack'),
+                        avatar: _themeSwatchAvatar(
+                          const Color(0xFF000000),
+                          const Color(0xFFE6E4DE),
+                        ),
                         label: const Text('纯黑夜读'),
                         selected: _readerTheme == _ReaderTheme.pureBlack,
                         onSelected: (_) {
@@ -1218,6 +1306,10 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                       ),
                       ChoiceChip(
                         key: const Key('reader_theme_lightPaper'),
+                        avatar: _themeSwatchAvatar(
+                          const Color(0xFFF6F1E7),
+                          const Color(0xFF1E1B18),
+                        ),
                         label: const Text('柔和亮白'),
                         selected: _readerTheme == _ReaderTheme.lightPaper,
                         onSelected: (_) {
@@ -1922,6 +2014,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
 
   void _jumpToAnnotation(ReadingAnnotation ann) {
     if (_chapters.isEmpty) return;
+    _setChromeVisible(false);
     final targetArrayIdx = _findChapterArrayIdx(_chapters, ann.chapterIndex);
     final targetChapter = _chapters[targetArrayIdx];
     if (targetChapter.index == _chapterIndex &&
@@ -2234,7 +2327,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   void _openSpeedSheet({
     required double initialSpeed,
     required String title,
-    required ({Color bg, Color fg, Color secondary}) palette,
+    required _ReaderPalette palette,
     required ValueChanged<double> onChanged,
   }) {
     showPlaybackSpeedSheet(
@@ -2248,229 +2341,509 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     );
   }
 
-  Widget _buildCompactLiveControls(
-    EchoTokens tokens,
-    ({Color bg, Color fg, Color secondary}) palette,
+  Widget _buildLiveAudioStrip(
+    _ReaderPalette palette,
     LiveTtsState liveState,
   ) {
     final liveCtrl = ref.read(liveTtsPlayerProvider.notifier);
-    const btnConstraints = BoxConstraints.tightFor(width: 32, height: 32);
-    return Row(
+    const navConstraints = BoxConstraints.tightFor(width: 38, height: 38);
+    const playConstraints = BoxConstraints.tightFor(width: 40, height: 40);
+    return SizedBox(
       key: const Key('reader_live_control_bar'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_displayMode != BilingualDisplayMode.original) ...[
-          InkWell(
-            key: const Key('reader_live_lang_toggle'),
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => unawaited(
-              liveCtrl.setSpeakTranslated(!liveState.speakTranslated),
-            ),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: liveState.speakTranslated
-                    ? tokens.primary.withValues(alpha: 0.16)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: liveState.speakTranslated
-                      ? tokens.primary
-                      : palette.secondary.withValues(alpha: 0.35),
+      height: 52,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_displayMode != BilingualDisplayMode.original) ...[
+                      InkWell(
+                        key: const Key('reader_live_lang_toggle'),
+                        borderRadius: BorderRadius.circular(
+                          EchoMetrics.radiusPill,
+                        ),
+                        onTap: () => unawaited(
+                          liveCtrl.setSpeakTranslated(
+                            !liveState.speakTranslated,
+                          ),
+                        ),
+                        child: Container(
+                          height: 28,
+                          padding: const EdgeInsets.symmetric(horizontal: 9),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: liveState.speakTranslated
+                                ? palette.accent.withValues(alpha: 0.12)
+                                : palette.fg.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(
+                              EchoMetrics.radiusPill,
+                            ),
+                            border: Border.all(
+                              color: liveState.speakTranslated
+                                  ? palette.accent.withValues(alpha: 0.42)
+                                  : palette.hairline,
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Text(
+                            liveState.speakTranslated ? '译' : '原',
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.1,
+                              fontWeight: FontWeight.w600,
+                              color: liveState.speakTranslated
+                                  ? palette.accent
+                                  : palette.fg,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    buildCompactSpeedPill(
+                      key: const Key('reader_live_speed_button'),
+                      speed: liveState.speed,
+                      accentColor: palette.accent,
+                      textColor: palette.fg,
+                      borderColor: palette.secondary,
+                      onTap: () => _openSpeedSheet(
+                        initialSpeed: liveState.speed,
+                        title: '朗读语速',
+                        palette: palette,
+                        onChanged: (s) => unawaited(liveCtrl.setSpeed(s)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Text(
-                liveState.speakTranslated ? '译' : '原',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: liveState.speakTranslated ? tokens.primary : palette.fg,
-                ),
-              ),
             ),
-          ),
-          const SizedBox(width: 4),
-        ],
-        buildCompactSpeedPill(
-          key: const Key('reader_live_speed_button'),
-          speed: liveState.speed,
-          accentColor: tokens.primary,
-          textColor: palette.fg,
-          borderColor: palette.secondary.withValues(alpha: 0.28),
-          onTap: () => _openSpeedSheet(
-            initialSpeed: liveState.speed,
-            title: '朗读语速',
-            palette: palette,
-            onChanged: (s) => unawaited(liveCtrl.setSpeed(s)),
-          ),
-        ),
-        const SizedBox(width: 2),
-        IconButton(
-          key: const Key('reader_live_prev_sentence'),
-          tooltip: '上一句',
-          padding: EdgeInsets.zero,
-          constraints: btnConstraints,
-          visualDensity: VisualDensity.compact,
-          onPressed: liveCtrl.prevSentence,
-          icon: Icon(Icons.skip_previous_rounded, size: 20, color: palette.fg),
-        ),
-        IconButton(
-          key: const Key('reader_live_toggle_play'),
-          tooltip: liveState.isPlaying ? '暂停朗读' : '继续朗读',
-          padding: EdgeInsets.zero,
-          constraints: btnConstraints,
-          visualDensity: VisualDensity.compact,
-          onPressed: liveCtrl.togglePlayPause,
-          icon: liveState.isSynthesizing
-              ? SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: tokens.primary,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  key: const Key('reader_live_prev_sentence'),
+                  tooltip: '上一句',
+                  padding: EdgeInsets.zero,
+                  constraints: navConstraints,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: liveCtrl.prevSentence,
+                  icon: Icon(
+                    Icons.skip_previous_rounded,
+                    size: 22,
+                    color: palette.fg,
                   ),
-                )
-              : Icon(
-                  liveState.isPlaying
-                      ? Icons.pause_circle_filled
-                      : Icons.play_circle_filled,
-                  size: 22,
-                  color: tokens.primary,
                 ),
+                const SizedBox(width: 4),
+                Material(
+                  color: palette.accent.withValues(alpha: 0.16),
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    key: const Key('reader_live_toggle_play'),
+                    tooltip: liveState.isPlaying ? '暂停朗读' : '继续朗读',
+                    padding: EdgeInsets.zero,
+                    constraints: playConstraints,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: liveCtrl.togglePlayPause,
+                    icon: liveState.isSynthesizing
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: palette.accent,
+                            ),
+                          )
+                        : Icon(
+                            liveState.isPlaying
+                                ? Icons.pause_circle_filled
+                                : Icons.play_circle_filled,
+                            size: 26,
+                            color: palette.accent,
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  key: const Key('reader_live_next_sentence'),
+                  tooltip: '下一句',
+                  padding: EdgeInsets.zero,
+                  constraints: navConstraints,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: liveCtrl.nextSentence,
+                  icon: Icon(
+                    Icons.skip_next_rounded,
+                    size: 22,
+                    color: palette.fg,
+                  ),
+                ),
+              ],
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  key: const Key('reader_live_stop'),
+                  tooltip: '停止听书',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 36,
+                    height: 36,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: liveCtrl.stop,
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 19,
+                    color: palette.secondary,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-        IconButton(
-          key: const Key('reader_live_next_sentence'),
-          tooltip: '下一句',
-          padding: EdgeInsets.zero,
-          constraints: btnConstraints,
-          visualDensity: VisualDensity.compact,
-          onPressed: liveCtrl.nextSentence,
-          icon: Icon(Icons.skip_next_rounded, size: 20, color: palette.fg),
-        ),
-        IconButton(
-          key: const Key('reader_live_stop'),
-          tooltip: '停止听书',
-          padding: EdgeInsets.zero,
-          constraints: btnConstraints,
-          visualDensity: VisualDensity.compact,
-          onPressed: liveCtrl.stop,
-          icon: Icon(Icons.close, size: 18, color: palette.secondary),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildUnifiedBottomBar({
-    required EchoTokens tokens,
+  Widget _buildChunkedAudioStrip(
+    _ReaderPalette palette,
+    double chunkedSpeed,
+    bool isPlayingThisBook,
+  ) {
+    return SizedBox(
+      height: 48,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            buildCompactSpeedPill(
+              key: const Key('reader_chunked_speed_button'),
+              speed: chunkedSpeed,
+              accentColor: palette.accent,
+              textColor: palette.fg,
+              borderColor: palette.secondary.withValues(alpha: 0.30),
+              onTap: () => _openSpeedSheet(
+                initialSpeed: chunkedSpeed,
+                title: '播放倍速',
+                palette: palette,
+                onChanged: (s) => unawaited(
+                  ref.read(chunkedPlayerProvider.notifier).setSpeed(s),
+                ),
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              key: const Key('reader_open_player'),
+              style: TextButton.styleFrom(
+                foregroundColor: palette.accent,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => openPlayer(context),
+              icon: Icon(
+                isPlayingThisBook ? Icons.graphic_eq : Icons.play_circle_outline,
+                size: 17,
+              ),
+              label: const Text('全屏播放器'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopToolBar({
+    required _ReaderPalette palette,
     required TextTheme textTheme,
-    required ({Color bg, Color fg, Color secondary}) palette,
-    required int currentArrayIdx,
-    required ReaderPage? page,
-    required int bookPct,
+    required bool hasReadableContent,
+    required bool isPlayingThisBook,
+    required bool hasAudio,
+  }) {
+    return EchoGlassSurface(
+      surfaceColor: palette.chromeBg,
+      opacity: palette.isDarkSurface ? 0.90 : 0.95,
+      border: Border(
+        bottom: BorderSide(color: palette.hairline, width: 0.8),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: SizedBox(
+              key: const Key('reader_top_bar'),
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    IconButton(
+                      key: const Key('reader_back_button'),
+                      tooltip: '返回',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 48,
+                        height: 48,
+                      ),
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: Icon(
+                        Icons.arrow_back_rounded,
+                        color: palette.fg,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        widget.book.title,
+                        key: const Key('reader_book_title'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleMedium?.copyWith(
+                          color: palette.fg,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (hasReadableContent) ...[
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: isPlayingThisBook ? '从本页听书 / 暂停' : '边听边看',
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: InkWell(
+                            key: const Key('reader_play_button'),
+                            borderRadius: BorderRadius.circular(
+                              EchoMetrics.radiusPill,
+                            ),
+                            onTap: _loading ? null : () => _listenFromHere(),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minHeight: 40,
+                                minWidth: 48,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: isPlayingThisBook
+                                        ? palette.accent.withValues(alpha: 0.16)
+                                        : palette.fg.withValues(alpha: 0.06),
+                                    borderRadius: BorderRadius.circular(
+                                      EchoMetrics.radiusPill,
+                                    ),
+                                    border: Border.all(
+                                      color: isPlayingThisBook
+                                          ? palette.accent.withValues(alpha: 0.55)
+                                          : palette.hairline,
+                                      width: 0.8,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          isPlayingThisBook
+                                              ? Icons.pause_circle_filled
+                                              : Icons.headphones,
+                                          size: 18,
+                                          color: isPlayingThisBook
+                                              ? palette.accent
+                                              : (hasAudio
+                                                    ? palette.fg
+                                                    : palette.secondary
+                                                          .withValues(
+                                                            alpha: 0.55,
+                                                          )),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          isPlayingThisBook ? '朗读中' : '听书',
+                                          style: textTheme.labelMedium?.copyWith(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: isPlayingThisBook
+                                                ? palette.accent
+                                                : (hasAudio
+                                                      ? palette.fg
+                                                      : palette.secondary
+                                                            .withValues(
+                                                              alpha: 0.65,
+                                                            )),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFloatingToolDock({
+    required _ReaderPalette palette,
+    required TextTheme textTheme,
+    required List<ReadingAnnotation> annotations,
     required bool isLiveThisBook,
     required LiveTtsState liveState,
     required bool isThisBookLoaded,
     required bool isPlayingThisBook,
     required double chunkedSpeed,
-    required bool hasAudio,
   }) {
-    final compactLabelStyle = textTheme.labelSmall?.copyWith(
-      color: palette.secondary,
-    );
-    return Container(
-      key: const Key('reader_bottom_bar'),
-      decoration: BoxDecoration(
-        color: palette.bg,
-        border: Border(
-          top: BorderSide(color: palette.secondary.withValues(alpha: 0.16)),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 48,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '第 ${currentArrayIdx + 1}/${_chapters.length} 章 · '
-                          '${page?.pageInChapter ?? 1}/${page?.pageCountInChapter ?? 1} 页',
-                          key: const Key('reader_page_indicator'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: compactLabelStyle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '全书 $bookPct%',
-                        key: const Key('reader_global_indicator'),
-                        style: compactLabelStyle,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 4),
-                if (isLiveThisBook)
-                  _buildCompactLiveControls(tokens, palette, liveState)
-                else if (isThisBookLoaded)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      buildCompactSpeedPill(
-                        key: const Key('reader_chunked_speed_button'),
-                        speed: chunkedSpeed,
-                        accentColor: tokens.primary,
-                        textColor: palette.fg,
-                        borderColor: palette.secondary.withValues(alpha: 0.28),
-                        onTap: () => _openSpeedSheet(
-                          initialSpeed: chunkedSpeed,
-                          title: '播放倍速',
-                          palette: palette,
-                          onChanged: (s) => unawaited(
-                            ref
-                                .read(chunkedPlayerProvider.notifier)
-                                .setSpeed(s),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      TextButton.icon(
-                        key: const Key('reader_open_player'),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          minimumSize: const Size(0, 36),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        onPressed: () => openPlayer(context),
-                        icon: Icon(
-                          isPlayingThisBook
-                              ? Icons.graphic_eq
-                              : Icons.play_circle_outline,
-                          size: 16,
-                        ),
-                        label: const Text('全屏播放器'),
-                      ),
-                    ],
-                  )
-                else if (hasAudio)
-                  TextButton.icon(
-                    key: const Key('reader_listen_here'),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      minimumSize: const Size(0, 36),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final translateLabel = switch (_displayMode) {
+      BilingualDisplayMode.original => '双语',
+      BilingualDisplayMode.bilingual => '双语中',
+      BilingualDisplayMode.translatedOnly => '仅译文',
+    };
+    final translateActive = _displayMode != BilingualDisplayMode.original;
+    final hasAudioStrip = isLiveThisBook || isThisBookLoaded;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Material(
+              color: Colors.transparent,
+              child: EchoGlassSurface(
+                borderRadius: BorderRadius.circular(20),
+                surfaceColor: palette.chromeBg,
+                opacity: palette.isDarkSurface ? 0.90 : 0.95,
+                border: Border.all(color: palette.hairline, width: 0.8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: palette.isDarkSurface ? 0.42 : 0.10,
                     ),
-                    onPressed: () => _listenFromHere(),
-                    icon: const Icon(Icons.play_circle_outline, size: 16),
-                    label: const Text('边听边看'),
+                    blurRadius: 20,
+                    offset: const Offset(0, 6),
                   ),
-              ],
+                ],
+                child: Column(
+                  key: const Key('reader_bottom_bar'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (hasAudioStrip) ...[
+                      if (isLiveThisBook)
+                        _buildLiveAudioStrip(palette, liveState)
+                      else
+                        _buildChunkedAudioStrip(
+                          palette,
+                          chunkedSpeed,
+                          isPlayingThisBook,
+                        ),
+                      Divider(
+                        height: 1,
+                        thickness: 0.8,
+                        indent: 12,
+                        endIndent: 12,
+                        color: palette.hairline,
+                      ),
+                    ],
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _ReaderDockItem(
+                              itemKey: const Key('reader_toc_button'),
+                              tooltip: '目录',
+                              icon: Icons.format_list_bulleted_rounded,
+                              label: '目录',
+                              fgColor: palette.fg,
+                              accentColor: palette.accent,
+                              onTap: _loading || _chapters.isEmpty
+                                  ? null
+                                  : _showToc,
+                            ),
+                          ),
+                          Expanded(
+                            child: _ReaderDockItem(
+                              itemKey: const Key('reader_notes_button'),
+                              tooltip: '划线与笔记',
+                              icon: Icons.edit_note_rounded,
+                              label: '笔记',
+                              showBadgeDot: annotations.isNotEmpty,
+                              fgColor: palette.fg,
+                              accentColor: palette.accent,
+                              onTap: _loading ? null : _showBookNotes,
+                            ),
+                          ),
+                          Expanded(
+                            child: _ReaderDockItem(
+                              itemKey: const Key('reader_translate_button'),
+                              tooltip: '双语翻译',
+                              icon: Icons.translate_rounded,
+                              label: translateLabel,
+                              active: translateActive,
+                              fgColor: palette.fg,
+                              accentColor: palette.accent,
+                              onTap: _loading || _chapters.isEmpty
+                                  ? null
+                                  : _showTranslationSheet,
+                            ),
+                          ),
+                          Expanded(
+                            child: _ReaderDockItem(
+                              itemKey: const Key('reader_font_button'),
+                              tooltip: '排版设置',
+                              label: '排版',
+                              fgColor: palette.fg,
+                              accentColor: palette.accent,
+                              customIcon: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: Center(
+                                  child: Text(
+                                    'Aa',
+                                    style: textTheme.labelLarge?.copyWith(
+                                      fontFamily: 'serif',
+                                      fontSize: 16,
+                                      height: 1.0,
+                                      fontWeight: FontWeight.w700,
+                                      color: palette.fg,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              onTap: _loading ? null : _showTypographySheet,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -2661,275 +3034,418 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
                   : '第 ${currentArrayIdx + 1} 章'));
     final bookPct = _computeBookProgressPercent();
 
-    return Scaffold(
-      key: const Key('reader_page'),
-      backgroundColor: palette.bg,
-      appBar: AppBar(
-        backgroundColor: palette.bg,
-        foregroundColor: palette.fg,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.book.title,
-              key: const Key('reader_book_title'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: textTheme.titleMedium?.copyWith(color: palette.fg),
-            ),
-            Text(
-              headerChapterTitle,
-              key: const Key('reader_chapter_label'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: textTheme.bodySmall?.copyWith(color: palette.secondary),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            key: const Key('reader_toc_button'),
-            tooltip: '目录',
-            visualDensity: VisualDensity.compact,
-            onPressed: _loading || _chapters.isEmpty ? null : _showToc,
-            icon: Icon(Icons.list, color: palette.fg),
-          ),
-          IconButton(
-            key: const Key('reader_notes_button'),
-            tooltip: '划线与笔记',
-            visualDensity: VisualDensity.compact,
-            onPressed: _loading ? null : _showBookNotes,
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(Icons.edit_note_outlined, color: palette.fg),
-                if (annotations.isNotEmpty)
-                  Positioned(
-                    right: -2,
-                    top: -1,
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: tokens.primary,
+    final hasReadableContent =
+        !_loading && _error == null && _chapters.isNotEmpty;
+    final overlayStyle = palette.isDarkSurface
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark;
+    final readingMetaStyle = textTheme.labelSmall?.copyWith(
+      fontSize: 12,
+      color: palette.secondary.withValues(alpha: 0.72),
+      fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+    );
+
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_chromeVisible) _setChromeVisible(false);
+        },
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: Scaffold(
+          key: const Key('reader_page'),
+          backgroundColor: palette.bg,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Layer 1: 恒定几何尺寸的正文画布（顶部/底部仅在阅读态渲染章节与进度信息）
+              if (_loading)
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 56),
+                    child: Center(
+                      child: CircularProgressIndicator(color: tokens.primary),
+                    ),
+                  ),
+                )
+              else if (_error != null)
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 56),
+                    child: Center(
+                      key: const Key('reader_error'),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(EchoMetrics.space3),
+                            child: Text(
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: tokens.error,
+                              ),
+                            ),
+                          ),
+                          FilledButton(
+                            onPressed: _loadChapters,
+                            child: const Text('重试'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-              ],
-            ),
-          ),
-          IconButton(
-            key: const Key('reader_translate_button'),
-            tooltip: '双语翻译',
-            visualDensity: VisualDensity.compact,
-            onPressed: _loading || _chapters.isEmpty
-                ? null
-                : _showTranslationSheet,
-            icon: Icon(
-              Icons.translate_rounded,
-              color: _displayMode != BilingualDisplayMode.original
-                  ? tokens.primary
-                  : palette.fg,
-            ),
-          ),
-          IconButton(
-            key: const Key('reader_font_button'),
-            tooltip: '排版设置',
-            visualDensity: VisualDensity.compact,
-            onPressed: _loading ? null : _showTypographySheet,
-            icon: Text(
-              'Aa',
-              style: textTheme.labelLarge?.copyWith(color: palette.fg),
-            ),
-          ),
-          IconButton(
-            key: const Key('reader_play_button'),
-            tooltip: isPlayingThisBook ? '从本页听书 / 暂停' : '边听边看',
-            visualDensity: VisualDensity.compact,
-            onPressed: _loading ? null : () => _listenFromHere(),
-            icon: Icon(
-              isPlayingThisBook
-                  ? Icons.pause_circle_filled
-                  : Icons.headphones,
-              color: isPlayingThisBook
-                  ? tokens.primary
-                  : (hasAudio ? palette.fg : tokens.textDisabled),
-            ),
-          ),
-        ],
-      ),
-      body: _loading
-          ? Center(child: CircularProgressIndicator(color: tokens.primary))
-          : _error != null
-          ? Center(
-              key: const Key('reader_error'),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(EchoMetrics.space3),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: tokens.error,
+                )
+              else if (_chapters.isEmpty)
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 56),
+                    child: Center(
+                      key: const Key('reader_empty'),
+                      child: Text(
+                        '本书暂无可读章节（支持 EPUB / TXT 格式）',
+                        style: textTheme.bodyLarge?.copyWith(
+                          color: palette.secondary,
+                        ),
                       ),
                     ),
                   ),
-                  FilledButton(
-                    onPressed: _loadChapters,
-                    child: const Text('重试'),
-                  ),
-                ],
-              ),
-            )
-          : _chapters.isEmpty
-          ? Center(
-              key: const Key('reader_empty'),
-              child: Text(
-                '本书暂无可读章节（支持 EPUB / TXT 格式）',
-                style: textTheme.bodyLarge?.copyWith(
-                  color: palette.secondary,
-                ),
-              ),
-            )
-          : Column(
-              children: [
-                if (_showForeignBanner &&
-                    _displayMode == BilingualDisplayMode.original)
-                  _buildForeignPromptBanner(
-                    tokens: tokens,
-                    textTheme: textTheme,
-                    palette: palette,
-                  ),
-                if (translationError != null && translationError.isNotEmpty)
-                  _buildTranslationErrorBanner(
-                    errorText: translationError,
-                    tokens: tokens,
-                    textTheme: textTheme,
-                    palette: palette,
-                  ),
-                if (_displayMode != BilingualDisplayMode.original)
-                  SizedBox(
-                    height: 26,
-                    child: showProgressStrip && !_switchingChapter
-                        ? _buildBilingualProgressStrip(
-                            doneOnPage: doneOnPage,
-                            totalOnPage: totalOnPage,
-                            tokens: tokens,
-                            textTheme: textTheme,
-                            palette: palette,
-                          )
-                        : (_switchingChapter
-                              ? Align(
-                                  alignment: Alignment.topCenter,
-                                  child: SizedBox(
-                                    height: 2,
-                                    child: LinearProgressIndicator(
-                                      color: tokens.primary,
-                                      backgroundColor: palette.secondary
-                                          .withValues(alpha: 0.14),
+                )
+              else
+                SafeArea(
+                  child: Column(
+                    children: [
+                      // 顶部静默阅读章名区（工具栏展开时完全隐藏）
+                      SizedBox(
+                        height: 32,
+                        child: AnimatedBuilder(
+                          animation: _chromeController,
+                          builder: (context, _) {
+                            if (_chromeController.value >= 1.0) {
+                              return const SizedBox.shrink();
+                            }
+                            final opacity =
+                                (1.0 - _chromeController.value).clamp(0.0, 1.0);
+                            return Opacity(
+                              key: const Key('reader_reading_header'),
+                              opacity: opacity,
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 680,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: EchoMetrics.space3,
+                                    ),
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        headerChapterTitle,
+                                        key: const Key('reader_chapter_label'),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: readingMetaStyle,
+                                      ),
                                     ),
                                   ),
-                                )
-                              : null),
-                  ),
-                Expanded(
-                  child: _ReaderBody(
-                    pages: _pages,
-                    pageViewEpoch: _pageViewEpoch,
-                    pageController: _pageController,
-                    textStyle: DefaultTextStyle.of(
-                      context,
-                    ).style.merge(_textStyle(tokens)),
-                    secondaryColor: palette.secondary,
-                    highlightColor: tokens.readingHighlight,
-                    activeSentence: activeSentence,
-                    activeCueText: activeCueText,
-                    speakTranslated:
-                        isLiveThisBook && liveState.speakTranslated,
-                    annotations: annotations,
-                    activeTranslatingHash: activeTranslatingHashForCurChapter,
-                    lastHighlightColor: _lastHighlightColor,
-                    hasTextSelection: _hasTextSelection,
-                    layoutSize: _layoutSize,
-                    onNeedPagination: _onLayoutSizeChanged,
-                    onPageChanged: _onPageChanged,
-                    onScrollNotification: _onScrollNotification,
-                    onSelectionActiveChanged: (active) {
-                      if (mounted && _hasTextSelection != active) {
-                        setState(() => _hasTextSelection = active);
-                      }
-                    },
-                    onQuickHighlight: (page, localStart, localEnd, color) {
-                      unawaited(
-                        _createHighlight(
-                          page: page,
-                          localStart: localStart,
-                          localEnd: localEnd,
-                          color: color,
-                        ),
-                      );
-                    },
-                    onOpenNoteEditor: (page, localStart, localEnd) {
-                      unawaited(
-                        _openAnnotationEditor(
-                          page: page,
-                          localStart: localStart,
-                          localEnd: localEnd,
-                        ),
-                      );
-                    },
-                    onTapAnnotation: (ann) {
-                      unawaited(_openAnnotationEditor(existing: ann));
-                    },
-                    onListenFromSelection: hasAudio
-                        ? (page, localStart) {
-                            final idx = _findChapterArrayIdx(
-                              _chapters,
-                              page.chapterIndex,
-                            );
-                            final mapped = resolveOriginalSelectionForPage(
-                              page,
-                              localStart,
-                              math.min(page.text.length, localStart + 1),
-                            );
-                            unawaited(
-                              _listenFromHere(
-                                overrideChapterArrayIdx: idx,
-                                overrideCharOffset: mapped.startOffset,
+                                ),
                               ),
                             );
-                          }
-                        : null,
+                          },
+                        ),
+                      ),
+                      if (_showForeignBanner &&
+                          _displayMode == BilingualDisplayMode.original)
+                        _buildForeignPromptBanner(
+                          tokens: tokens,
+                          textTheme: textTheme,
+                          palette: palette,
+                        ),
+                      if (translationError != null &&
+                          translationError.isNotEmpty)
+                        _buildTranslationErrorBanner(
+                          errorText: translationError,
+                          tokens: tokens,
+                          textTheme: textTheme,
+                          palette: palette,
+                        ),
+                      if (_displayMode != BilingualDisplayMode.original)
+                        SizedBox(
+                          height: 26,
+                          child: showProgressStrip && !_switchingChapter
+                              ? _buildBilingualProgressStrip(
+                                  doneOnPage: doneOnPage,
+                                  totalOnPage: totalOnPage,
+                                  tokens: tokens,
+                                  textTheme: textTheme,
+                                  palette: palette,
+                                )
+                              : (_switchingChapter
+                                    ? Align(
+                                        alignment: Alignment.topCenter,
+                                        child: SizedBox(
+                                          height: 2,
+                                          child: LinearProgressIndicator(
+                                            color: tokens.primary,
+                                            backgroundColor: palette.secondary
+                                                .withValues(alpha: 0.14),
+                                          ),
+                                        ),
+                                      )
+                                    : null),
+                        ),
+                      Expanded(
+                        child: _ReaderBody(
+                          pages: _pages,
+                          pageViewEpoch: _pageViewEpoch,
+                          pageController: _pageController,
+                          textStyle: DefaultTextStyle.of(
+                            context,
+                          ).style.merge(_textStyle(tokens)),
+                          secondaryColor: palette.secondary,
+                          highlightColor: tokens.readingHighlight,
+                          activeSentence: activeSentence,
+                          activeCueText: activeCueText,
+                          speakTranslated:
+                              isLiveThisBook && liveState.speakTranslated,
+                          annotations: annotations,
+                          activeTranslatingHash:
+                              activeTranslatingHashForCurChapter,
+                          lastHighlightColor: _lastHighlightColor,
+                          hasTextSelection: _hasTextSelection,
+                          layoutSize: _layoutSize,
+                          onTapCanvas: _toggleChrome,
+                          onNeedPagination: _onLayoutSizeChanged,
+                          onPageChanged: _onPageChanged,
+                          onScrollNotification: _onScrollNotification,
+                          onSelectionActiveChanged: (active) {
+                            if (active && _chromeVisible) {
+                              _setChromeVisible(false);
+                            }
+                            if (mounted && _hasTextSelection != active) {
+                              setState(() => _hasTextSelection = active);
+                            }
+                          },
+                          onQuickHighlight:
+                              (page, localStart, localEnd, color) {
+                            unawaited(
+                              _createHighlight(
+                                page: page,
+                                localStart: localStart,
+                                localEnd: localEnd,
+                                color: color,
+                              ),
+                            );
+                          },
+                          onOpenNoteEditor: (page, localStart, localEnd) {
+                            unawaited(
+                              _openAnnotationEditor(
+                                page: page,
+                                localStart: localStart,
+                                localEnd: localEnd,
+                              ),
+                            );
+                          },
+                          onTapAnnotation: (ann) {
+                            unawaited(_openAnnotationEditor(existing: ann));
+                          },
+                          onListenFromSelection: hasAudio
+                              ? (page, localStart) {
+                                  final idx = _findChapterArrayIdx(
+                                    _chapters,
+                                    page.chapterIndex,
+                                  );
+                                  final mapped =
+                                      resolveOriginalSelectionForPage(
+                                        page,
+                                        localStart,
+                                        math.min(
+                                          page.text.length,
+                                          localStart + 1,
+                                        ),
+                                      );
+                                  unawaited(
+                                    _listenFromHere(
+                                      overrideChapterArrayIdx: idx,
+                                      overrideCharOffset: mapped.startOffset,
+                                    ),
+                                  );
+                                }
+                              : null,
+                        ),
+                      ),
+                      // 底部静默阅读进度区（工具栏展开时完全隐藏）
+                      SizedBox(
+                        height: 32,
+                        child: AnimatedBuilder(
+                          animation: _chromeController,
+                          builder: (context, _) {
+                            if (_pages.isEmpty ||
+                                _chromeController.value >= 1.0) {
+                              return const SizedBox.shrink();
+                            }
+                            final opacity =
+                                (1.0 - _chromeController.value).clamp(0.0, 1.0);
+                            return Opacity(
+                              key: const Key('reader_reading_footer'),
+                              opacity: opacity,
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 680,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: EchoMetrics.space3,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        if (isPlayingThisBook) ...[
+                                          Container(
+                                            width: 6,
+                                            height: 6,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: palette.accent,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        Flexible(
+                                          child: Text(
+                                            '第 ${currentArrayIdx + 1}/${_chapters.length} 章 · '
+                                            '${page?.pageInChapter ?? 1}/${page?.pageCountInChapter ?? 1} 页',
+                                            key: const Key(
+                                              'reader_page_indicator',
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: readingMetaStyle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '全书 $bookPct%',
+                                          key: const Key(
+                                            'reader_global_indicator',
+                                          ),
+                                          style: readingMetaStyle,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-      bottomNavigationBar: _loading || _pages.isEmpty
-          ? null
-          : _buildUnifiedBottomBar(
-              tokens: tokens,
-              textTheme: textTheme,
-              palette: palette,
-              currentArrayIdx: currentArrayIdx,
-              page: page,
-              bookPct: bookPct,
-              isLiveThisBook: isLiveThisBook,
-              liveState: liveState,
-              isThisBookLoaded: isThisBookLoaded,
-              isPlayingThisBook: isPlayingThisBook,
-              chunkedSpeed: playerState.speed,
-              hasAudio: hasAudio,
-            ),
+
+              // Layer 2: 工具栏展开时的轻触收起拦截层（水平滑动仍直接透传给 PageView）
+              if (hasReadableContent && _chromeVisible)
+                Positioned.fill(
+                  child: GestureDetector(
+                    key: const Key('reader_chrome_scrim'),
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () => _setChromeVisible(false),
+                  ),
+                ),
+
+              // Layer 3: 顶部工具栏浮层（仅书名 + 返回 + 听书入口；加载/异常态常驻以防困住用户）
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: !hasReadableContent
+                    ? _buildTopToolBar(
+                        palette: palette,
+                        textTheme: textTheme,
+                        hasReadableContent: false,
+                        isPlayingThisBook: isPlayingThisBook,
+                        hasAudio: hasAudio,
+                      )
+                    : AnimatedBuilder(
+                        animation: _chromeController,
+                        builder: (context, child) {
+                          if (_chromeController.value <= 0.0) {
+                            return const SizedBox.shrink();
+                          }
+                          final curve = _chromeController.status ==
+                                  AnimationStatus.reverse
+                              ? Curves.easeInCubic
+                              : Curves.easeOutCubic;
+                          final t = curve.transform(_chromeController.value);
+                          return Opacity(
+                            opacity: t,
+                            child: FractionalTranslation(
+                              translation: Offset(0, -(1 - t) * 0.35),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _buildTopToolBar(
+                          palette: palette,
+                          textTheme: textTheme,
+                          hasReadableContent: true,
+                          isPlayingThisBook: isPlayingThisBook,
+                          hasAudio: hasAudio,
+                        ),
+                      ),
+              ),
+
+              // Layer 4: 底部悬浮工具坞浮层（按需点击唤起）
+              if (hasReadableContent && _pages.isNotEmpty)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: AnimatedBuilder(
+                    animation: _chromeController,
+                    builder: (context, child) {
+                      if (_chromeController.value <= 0.0) {
+                        return const SizedBox.shrink();
+                      }
+                      final curve =
+                          _chromeController.status == AnimationStatus.reverse
+                              ? Curves.easeInCubic
+                              : Curves.easeOutCubic;
+                      final t = curve.transform(_chromeController.value);
+                      return Opacity(
+                        opacity: t,
+                        child: FractionalTranslation(
+                          translation: Offset(0, (1 - t) * 0.35),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _buildFloatingToolDock(
+                      palette: palette,
+                      textTheme: textTheme,
+                      annotations: annotations,
+                      isLiveThisBook: isLiveThisBook,
+                      liveState: liveState,
+                      isThisBookLoaded: isThisBookLoaded,
+                      isPlayingThisBook: isPlayingThisBook,
+                      chunkedSpeed: playerState.speed,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildForeignPromptBanner({
     required EchoTokens tokens,
     required TextTheme textTheme,
-    required ({Color bg, Color fg, Color secondary}) palette,
+    required _ReaderPalette palette,
   }) {
     return Container(
       key: const Key('reader_foreign_prompt_banner'),
@@ -2992,7 +3508,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     required String errorText,
     required EchoTokens tokens,
     required TextTheme textTheme,
-    required ({Color bg, Color fg, Color secondary}) palette,
+    required _ReaderPalette palette,
   }) {
     return Container(
       key: const Key('reader_translation_error_banner'),
@@ -3085,7 +3601,7 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
     required int totalOnPage,
     required EchoTokens tokens,
     required TextTheme textTheme,
-    required ({Color bg, Color fg, Color secondary}) palette,
+    required _ReaderPalette palette,
   }) {
     final progress = totalOnPage > 0 ? doneOnPage / totalOnPage : null;
     return Container(
@@ -3146,6 +3662,100 @@ class _ReaderPageState extends ConsumerState<ReaderPageView> {
   }
 }
 
+class _ReaderDockItem extends StatelessWidget {
+  const _ReaderDockItem({
+    required this.itemKey,
+    required this.tooltip,
+    required this.label,
+    required this.fgColor,
+    required this.accentColor,
+    required this.onTap,
+    this.icon,
+    this.customIcon,
+    this.active = false,
+    this.showBadgeDot = false,
+  });
+
+  final Key itemKey;
+  final String tooltip;
+  final String label;
+  final Color fgColor;
+  final Color accentColor;
+  final VoidCallback? onTap;
+  final IconData? icon;
+  final Widget? customIcon;
+  final bool active;
+  final bool showBadgeDot;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final enabled = onTap != null;
+    final tone = !enabled
+        ? fgColor.withValues(alpha: 0.35)
+        : (active ? accentColor : fgColor);
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        key: itemKey,
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 50),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            color: active
+                ? accentColor.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (customIcon != null)
+                    customIcon!
+                  else
+                    Icon(icon, size: 22, color: tone),
+                  if (showBadgeDot)
+                    Positioned(
+                      right: -4,
+                      top: -2,
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: accentColor,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.labelSmall?.copyWith(
+                  fontSize: 11.5,
+                  height: 1.15,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                  color: tone,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 版心：用 LayoutBuilder 拿到可用宽高，宽屏约束最大宽度 680dp（45–75ch），按章精确分页。
 class _ReaderBody extends StatelessWidget {
   const _ReaderBody({
@@ -3163,6 +3773,7 @@ class _ReaderBody extends StatelessWidget {
     required this.lastHighlightColor,
     required this.hasTextSelection,
     required this.layoutSize,
+    required this.onTapCanvas,
     required this.onNeedPagination,
     required this.onPageChanged,
     required this.onScrollNotification,
@@ -3187,6 +3798,7 @@ class _ReaderBody extends StatelessWidget {
   final ReadingHighlightColor lastHighlightColor;
   final bool hasTextSelection;
   final Size? layoutSize;
+  final VoidCallback onTapCanvas;
   final Future<void> Function(Size size, EchoTokens tokens) onNeedPagination;
   final ValueChanged<int> onPageChanged;
   final bool Function(ScrollNotification) onScrollNotification;
@@ -3494,6 +4106,7 @@ class _ReaderBody extends StatelessWidget {
                           annotations: annotations,
                           activeTranslatingHash: activeTranslatingHash,
                           lastHighlightColor: lastHighlightColor,
+                          onTapCanvas: onTapCanvas,
                           onSelectionActiveChanged: onSelectionActiveChanged,
                           onQuickHighlight: onQuickHighlight,
                           onOpenNoteEditor: onOpenNoteEditor,
@@ -3524,6 +4137,7 @@ class _SelectableReaderPage extends StatefulWidget {
     required this.annotations,
     this.activeTranslatingHash,
     required this.lastHighlightColor,
+    required this.onTapCanvas,
     required this.onSelectionActiveChanged,
     required this.onQuickHighlight,
     required this.onOpenNoteEditor,
@@ -3540,6 +4154,7 @@ class _SelectableReaderPage extends StatefulWidget {
   final List<ReadingAnnotation> annotations;
   final String? activeTranslatingHash;
   final ReadingHighlightColor lastHighlightColor;
+  final VoidCallback onTapCanvas;
   final ValueChanged<bool> onSelectionActiveChanged;
   final void Function(
     ReaderPage page,
@@ -3811,8 +4426,8 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
       selectionRect: selectionRect,
       safeTop: mediaPadding.top + 4,
       safeBottom: mediaPadding.bottom + 4,
-      topClearance: mediaPadding.top + kToolbarHeight + 4,
-      bottomClearance: mediaPadding.bottom + 52,
+      topClearance: mediaPadding.top + 32 + 4,
+      bottomClearance: mediaPadding.bottom + 32 + 4,
       selectedColor: widget.lastHighlightColor,
       onSelectColor: (color) {
         _clearSelection();
@@ -4285,7 +4900,7 @@ class _SelectableReaderPageState extends State<_SelectableReaderPage> {
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onTap: _hasSelection ? _clearSelection : null,
+      onTap: _hasSelection ? _clearSelection : widget.onTapCanvas,
       onLongPressStart: _onLongPressStart,
       onLongPressMoveUpdate: _onLongPressMoveUpdate,
       onLongPressEnd: (_) {

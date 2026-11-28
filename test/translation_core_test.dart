@@ -1899,9 +1899,9 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      // 外文书自动弹出顶部提示横条
+      // 外文书自动弹出顶部提示横条，工具栏默认隐藏
       expect(find.byKey(const Key('reader_foreign_prompt_banner')), findsOneWidget);
-      expect(find.byKey(const Key('reader_translate_button')), findsOneWidget);
+      expect(find.byKey(const Key('reader_translate_button')), findsNothing);
 
       // 点击「开启双语」
       await tester.tap(find.byKey(const Key('reader_foreign_enable_button')));
@@ -1923,7 +1923,9 @@ void main() {
       );
       expect(rendered, isNot(contains('等待翻译')));
 
-      // 点击工具栏「译」按钮打开控制面板并切换至「仅译文」
+      // 点击正文唤起工具栏，再点击「双语」按钮打开控制面板并切换至「仅译文」
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('reader_translate_button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('reader_translation_sheet')), findsOneWidget);
@@ -2434,13 +2436,23 @@ void main() {
       await tester.pump(const Duration(milliseconds: 30));
 
       // 翻到第一章末页（不等待全部翻译完成）
-      for (var step = 0; step < 12; step++) {
+      for (var step = 0; step < 14; step++) {
         final indicator = tester.widget<Text>(
           find.byKey(const Key('reader_page_indicator')),
         );
         final m = RegExp(r'(\d+)/(\d+)\s*页').firstMatch(indicator.data ?? '');
         if (m != null && m.group(1) == m.group(2)) {
-          break;
+          // 让当前末页正在进行的可见句翻译与防抖重排先完成，避免甩动瞬间末页再分裂
+          for (var settle = 0; settle < 5; settle++) {
+            await tester.pump(const Duration(milliseconds: 90));
+          }
+          final recheck = tester.widget<Text>(
+            find.byKey(const Key('reader_page_indicator')),
+          );
+          final rm = RegExp(r'(\d+)/(\d+)\s*页').firstMatch(recheck.data ?? '');
+          if (rm != null && rm.group(1) == rm.group(2)) {
+            break;
+          }
         }
         await tester.drag(
           find.byKey(const Key('reader_pageview')),

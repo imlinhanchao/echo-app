@@ -363,7 +363,9 @@ void main() {
         .width;
     expect(colWidth, lessThanOrEqualTo(680.0));
 
-    // 点 Aa 打开排版面板
+    // 点击正文唤起工具栏，再点 Aa 打开排版面板
+    await tester.tap(find.byKey(const Key('reader_pageview')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('reader_font_button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('reader_typography_sheet')), findsOneWidget);

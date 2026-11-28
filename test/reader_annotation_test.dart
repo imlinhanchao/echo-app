@@ -211,6 +211,8 @@ void main() {
       final noteItem = afterSave.firstWhere((a) => a.hasNote);
       expect(noteItem.note, '精彩细节');
 
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('reader_notes_button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('reader_notes_sheet')), findsOneWidget);
@@ -313,6 +315,8 @@ void main() {
       expect(measured.height, lessThanOrEqualTo(maxTextHeight));
 
       // Open notes sheet and tap chapter 3 annotation to jump there
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('reader_notes_button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('annotation_item_ann_ch2')), findsOneWidget);

@@ -242,8 +242,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 阅读百分比展示
+    // 阅读态展示章节与全书百分比，且工具栏默认隐藏
+    expect(find.byKey(const Key('reader_chapter_label')), findsOneWidget);
     expect(find.byKey(const Key('reader_global_indicator')), findsOneWidget);
+    expect(find.byKey(const Key('reader_toc_button')), findsNothing);
+
+    // 点击正文唤起工具栏：工具显现，章节信息随之隐藏
+    await tester.tap(find.byKey(const Key('reader_pageview')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('reader_toc_button')), findsOneWidget);
+    expect(find.byKey(const Key('reader_chapter_label')), findsNothing);
+    expect(find.byKey(const Key('reader_global_indicator')), findsNothing);
 
     // 打开目录
     await tester.tap(find.byKey(const Key('reader_toc_button')));
@@ -251,9 +260,11 @@ void main() {
     expect(find.byKey(const Key('reader_toc_list')), findsOneWidget);
     expect(find.byKey(const Key('reader_toc_item_2')), findsOneWidget);
 
-    // 跳到第 3 章
+    // 跳到第 3 章（自动收起工具栏并恢复阅读态章节信息）
     await tester.tap(find.byKey(const Key('reader_toc_item_2')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('reader_toc_button')), findsNothing);
+    expect(find.byKey(const Key('reader_chapter_label')), findsOneWidget);
     expect(find.textContaining('第3章'), findsWidgets);
   });
 
@@ -323,7 +334,9 @@ void main() {
 
     expect(keepAlive.events.first, isTrue);
 
-    // 打开排版设置并关闭防锁屏
+    // 点击正文唤起工具栏，再打开排版设置并关闭防锁屏
+    await tester.tap(find.byKey(const Key('reader_pageview')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('reader_font_button')));
     await tester.pumpAndSettle();
     final switchFinder = find.byKey(const Key('reader_keep_screen_on_switch'));
@@ -388,7 +401,7 @@ void main() {
       expect(find.text('第 3 章'), findsWidgets);
     });
 
-    testWidgets('Material 3 主题下排版实测不溢出且边听边看控制融入单行底栏', (
+    testWidgets('Material 3 主题下排版实测不溢出且工具按需显隐、边听边看控制融入底部工具坞', (
       WidgetTester tester,
     ) async {
       tester.view.physicalSize = const Size(360, 720);
@@ -461,7 +474,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 1. 末行不被底栏截断：实测 TextPainter 高度 <= 渲染容器去除内边距后的可用高度
+      // 1. 末行不被截断：实测 TextPainter 高度 <= 渲染容器去除内边距后的可用高度
       final pageViewSize = tester.getSize(find.byKey(const Key('reader_pageview')));
       final pageTextWidget = tester.widget<Text>(
         find.byKey(const Key('reader_page_text_0')),
@@ -479,22 +492,46 @@ void main() {
       )..layout(maxWidth: maxTextWidth);
       expect(measured.height, lessThanOrEqualTo(maxTextHeight));
 
-      // 2. 底栏融入听书控制按钮后仍保持紧凑单行（<= 64dp）
-      final barSizeWithLive = tester.getSize(
-        find.byKey(const Key('reader_bottom_bar')),
-      );
-      expect(barSizeWithLive.height, lessThanOrEqualTo(64.0));
+      // 2. 阅读态：章节/进度信息可见，工具栏隐藏
+      expect(find.byKey(const Key('reader_reading_header')), findsOneWidget);
+      expect(find.byKey(const Key('reader_chapter_label')), findsOneWidget);
+      expect(find.byKey(const Key('reader_reading_footer')), findsOneWidget);
       expect(find.byKey(const Key('reader_page_indicator')), findsOneWidget);
       expect(find.byKey(const Key('reader_global_indicator')), findsOneWidget);
+      expect(find.byKey(const Key('reader_top_bar')), findsNothing);
+      expect(find.byKey(const Key('reader_bottom_bar')), findsNothing);
+      expect(find.byKey(const Key('reader_live_control_bar')), findsNothing);
+
+      // 3. 点击正文唤起工具栏：正文视口高度保持绝对恒定（不重排跳页），章节信息隐藏，工具坞显露
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getSize(find.byKey(const Key('reader_pageview'))).height,
+        equals(pageViewSize.height),
+      );
+      expect(find.byKey(const Key('reader_chapter_label')), findsNothing);
+      expect(find.byKey(const Key('reader_page_indicator')), findsNothing);
+      expect(find.byKey(const Key('reader_global_indicator')), findsNothing);
+      expect(find.byKey(const Key('reader_top_bar')), findsOneWidget);
+      expect(find.byKey(const Key('reader_bottom_bar')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_control_bar')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_speed_button')), findsOneWidget);
+      final speedPillSize = tester.getSize(
+        find.byKey(const Key('reader_live_speed_button')),
+      );
+      final playBtnSize = tester.getSize(
+        find.byKey(const Key('reader_live_toggle_play')),
+      );
+      expect(speedPillSize.height, lessThanOrEqualTo(32.0));
+      expect(speedPillSize.height, lessThan(playBtnSize.height));
       expect(find.text('1.0x'), findsOneWidget);
       expect(find.byKey(const Key('reader_live_prev_sentence')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_toggle_play')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_next_sentence')), findsOneWidget);
       expect(find.byKey(const Key('reader_live_stop')), findsOneWidget);
 
-      // 3. 底栏直接打开语速面板并实时调节语速，不溢出且即时生效
+      // 4. 底部工具坞直接打开语速面板并实时调节语速，不溢出且即时生效
       await tester.tap(find.byKey(const Key('reader_live_speed_button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('speed_sheet_value')), findsOneWidget);
@@ -521,10 +558,6 @@ void main() {
       ).pop();
       await tester.pumpAndSettle();
       expect(find.text('1.25x'), findsOneWidget);
-      expect(
-        tester.getSize(find.byKey(const Key('reader_bottom_bar'))).height,
-        lessThanOrEqualTo(64.0),
-      );
 
       Icon playButtonIcon() => tester.widget<Icon>(
         find.descendant(
@@ -548,14 +581,87 @@ void main() {
       await tester.pumpAndSettle();
       expect(playButtonIcon().icon, Icons.headphones);
 
-      // 点击停止后底栏高度保持一致（无布局跳变）
+      // 点击停止后工具坞收起音频区，正文字体与页高不受影响
       await tester.tap(find.byKey(const Key('reader_live_stop')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('reader_live_control_bar')), findsNothing);
-      final barSizeAfterStop = tester.getSize(
-        find.byKey(const Key('reader_bottom_bar')),
+      expect(find.byKey(const Key('reader_bottom_bar')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('reader_pageview'))).height,
+        equals(pageViewSize.height),
       );
-      expect(barSizeAfterStop.height, equals(barSizeWithLive.height));
+    });
+
+    testWidgets('沉浸式交互：轻触切换工具显隐、左滑翻页自动收起工具且支持亮白纸主题', (
+      WidgetTester tester,
+    ) async {
+      final tokenStore = MemoryTokenStore();
+      await tokenStore.write('echo_pat_reader');
+      final dio = Dio(BaseOptions(baseUrl: 'http://127.0.0.1:8090'))
+        ..httpClientAdapter = _ReaderStubAdapter();
+      final api = EchoApi(dio: dio, tokenStore: tokenStore);
+      final readingStore = MemoryReadingStore();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            echoApiProvider.overrideWithValue(api),
+            readingStoreProvider.overrideWithValue(readingStore),
+          ],
+          child: MaterialApp(
+            theme: buildEchoTheme(Brightness.dark, darkTokens),
+            home: const ReaderPageView(book: book),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 初始阅读态：章节信息显示，工具隐藏
+      expect(find.byKey(const Key('reader_chapter_label')), findsOneWidget);
+      expect(find.byKey(const Key('reader_top_bar')), findsNothing);
+      expect(find.byKey(const Key('reader_bottom_bar')), findsNothing);
+
+      // 点击显示工具，再点击遮罩收起工具
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('reader_top_bar')), findsOneWidget);
+      expect(find.byKey(const Key('reader_bottom_bar')), findsOneWidget);
+      expect(find.byKey(const Key('reader_chapter_label')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('reader_chrome_scrim')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('reader_top_bar')), findsNothing);
+      expect(find.byKey(const Key('reader_bottom_bar')), findsNothing);
+      expect(find.byKey(const Key('reader_chapter_label')), findsOneWidget);
+
+      // 工具展开时左滑翻页，自动收起工具并翻到下一页
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('reader_bottom_bar')), findsOneWidget);
+
+      await tester.drag(
+        find.byKey(const Key('reader_pageview')),
+        const Offset(-600, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('reader_page_text_1')), findsOneWidget);
+      expect(find.byKey(const Key('reader_bottom_bar')), findsNothing);
+      expect(find.byKey(const Key('reader_chapter_label')), findsOneWidget);
+
+      // 打开排版面板切换到柔和亮白纸主题
+      await tester.tap(find.byKey(const Key('reader_pageview')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reader_font_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reader_theme_lightPaper')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<Scaffold>(find.byKey(const Key('reader_page')))
+            .backgroundColor,
+        const Color(0xFFF6F1E7),
+      );
     });
 
     test('formatPlaybackSpeed 正确格式化常用及 0.05 步进倍速', () {

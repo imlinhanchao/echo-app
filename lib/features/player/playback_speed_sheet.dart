@@ -33,39 +33,43 @@ Widget buildCompactSpeedPill({
   String tooltip = '调整语速',
 }) {
   final isCustom = (speed - 1.0).abs() >= 0.01;
-  return Material(
-    type: MaterialType.transparency,
-    child: Tooltip(
-      message: tooltip,
-      child: InkWell(
-        key: key,
-        borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 28),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-          decoration: BoxDecoration(
-            color: isCustom
-                ? accentColor.withValues(alpha: 0.14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
-            border: Border.all(
+  return Center(
+    widthFactor: 1,
+    child: Material(
+      type: MaterialType.transparency,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          key: key,
+          borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
+          onTap: onTap,
+          child: Container(
+            height: 28,
+            constraints: const BoxConstraints(minWidth: 42),
+            padding: const EdgeInsets.symmetric(horizontal: 9),
+            decoration: BoxDecoration(
               color: isCustom
-                  ? accentColor.withValues(alpha: 0.72)
-                  : borderColor,
-              width: 0.9,
+                  ? accentColor.withValues(alpha: 0.12)
+                  : textColor.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(EchoMetrics.radiusPill),
+              border: Border.all(
+                color: isCustom
+                    ? accentColor.withValues(alpha: 0.42)
+                    : borderColor.withValues(alpha: 0.24),
+                width: 0.8,
+              ),
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            formatPlaybackSpeed(speed),
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.1,
-              fontWeight: FontWeight.w600,
-              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-              color: isCustom ? accentColor : textColor,
+            alignment: Alignment.center,
+            child: Text(
+              formatPlaybackSpeed(speed),
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.1,
+                fontWeight: FontWeight.w600,
+                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+                color: isCustom ? accentColor : textColor,
+              ),
             ),
           ),
         ),
